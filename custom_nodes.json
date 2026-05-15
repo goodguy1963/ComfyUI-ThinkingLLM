@@ -9,5 +9,5 @@
   "description": "A multimodal ComfyUI AI node with Qwen3.5, Qwen3-VL, Qwen2.5-VL, Qwen3, and Gemma 4 integrations. Features live thinking in the terminal to see what the LLM is doing in real time.",
   "category": "image",
   "tags": ["vision", "language", "multimodal", "thinkingllm", "qwen", "gguf", "flash_attention", "performance", "wan2.2", "video", "i2v", "t2v", "storyboard", "caching", "fork", "gpl-3.0"],
-  "version": "2.2.6"
+  "version": "2.2.7"
 }

@@ -58,7 +58,7 @@ The HF path is the most straightforward option for Windows and Linux when you wa
 - `ThinkingLLM (GGUF Advanced)`
 - `ThinkingLLM Prompt Enhancer (GGUF)`
 
-The GGUF path requires a vision-capable `llama-cpp-python` build. The normal PyPI package is not enough for Qwen vision handlers. Use the setup notes in [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md).
+The GGUF path requires a vision-capable `llama-cpp-python` build. The normal PyPI package is not enough for Qwen vision handlers. On Linux, ThinkingLLM now auto-checks this at first GGUF use and attempts an automatic install of a matching JamePeng backend. Use the setup notes in [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md) if you need to override the wheel/package source.
 
 ## Workflow tips
 
@@ -138,7 +138,7 @@ For local GGUF models, keep the matching mmproj file beside the model file.
 
 - HF is the recommended default path and is the simplest cross-platform option.
 - GGUF on Windows needs a matching `win_amd64` vision-capable wheel.
-- GGUF on Linux needs the matching Linux wheel or compatible local build.
+- GGUF on Linux now auto-installs a matching backend on first use when possible. Override with `THINKINGLLM_LLAMA_CPP_LINUX_WHEEL_URL` or `THINKINGLLM_LLAMA_CPP_LINUX_SPEC` when your server needs a different build.
 - Flash Attention support is best on Linux. The nodes fall back when it is unavailable.
 - The thinking toggle works best with Qwen3.5 and Qwen3 style models. Other architectures may ignore the steering.
 

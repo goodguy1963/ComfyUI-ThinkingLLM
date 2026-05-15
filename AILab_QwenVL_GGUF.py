@@ -28,14 +28,8 @@ import torch
 from huggingface_hub import hf_hub_download, snapshot_download
 from PIL import Image
 from AILab_StreamDisplay import TerminalStreamDisplay
+from AILab_LlamaCppInstaller import ensure_llama_cpp_backend
 from comfy.model_management import throw_exception_if_processing_interrupted
-
-try:
-    from llama_cpp import Llama
-    _LLAMA_CPP_IMPORT_ERROR = None
-except Exception as exc:
-    Llama = None
-    _LLAMA_CPP_IMPORT_ERROR = exc
 
 # Import cache functions from main module
 sys.path.append(str(Path(__file__).parent))
@@ -684,10 +678,7 @@ class QwenVLGGUFBase:
         print(f"[QwenVL GGUF DEBUG] VRAM cleanup completed")
 
     def _load_backend(self):
-        if Llama is None:
-            raise RuntimeError(
-                "[QwenVL] llama_cpp is not available. Install the GGUF vision dependency first. See docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md"
-            ) from _LLAMA_CPP_IMPORT_ERROR
+        return ensure_llama_cpp_backend(require_vision_handlers=True)
 
     def _load_model(
         self,
@@ -701,7 +692,7 @@ class QwenVLGGUFBase:
         pool_size: int | None,
         enable_thinking: bool = True,
     ):
-        self._load_backend()
+        Llama = self._load_backend()
 
         resolved = _resolve_model_entry(model_name)
 
@@ -803,8 +794,6 @@ class QwenVLGGUFBase:
         if torch.cuda.is_available():
             torch.cuda.synchronize()
             time.sleep(0.1)  # Brief pause for cleanup to complete
-
-        from llama_cpp import Llama
 
         self.chat_handler = None
         if has_mmproj:

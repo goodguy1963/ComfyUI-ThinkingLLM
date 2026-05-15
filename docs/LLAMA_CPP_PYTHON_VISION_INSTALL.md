@@ -15,6 +15,22 @@ Release wheels (download `.whl` here):
 
 Stop ComfyUI before installing/replacing packages, especially on Windows portable.
 
+## Linux auto-install in ThinkingLLM
+
+On Linux, ThinkingLLM now performs a backend check the first time you run a GGUF node.
+
+- If `llama_cpp` is missing or lacks the required Qwen vision handlers, it attempts an automatic install.
+- The first automatic choice is a known JamePeng Linux wheel when the runtime matches a built-in mapping.
+- If there is no exact built-in wheel match, it falls back to the JamePeng Git package spec.
+
+Environment overrides:
+
+- `THINKINGLLM_AUTO_INSTALL_LLAMA_CPP=0` disables automatic Linux installation.
+- `THINKINGLLM_LLAMA_CPP_LINUX_WHEEL_URL=<wheel-url>` forces a specific Linux wheel.
+- `THINKINGLLM_LLAMA_CPP_LINUX_SPEC=<pip-spec>` forces an explicit pip install target.
+
+After an automatic install, restart ComfyUI if the current process does not pick up the new backend cleanly.
+
 ## 1) Identify the exact Python ComfyUI uses
 
 ### Windows portable (common)
