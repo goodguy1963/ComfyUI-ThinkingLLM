@@ -7,6 +7,7 @@
 > GPL-3.0 fork of Deaquay/ComfyUI-Qwen3.5-Uncensored, itself derived from huchukato/ComfyUI-QwenVL-Mod and 1038lab/ComfyUI-QwenVL. See [LICENSE](LICENSE).
 
 ![ThinkingLLM Demo](docs/DemoThinkingLLM%20(1).gif)
+![Node screenshot](docs/Screenshot%20of%20Notes.png)
 
 > 🎥 Prefer a narrated version? **[Watch the demo on YouTube](https://youtu.be/K1JsvnzujOw)**
 
@@ -58,6 +59,12 @@ The HF path is the most straightforward option for Windows and Linux when you wa
 - `ThinkingLLM Prompt Enhancer (GGUF)`
 
 The GGUF path requires a vision-capable `llama-cpp-python` build. The normal PyPI package is not enough for Qwen vision handlers. Use the setup notes in [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md).
+
+## Workflow tips
+
+- **Pre-process input images** — use a resize or scale node before ThinkingLLM so large images don't blow up the context window.
+- **Display the output** — connect RESPONSE or ENHANCED_OUTPUT to a **Show Text** or **Show Anything** node to see the generated text in the UI.
+- **Inspect reasoning** — connect the RAW_TRACE output to a second Show Text node to see what the model was thinking.
 
 ## Supported models
 

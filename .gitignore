@@ -59,6 +59,7 @@ temp/
 *.jpeg
 *.gif
 !docs/*.gif
+!docs/*.png
 *.webp
 *.mp4
 *.avi
