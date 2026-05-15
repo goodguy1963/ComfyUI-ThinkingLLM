@@ -53,6 +53,29 @@ The HF path is the most straightforward option for Windows and Linux when you wa
 
 The GGUF path requires a vision-capable `llama-cpp-python` build. The normal PyPI package is not enough for Qwen vision handlers. Use the setup notes in [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md).
 
+## Supported models
+
+ThinkingLLM works with these model families:
+
+### Vision-language (HF)
+- Qwen3.5 4B / 9B
+- Qwen3-VL 4B / 8B (Instruct + abliterated)
+- Qwen2.5-VL 3B / 7B
+
+### Vision-language (GGUF)
+- Qwen3-VL 4B / 8B (Q4 K M through F16)
+- Qwen2.5-VL 3B / 7B (Q4 K M through F16)
+
+### Text-only (HF)
+- Qwen3 0.6B / 4B / 8B
+- Qwen3.5 4B / 9B
+
+### Text-only (GGUF)
+- Qwen3 4B ablitterated / Josiefied (Q4 K M through F16)
+- Qwen3 8B ablitterated / Josiefied (Q4 K M through F16)
+
+Pre-configured model entries are in `hf_models.json` and `gguf_models.json`. Local GGUF models placed in `models/LLM/GGUF/` with a matching mmproj are auto-discovered.
+
 ## Quick install
 
 ```bash
@@ -63,16 +86,6 @@ pip install -r requirements.txt
 ```
 
 For GGUF vision support, follow [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md).
-
-## Registry publishing
-
-This repository is wired for Comfy Registry publication through GitHub Actions.
-
-- Workflow: `.github/workflows/publish.yml`
-- Required repository secret: `REGISTRY_ACCESS_TOKEN`
-- Secret value: a Comfy Registry publishing API key for publisher `goodguy1963`
-
-Once that secret exists, pushing a new `pyproject.toml` version on `main` or manually running the workflow will publish the package to the registry.
 
 ## Model locations
 
