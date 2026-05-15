@@ -6,6 +6,7 @@
 
 import gc
 import hashlib
+import importlib
 import json
 import platform
 import re
@@ -15,7 +16,7 @@ from pathlib import Path
 import torch
 import subprocess
 import sys
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer, BitsAndBytesConfig
 
 from AILab_OutputCleaner import OutputCleanConfig, clean_model_output, prompt_output_guard
 from AILab_StreamDisplay import TerminalStreamDisplay
@@ -120,6 +121,7 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
     def __init__(self):
         super().__init__()
         self.text_model = None
+        self.text_processor = None
         self.text_tokenizer = None
         self.text_signature = None
 
@@ -339,6 +341,7 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
             return
 
         self.text_model = None
+        self.text_processor = None
         self.text_tokenizer = None
         self.text_signature = None
 
@@ -350,8 +353,21 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
 
         print(f"[QwenVL] Loading text model {model_name} ({quantization})")
         tokenizer_kwargs = {"trust_remote_code": True}
+        prefers_processor = "gemma" in model_name.lower() or "gemma" in repo_id.lower()
+
+        def _load_tokenizer(prefer_slow: bool = False):
+            if prefers_processor:
+                processor = AutoProcessor.from_pretrained(repo_id, use_fast=not prefer_slow, **tokenizer_kwargs)
+                tokenizer = getattr(processor, "tokenizer", None)
+                if tokenizer is None:
+                    raise ValueError(f"[QwenVL] AutoProcessor for {repo_id} did not expose a tokenizer")
+                self.text_processor = processor
+                return tokenizer
+            self.text_processor = None
+            return AutoTokenizer.from_pretrained(repo_id, use_fast=not prefer_slow, **tokenizer_kwargs)
+
         try:
-            self.text_tokenizer = AutoTokenizer.from_pretrained(repo_id, **tokenizer_kwargs)
+            self.text_tokenizer = _load_tokenizer(prefer_slow=False)
         except ValueError as exc:
             message = str(exc)
             missing_backend = "sentencepiece or tiktoken" in message.lower()
@@ -374,10 +390,19 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
                         "[QwenVL] Failed to install tokenizer backends automatically. "
                         f"Command: {' '.join(install_cmd)}\nstdout:\n{stdout or '<empty>'}\nstderr:\n{stderr or '<empty>'}"
                     ) from exc
+                importlib.invalidate_caches()
+                for module_name in ("sentencepiece", "tiktoken"):
+                    try:
+                        importlib.import_module(module_name)
+                    except Exception:
+                        pass
             try:
-                self.text_tokenizer = AutoTokenizer.from_pretrained(repo_id, use_fast=False, **tokenizer_kwargs)
-            except Exception:
-                raise exc
+                self.text_tokenizer = _load_tokenizer(prefer_slow=True)
+            except Exception as retry_exc:
+                raise RuntimeError(
+                    f"[QwenVL] Failed to load tokenizer for {repo_id}. "
+                    f"Initial error: {exc}. Retry error: {retry_exc}"
+                ) from retry_exc
         self.text_model = AutoModelForCausalLM.from_pretrained(repo_id, trust_remote_code=True, **load_kwargs).eval()
         self.text_model.to(device)
         ensure_cuda_vram_headroom("QwenVL PromptEnhancer HF", min_free_gb=1.0, min_free_ratio=0.08)
@@ -501,6 +526,7 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
                 print(f"[QwenVL HF] Thinking status: {_describe_prompt_enhancer_thinking(requested_thinking, effective_thinking, raw_text)}")
                 if not keep_model_loaded:
                     self.text_model = None
+                    self.text_processor = None
                     self.text_tokenizer = None
                     self.text_signature = None
                     if torch.cuda.is_available():
@@ -525,6 +551,7 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
 
         if not keep_model_loaded:
             self.text_model = None
+            self.text_processor = None
             self.text_tokenizer = None
             self.text_signature = None
             if torch.cuda.is_available():
