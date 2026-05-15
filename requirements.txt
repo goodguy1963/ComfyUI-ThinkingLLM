@@ -1,0 +1,23 @@
+# ComfyUI-QwenVL requirements
+# Note: Qwen3-VL models require transformers >= 4.57.0
+
+transformers>=5.2.0
+torch
+huggingface-hub
+hf_xet
+psutil
+numpy
+Pillow
+opencv-python
+bitsandbytes
+accelerate
+
+# For running GGUF models with vision support
+# The [server] extra installs necessary components for multimodal models
+# llama-cpp-python[server]
+
+# Optional: Flash Attention 2 for 2-3x performance boost (RTX 20+)
+# flash-attn>=2.0.0  # Uncomment for Flash Attention 2 support
+
+# Optional: SageAttention for 2-5x performance boost (RTX 30+)
+# sageattention>=1.0.0  # Uncomment for SageAttention support

@@ -1,0 +1,13 @@
+{
+  "author": "goodguy1963",
+  "title": "ComfyUI-ThinkingLLM",
+  "reference": "https://github.com/goodguy1963/ComfyUI-ThinkingLLM",
+  "files": [
+    "https://github.com/goodguy1963/ComfyUI-ThinkingLLM"
+  ],
+  "install_type": "git-clone",
+  "description": "ThinkingLLM multimodal fork with Hugging Face and GGUF nodes, prompt caching, WAN 2.2-oriented workflows, and GPL-preserved lineage from ComfyUI-Qwen3.5-Uncensored and earlier QwenVL forks.",
+  "category": "image",
+  "tags": ["vision", "language", "multimodal", "thinkingllm", "qwen", "gguf", "flash_attention", "performance", "wan2.2", "video", "i2v", "t2v", "storyboard", "caching", "fork", "gpl-3.0"],
+  "version": "2.2.5"
+}

@@ -1,0 +1,96 @@
+.DS_S
+# ComfyUI-ThinkingLLM Git Ignore File
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# ComfyUI specific
+models/
+input/
+output/
+temp/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.mp4
+*.avi
+*.mov
+*.webm
+
+# Docker
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+# Node modules
+node_modules/
+npm-debug.log*
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Prompt cache files
+node_prompt_state.json
+prompt_cache.json
+
+# Personal build scripts and backups (don't commit to shared repo)
+build-and-push-4090.sh
+build-and-push-5090.sh
+runpod/build-and-push-4090.sh
+runpod/build-and-push-5090.sh
+vastai/
+
+# API consulting tools (keep local for client work)
+API_GUIDE.md
+debug_api.py
+api_client_examples/
+consulting/
+client_work/
+CLAUDE.md
