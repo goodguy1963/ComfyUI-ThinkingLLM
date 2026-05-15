@@ -3,7 +3,7 @@
     "name": "ComfyUI-ThinkingLLM",
     "description": "ThinkingLLM multimodal fork with HF and GGUF paths. GPL-3.0 lineage preserved from Deaquay/ComfyUI-Qwen3.5-Uncensored, huchukato/ComfyUI-QwenVL-Mod, and 1038lab/ComfyUI-QwenVL.",
     "author": "goodguy1963",
-    "version": "2.2.10",
+    "version": "1.0.1",
     "url": "https://github.com/goodguy1963/ComfyUI-ThinkingLLM",
   "category": "image"
 }
@@ -31,6 +31,8 @@ def load_modules_from_directory(directory):
 
             try:
                 spec = importlib.util.spec_from_file_location(module_name, file_path)
+                if spec is None or spec.loader is None:
+                    raise ImportError(f"Unable to create import spec for {module_name}")
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[module_name] = module
                 spec.loader.exec_module(module)

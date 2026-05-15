@@ -19,4 +19,6 @@
 
 - Metadata has been rebranded to `ComfyUI-ThinkingLLM` with publisher id `goodguy1963`.
 - Repository URLs currently point at the planned GitHub location `https://github.com/goodguy1963/ComfyUI-ThinkingLLM` and need a real remote repo before registry publication.
+- Registry and ComfyUI-Manager publication use the semantic version in `pyproject.toml` as the source of truth.
+- Keep the same version mirrored in the `__init__.py` metadata block and `custom_nodes.json` so local ComfyUI metadata and manager-facing metadata stay aligned.
 - README still contains historical upstream links and changelog references beyond the top-level fork identity; that is acceptable for attribution, but a docs pass should normalize publish-facing instructions before release.
