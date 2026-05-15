@@ -900,7 +900,31 @@ def resolve_attention_mode(mode, force_sdpa=False):
     print("[QwenVL] Auto mode: Using SDPA")
     return "sdpa"
 
-def ensure_model(model_name):
+
+def _model_snapshot_has_weights(target: Path) -> bool:
+    return any(target.glob("*.safetensors")) or any(target.glob("*.bin"))
+
+
+def _model_snapshot_has_required_files(target: Path, require_processor: bool = False) -> bool:
+    if not target.exists() or not target.is_dir():
+        return False
+    if not _model_snapshot_has_weights(target):
+        return False
+    if not (target / "config.json").exists():
+        return False
+    if require_processor:
+        processor_files = (
+            "preprocessor_config.json",
+            "processor_config.json",
+            "image_processor_config.json",
+            "video_preprocessor_config.json",
+        )
+        if not any((target / name).exists() for name in processor_files):
+            return False
+    return True
+
+
+def ensure_model(model_name, require_processor=False):
     info = HF_ALL_MODELS.get(model_name)
     if not info:
         raise ValueError(f"Model '{model_name}' not in config")
@@ -928,16 +952,41 @@ def ensure_model(model_name):
     models_dir.mkdir(parents=True, exist_ok=True)
     target = models_dir / repo_id.split("/")[-1]
 
-    # If already downloaded (has weights), use local without calling snapshot_download
+    # Only trust an existing snapshot if it also contains the metadata needed
+    # by the selected backend. This avoids reusing stale or partial downloads.
+    if _model_snapshot_has_required_files(target, require_processor=require_processor):
+        return str(target)
+
     if target.exists() and target.is_dir():
-        if any(target.glob("*.safetensors")) or any(target.glob("*.bin")):
-            return str(target)
+        print(f"[QwenVL] Existing model snapshot is incomplete, refreshing: {target}")
 
     snapshot_download(
         repo_id=repo_id,
         local_dir=str(target),
         ignore_patterns=["*.md", ".git*"],
     )
+
+    if not _model_snapshot_has_required_files(target, require_processor=require_processor):
+        missing = []
+        if not (target / "config.json").exists():
+            missing.append("config.json")
+        if require_processor and not any(
+            (target / name).exists()
+            for name in (
+                "preprocessor_config.json",
+                "processor_config.json",
+                "image_processor_config.json",
+                "video_preprocessor_config.json",
+            )
+        ):
+            missing.append("processor metadata")
+        if not _model_snapshot_has_weights(target):
+            missing.append("model weights")
+        missing_str = ", ".join(missing) if missing else "required files"
+        raise FileNotFoundError(
+            f"[QwenVL] Downloaded model snapshot is incomplete for {repo_id}: missing {missing_str} in {target}"
+        )
+
     return str(target)
 
 def enforce_memory(model_name, quantization, device_info):
@@ -1061,7 +1110,7 @@ class QwenVLBase:
             ensure_cuda_vram_headroom("QwenVL", min_free_gb=1.0, min_free_ratio=0.08)
             return
         self.clear()
-        model_path = ensure_model(model_name)
+        model_path = ensure_model(model_name, require_processor=True)
         quant_config, dtype = quantization_config(model_name, quant)
         
         # Handle attention mode for loading
