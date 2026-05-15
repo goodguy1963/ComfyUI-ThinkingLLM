@@ -52,6 +52,8 @@ This is the recommended default path.
 
 The HF path is the most straightforward option for Windows and Linux when you want the fewest install complications.
 
+HF tokenizer note: some Gemma and Qwen variants need `sentencepiece` or `tiktoken` available in the ComfyUI Python environment. ThinkingLLM now declares those dependencies and will attempt to install them automatically if a tokenizer backend is missing at first load.
+
 ### GGUF / llama.cpp nodes
 
 - `ThinkingLLM (GGUF)`

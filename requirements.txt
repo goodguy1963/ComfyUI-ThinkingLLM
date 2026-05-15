@@ -11,6 +11,8 @@ Pillow
 opencv-python
 bitsandbytes
 accelerate
+sentencepiece
+tiktoken
 
 # For running GGUF models with vision support
 # The [server] extra installs necessary components for multimodal models

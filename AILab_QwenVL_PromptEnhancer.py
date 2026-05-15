@@ -13,6 +13,8 @@ from enum import Enum
 from pathlib import Path
 
 import torch
+import subprocess
+import sys
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from AILab_OutputCleaner import OutputCleanConfig, clean_model_output, prompt_output_guard
@@ -347,7 +349,35 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
             load_kwargs["torch_dtype"] = torch.float16 if device == "cuda" else torch.float32
 
         print(f"[QwenVL] Loading text model {model_name} ({quantization})")
-        self.text_tokenizer = AutoTokenizer.from_pretrained(repo_id, trust_remote_code=True)
+        tokenizer_kwargs = {"trust_remote_code": True}
+        try:
+            self.text_tokenizer = AutoTokenizer.from_pretrained(repo_id, **tokenizer_kwargs)
+        except ValueError as exc:
+            message = str(exc)
+            missing_backend = "sentencepiece or tiktoken" in message.lower()
+            if missing_backend:
+                print("[QwenVL] Tokenizer backend missing; installing sentencepiece and tiktoken into the active ComfyUI Python environment.")
+                install_cmd = [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    "sentencepiece",
+                    "tiktoken",
+                ]
+                result = subprocess.run(install_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    stdout = (result.stdout or "").strip()
+                    stderr = (result.stderr or "").strip()
+                    raise RuntimeError(
+                        "[QwenVL] Failed to install tokenizer backends automatically. "
+                        f"Command: {' '.join(install_cmd)}\nstdout:\n{stdout or '<empty>'}\nstderr:\n{stderr or '<empty>'}"
+                    ) from exc
+            try:
+                self.text_tokenizer = AutoTokenizer.from_pretrained(repo_id, use_fast=False, **tokenizer_kwargs)
+            except Exception:
+                raise exc
         self.text_model = AutoModelForCausalLM.from_pretrained(repo_id, trust_remote_code=True, **load_kwargs).eval()
         self.text_model.to(device)
         ensure_cuda_vram_headroom("QwenVL PromptEnhancer HF", min_free_gb=1.0, min_free_ratio=0.08)
