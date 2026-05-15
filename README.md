@@ -61,26 +61,45 @@ The GGUF path requires a vision-capable `llama-cpp-python` build. The normal PyP
 
 ## Supported models
 
-ThinkingLLM works with these model families:
+ThinkingLLM supports these model families out of the box, with pre-configured entries in `hf_models.json` and `gguf_models.json`.
 
-### Vision-language (HF)
+### Qwen — Vision-language (HF)
 - Qwen3.5 4B / 9B
-- Qwen3-VL 4B / 8B (Instruct + abliterated)
+- Qwen3-VL 4B / 8B (Instruct, abliterated, unredacted)
+- Qwen3-VL 32B Heretic
 - Qwen2.5-VL 3B / 7B
 
-### Vision-language (GGUF)
-- Qwen3-VL 4B / 8B (Q4 K M through F16)
-- Qwen2.5-VL 3B / 7B (Q4 K M through F16)
+### Qwen — Vision-language (GGUF)
+- Qwen3.5 4B / 9B / 27B (Q4 K M through BF16)
+- Qwen3-VL 4B / 8B / 32B (Instruct, abliterated, thinking)
+- Qwen2.5-VL 3B / 7B
 
-### Text-only (HF)
+### Qwen — Text-only (HF)
 - Qwen3 0.6B / 4B / 8B
-- Qwen3.5 4B / 9B
+- Qwen3.5 4B / 9B (base + heretic + uncensored)
 
-### Text-only (GGUF)
-- Qwen3 4B ablitterated / Josiefied (Q4 K M through F16)
-- Qwen3 8B ablitterated / Josiefied (Q4 K M through F16)
+### Qwen — Text-only (GGUF)
+- Qwen3 4B / 8B (abliterated, Josiefied, base)
+- Qwen3.5 4B / 9B / 27B (base + uncensored HauhauCS)
 
-Pre-configured model entries are in `hf_models.json` and `gguf_models.json`. Local GGUF models placed in `models/LLM/GGUF/` with a matching mmproj are auto-discovered.
+### Gemma 4 — Vision-language (HF)
+- Gemma-4-E2B-it / Uncensored
+- Gemma-4-E4B-it / Uncensored
+- Gemma-4-26B-A4B-it / Heretic
+- Gemma-4-31B-it
+
+### Gemma 4 — Vision-language (GGUF)
+- Gemma-4-E2B / E4B (Q4 K M through BF16, uncensored)
+- Gemma-4-26B-A4B-it (Q4 K M through BF16)
+- Gemma-4-31B-it (Q4 K M through BF16)
+
+### Gemma 4 — Text-only (HF)
+- Gemma-4-E2B-it / Uncensored
+- Gemma-4-E4B-it / Uncensored
+- Gemma-4-26B-A4B-it / Heretic
+- Gemma-4-31B-it
+
+Local GGUF models placed in `models/LLM/GGUF/` with a matching mmproj file are auto-discovered. Pre-configured entries live in `hf_models.json` and `gguf_models.json`.
 
 ## Quick install
 
