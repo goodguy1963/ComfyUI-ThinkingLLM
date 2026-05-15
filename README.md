@@ -19,6 +19,7 @@ Every ThinkingLLM node exposes an `enable_thinking` toggle.
 Enable `stream_tokens_to_terminal` to print tokens into the ComfyUI terminal as they arrive.
 
 This is useful when:
+
 - a prompt seems stuck and you want to see whether the model is actually working
 - you want to debug a bad prompt while it is going wrong
 - you want to understand whether the model is thinking or simply producing a long answer
@@ -63,6 +64,16 @@ pip install -r requirements.txt
 
 For GGUF vision support, follow [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md).
 
+## Registry publishing
+
+This repository is wired for Comfy Registry publication through GitHub Actions.
+
+- Workflow: `.github/workflows/publish.yml`
+- Required repository secret: `REGISTRY_ACCESS_TOKEN`
+- Secret value: a Comfy Registry publishing API key for publisher `goodguy1963`
+
+Once that secret exists, pushing a new `pyproject.toml` version on `main` or manually running the workflow will publish the package to the registry.
+
 ## Model locations
 
 Models are discovered automatically.
@@ -106,7 +117,7 @@ This fork preserves the GPL-3.0 lineage of its predecessors.
 - comfyanonymous/ComfyUI
 
 Maintainer: goodguy1963  
-Planned repo: https://github.com/goodguy1963/ComfyUI-ThinkingLLM
+Planned repo: [goodguy1963/ComfyUI-ThinkingLLM](https://github.com/goodguy1963/ComfyUI-ThinkingLLM)
 
 ## License
 
