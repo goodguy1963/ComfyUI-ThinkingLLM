@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-ThinkingLLM"
 description = "ThinkingLLM multimodal ComfyUI fork with Hugging Face and GGUF backends, WAN 2.2 workflows, prompt tooling, and preserved GPL fork lineage from the Qwen3.5-Uncensored branch."
-version = "2.2.5"
+version = "2.2.6"
 license = {file = "LICENSE"}
 dependencies = ["transformers>=5.2.0", "torch", "huggingface-hub", "hf_xet", "psutil", "numpy", "Pillow", "opencv-python", "bitsandbytes", "accelerate", "llama-cpp-python"]
 

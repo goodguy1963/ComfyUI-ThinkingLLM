@@ -26,7 +26,13 @@ from dataclasses import dataclass
 from pathlib import Path
 import torch
 from huggingface_hub import hf_hub_download, snapshot_download
-from llama_cpp import Llama  # type: ignore[import-untyped]
+
+try:
+    from llama_cpp import Llama  # type: ignore[import-untyped]
+    _LLAMA_CPP_IMPORT_ERROR = None
+except Exception as exc:
+    Llama = None
+    _LLAMA_CPP_IMPORT_ERROR = exc
 
 import folder_paths
 from AILab_OutputCleaner import OutputCleanConfig, clean_model_output, prompt_output_guard
@@ -330,6 +336,12 @@ class AILab_QwenVL_GGUF_PromptEnhancer:
     FUNCTION = "process"
     CATEGORY = "ThinkingLLM"
 
+    def _load_backend(self):
+        if Llama is None:
+            raise RuntimeError(
+                "[QwenVL] llama_cpp is not available. Install the GGUF vision dependency first. See docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md"
+            ) from _LLAMA_CPP_IMPORT_ERROR
+
     def __init__(self):
         self.llm = None
         self.current_signature = None
@@ -628,6 +640,7 @@ class AILab_QwenVL_GGUF_PromptEnhancer:
             raise FileNotFoundError(f"[QwenVL] GGUF model not found after download: {resolved} (tried: {', '.join(attempted)})")
 
     def _load_model(self, model_name, device, enable_thinking=True):
+        self._load_backend()
         resolved = self._resolve_model_path(model_name)
         self._maybe_download_model(model_name, resolved)
         model_cfg = self.gguf_models["models"].get(model_name, {})

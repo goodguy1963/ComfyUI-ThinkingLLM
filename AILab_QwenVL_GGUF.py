@@ -26,10 +26,16 @@ from pathlib import Path
 import numpy as np
 import torch
 from huggingface_hub import hf_hub_download, snapshot_download
-from llama_cpp import Llama
 from PIL import Image
 from AILab_StreamDisplay import TerminalStreamDisplay
 from comfy.model_management import throw_exception_if_processing_interrupted
+
+try:
+    from llama_cpp import Llama
+    _LLAMA_CPP_IMPORT_ERROR = None
+except Exception as exc:
+    Llama = None
+    _LLAMA_CPP_IMPORT_ERROR = exc
 
 # Import cache functions from main module
 sys.path.append(str(Path(__file__).parent))
@@ -678,12 +684,10 @@ class QwenVLGGUFBase:
         print(f"[QwenVL GGUF DEBUG] VRAM cleanup completed")
 
     def _load_backend(self):
-        try:
-            from llama_cpp import Llama  # noqa: F401
-        except Exception as exc:
+        if Llama is None:
             raise RuntimeError(
                 "[QwenVL] llama_cpp is not available. Install the GGUF vision dependency first. See docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md"
-            ) from exc
+            ) from _LLAMA_CPP_IMPORT_ERROR
 
     def _load_model(
         self,

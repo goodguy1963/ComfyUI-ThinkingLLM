@@ -143,7 +143,7 @@
             }
         },
         "Gemma-4-E4B-Uncensored [DL: 16GB, VRAM: 7.0GB]": {
-            "repo_id": "HauhauCS/Gemma-4-E4B-Uncensored",
+            "repo_id": "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -153,7 +153,7 @@
             }
         },
         "Gemma-4-E2B-Uncensored [DL: 10.3GB, VRAM: 4.0GB]": {
-            "repo_id": "HauhauCS/Gemma-4-E2B-Uncensored",
+            "repo_id": "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -275,7 +275,7 @@
             }
         },
         "Gemma-4-E4B-Uncensored [DL: 16GB, VRAM: 7.0GB]": {
-            "repo_id": "HauhauCS/Gemma-4-E4B-Uncensored",
+            "repo_id": "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -285,7 +285,7 @@
             }
         },
         "Gemma-4-E2B-Uncensored [DL: 10.3GB, VRAM: 4.0GB]": {
-            "repo_id": "HauhauCS/Gemma-4-E2B-Uncensored",
+            "repo_id": "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
             "default": false,
             "quantized": false,
             "vram_requirement": {
