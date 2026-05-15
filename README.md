@@ -6,6 +6,10 @@
 
 > GPL-3.0 fork of Deaquay/ComfyUI-Qwen3.5-Uncensored, itself derived from huchukato/ComfyUI-QwenVL-Mod and 1038lab/ComfyUI-QwenVL. See [LICENSE](LICENSE).
 
+![ThinkingLLM Demo](docs/DemoThinkingLLM%20(1).gif)
+
+> 🎥 Prefer a narrated version? **[Watch the demo on YouTube](https://youtu.be/K1JsvnzujOw)**
+
 ## What ThinkingLLM adds
 
 ### The Thinking Toggle
