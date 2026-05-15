@@ -146,7 +146,7 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
                 "temperature": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.0}),
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0}),
                 "repetition_penalty": ("FLOAT", {"default": 1.1, "min": 0.5, "max": 2.0}),
-                "keep_model_loaded": ("BOOLEAN", {"default": True}),
+                "keep_model_loaded": ("BOOLEAN", {"default": False}),
                 "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1}),
                 "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep the last generated prompt instead of creating a new one"}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Show readable generation progress and thinking-status summaries in the ComfyUI terminal. When enabled, fixed-seed prompt reuse is bypassed so a fresh streamed run can occur."}),
