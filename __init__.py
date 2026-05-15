@@ -3,7 +3,7 @@
     "name": "ComfyUI-ThinkingLLM",
     "description": "ThinkingLLM multimodal fork with HF and GGUF paths. GPL-3.0 lineage preserved from Deaquay/ComfyUI-Qwen3.5-Uncensored, huchukato/ComfyUI-QwenVL-Mod, and 1038lab/ComfyUI-QwenVL.",
     "author": "goodguy1963",
-    "version": "2.2.9",
+    "version": "2.2.10",
     "url": "https://github.com/goodguy1963/ComfyUI-ThinkingLLM",
   "category": "image"
 }
