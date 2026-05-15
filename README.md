@@ -2,6 +2,8 @@
 
 **ThinkingLLM** is a local-LLM custom-node pack for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that wraps Qwen3.5, Qwen3, and Qwen2.5-VL models behind a cleaner node interface with thinking-mode control, live token streaming, and a raw trace output for debugging.
 
+📺 **[Watch the demo](https://youtu.be/K1JsvnzujOw)** for a better viewing experience.
+
 > GPL-3.0 fork of Deaquay/ComfyUI-Qwen3.5-Uncensored, itself derived from huchukato/ComfyUI-QwenVL-Mod and 1038lab/ComfyUI-QwenVL. See [LICENSE](LICENSE).
 
 ## What ThinkingLLM adds
