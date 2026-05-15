@@ -103,6 +103,12 @@ Local GGUF models placed in `models/LLM/GGUF/` with a matching mmproj file are a
 
 ## Quick install
 
+### ComfyUI Manager (recommended)
+1. Open **ComfyUI Manager** → **Install via Registry**
+2. Search for `ThinkingLLM`
+3. Click **Install**
+
+### Manual install
 ```bash
 cd ComfyUI/custom_nodes
 git clone https://github.com/goodguy1963/ComfyUI-ThinkingLLM.git
