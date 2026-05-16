@@ -10,6 +10,7 @@ import importlib
 import json
 import platform
 import re
+import time
 from enum import Enum
 from pathlib import Path
 
@@ -63,6 +64,7 @@ DEFAULT_STYLES = {
 }
 
 _EMPTY_THINK_RE = re.compile(r"<think[^>]*>\s*</think>", flags=re.IGNORECASE | re.DOTALL)
+_STREAM_HEARTBEAT_INTERVAL_SECONDS = 3.0
 
 
 def _describe_prompt_enhancer_thinking(requested_thinking: bool, effective_thinking: bool, raw_text: str) -> str:
@@ -83,6 +85,18 @@ def _describe_prompt_enhancer_thinking(requested_thinking: bool, effective_think
         f"requested={bool(requested_thinking)} effective={bool(effective_thinking)} "
         f"raw={raw_state} terminal_reasoning={terminal_state} final_output=clean_prompt"
     )
+
+
+def _maybe_emit_hf_prompt_stream_heartbeat(stage_label: str, started_at: float, last_status_at: float, full_text: str) -> float:
+    now = time.monotonic()
+    if (now - last_status_at) < _STREAM_HEARTBEAT_INTERVAL_SECONDS:
+        return last_status_at
+    cleaned_preview = clean_model_output(full_text, OutputCleanConfig(mode="prompt"))
+    if cleaned_preview and len(cleaned_preview.strip()) >= 32:
+        return now
+    elapsed = max(0.0, now - started_at)
+    print(f"[QwenVL HF] {stage_label}: reasoning hidden; still generating... ({len(full_text)} chars, {elapsed:.1f}s)")
+    return now
 
 
 def _load_prompt_styles() -> dict[str, str]:
@@ -504,21 +518,27 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
             try:
                 from transformers import TextIteratorStreamer
                 from threading import Thread
-                stream_display = TerminalStreamDisplay("QwenVL HF", suppress_planning=True, compact=True)
+                stage_label = "INITIAL GENERATION"
+                stream_display = TerminalStreamDisplay("QwenVL PromptEnhancer HF", suppress_planning=True, compact=False)
                 streamer = TextIteratorStreamer(self.text_tokenizer, skip_prompt=True, skip_special_tokens=True)
                 gen_kwargs["streamer"] = streamer
                 # Launch generation in a thread so we can iterate the streamer
                 import threading
                 thread = threading.Thread(target=self.text_model.generate, kwargs={**inputs, **gen_kwargs})
+                print(f"[QwenVL PromptEnhancer HF] STREAMING {stage_label}")
+                stream_display.start_stage(stage_label)
+                stage_started_at = time.monotonic()
+                last_status_at = stage_started_at
                 thread.start()
                 full_streamed = ""
                 for token_str in streamer:
                     if token_str:
                         throw_exception_if_processing_interrupted()
                         full_streamed += token_str
-                        stream_display.push_compact(token_str)
+                        stream_display.push(token_str)
+                        last_status_at = _maybe_emit_hf_prompt_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_streamed)
                 thread.join()
-                stream_display.end_compact()
+                stream_display.end_stage()
                 if not full_streamed.strip():
                     raise RuntimeError("[QwenVL] HF streaming returned empty response")
                 raw_text = full_streamed.strip()

@@ -16,6 +16,7 @@
 import gc
 import json
 import platform
+import time
 from enum import Enum
 from pathlib import Path
 import hashlib
@@ -55,6 +56,16 @@ QWEN_MIN_REASONING_BUDGET_TOKENS = 1024
 QWEN_FINAL_ANSWER_RESERVE_TOKENS = 256
 QWEN_CONTEXT_OVERHEAD_TOKENS = 128
 _QWEN_SOFT_SWITCHES = {"/think", "/no_think", "/nothink"}
+_STREAM_HEARTBEAT_INTERVAL_SECONDS = 3.0
+
+
+def _maybe_emit_hf_stream_heartbeat(stage_label: str, started_at: float, last_status_at: float, full_text: str) -> float:
+    now = time.monotonic()
+    if (now - last_status_at) < _STREAM_HEARTBEAT_INTERVAL_SECONDS:
+        return last_status_at
+    elapsed = max(0.0, now - started_at)
+    print(f"[QwenVL HF] {stage_label}: still generating... ({len(full_text)} chars, {elapsed:.1f}s)")
+    return now
 
 def _build_workflow_fingerprint(extra_pnginfo):
     """Return a short stable fingerprint for a workflow dict so node state
@@ -1316,24 +1327,30 @@ class QwenVLBase:
         else:
             kwargs["do_sample"] = False
             
-        # Optional: terminal streaming with rolling 200-char window
+        # Optional: staged readable terminal streaming
         if stream_to_terminal:
             try:
                 from transformers import TextIteratorStreamer
                 from threading import Thread
-                sd = TerminalStreamDisplay("QwenVL HF", compact=True)
+                stage_label = "STREAMING"
+                sd = TerminalStreamDisplay("QwenVL HF", suppress_planning=True, compact=False)
                 streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
                 kwargs["streamer"] = streamer
                 thread = Thread(target=self.model.generate, kwargs={**model_inputs, **kwargs})
+                print(f"[QwenVL HF] STREAMING {stage_label}")
+                sd.start_stage(stage_label)
+                stage_started_at = time.monotonic()
+                last_status_at = stage_started_at
                 thread.start()
                 full_streamed = ""
                 for token_str in streamer:
                     if token_str:
                         throw_exception_if_processing_interrupted()
                         full_streamed += token_str
-                        sd.push_compact(token_str)
+                        sd.push(token_str)
+                        last_status_at = _maybe_emit_hf_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_streamed)
                 thread.join()
-                sd.end_compact()
+                sd.end_stage()
                 if not full_streamed.strip():
                     raise RuntimeError("[QwenVL] HF streaming returned empty response")
                 return full_streamed.strip(), full_streamed.strip()
