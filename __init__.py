@@ -1,9 +1,9 @@
 """
 {
     "name": "ComfyUI-ThinkingLLM",
-    "description": "ThinkingLLM multimodal fork with HF and GGUF paths. GPL-3.0 lineage preserved from Deaquay/ComfyUI-Qwen3.5-Uncensored, huchukato/ComfyUI-QwenVL-Mod, and 1038lab/ComfyUI-QwenVL.",
+    "description": "A multimodal ComfyUI AI node with Qwen3.5, Qwen3-VL, Qwen2.5-VL, Qwen3, and Gemma 4 integrations. Features live thinking in the terminal to see what the LLM is doing in real time.",
     "author": "goodguy1963",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "url": "https://github.com/goodguy1963/ComfyUI-ThinkingLLM",
   "category": "image"
 }
