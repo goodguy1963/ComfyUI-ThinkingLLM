@@ -1,5 +1,15 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 1.0.4 (2026/05/16) — GGUF Workflow Compatibility Fix
+
+### Fixed
+- Restored legacy widget ordering compatibility for `ThinkingLLM_QwenVL_GGUF_Advanced` so older saved workflows no longer shift values into the wrong advanced GGUF fields.
+- Added compatibility shims for deprecated legacy fields (`seed_mode` and `unload_after_run`) so old workflows deserialize cleanly without affecting current runtime behavior.
+- Added regression tests that lock the advanced GGUF widget order and `process()` signature alignment.
+
+### Validation
+- Local regression suite passes: `python tests/test_new_features.py`
+
 ## Version 2.2.5-local-locked (2026/05/14) — Complete Feature Parity
 
 ### 🎯 All 6 Nodes Now Have:

@@ -9,6 +9,7 @@ plain shell without ML dependencies.
 
 import ast
 import importlib.util
+import inspect
 import json
 import os
 import re
@@ -426,6 +427,68 @@ class TestLegacyNodeNameCompatibility(unittest.TestCase):
                 if node_type.startswith("AILab_QwenVL"):
                     with self.subTest(workflow=workflow_file.name, node_type=node_type):
                         self.assertIn(node_type, resolved_types)
+
+
+class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
+    LEGACY_REQUIRED_PREFIX = [
+        "model_name",
+        "device",
+        "preset_prompt",
+        "custom_prompt",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "repetition_penalty",
+        "frame_count",
+        "ctx",
+        "n_batch",
+        "gpu_layers",
+        "image_max_tokens",
+        "top_k",
+        "pool_size",
+        "keep_model_loaded",
+        "seed",
+    ]
+
+    def _load_gguf_advanced_class(self):
+        package = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py"])
+        return package.NODE_CLASS_MAPPINGS["ThinkingLLM_QwenVL_GGUF_Advanced"]
+
+    def test_gguf_advanced_required_widgets_preserve_legacy_order(self):
+        node_cls = self._load_gguf_advanced_class()
+        required_keys = list(node_cls.INPUT_TYPES()["required"].keys())
+
+        self.assertEqual(
+            required_keys[: len(self.LEGACY_REQUIRED_PREFIX)],
+            self.LEGACY_REQUIRED_PREFIX,
+        )
+        self.assertEqual(
+            required_keys[len(self.LEGACY_REQUIRED_PREFIX): len(self.LEGACY_REQUIRED_PREFIX) + 2],
+            ["legacy_seed_mode", "legacy_unload_after_run"],
+        )
+        self.assertGreater(required_keys.index("n_ubatch"), required_keys.index("legacy_unload_after_run"))
+
+    def test_gguf_advanced_process_signature_matches_required_widget_order(self):
+        node_cls = self._load_gguf_advanced_class()
+        signature = inspect.signature(node_cls.process)
+        parameter_names = [
+            name
+            for name, parameter in signature.parameters.items()
+            if name != "self" and parameter.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        ]
+
+        expected_prefix = self.LEGACY_REQUIRED_PREFIX + [
+            "legacy_seed_mode",
+            "legacy_unload_after_run",
+            "n_ubatch",
+            "n_threads",
+            "n_threads_batch",
+            "flash_attn",
+            "offload_kqv",
+            "ctx_checkpoints",
+            "keep_last_prompt",
+        ]
+        self.assertEqual(parameter_names[: len(expected_prefix)], expected_prefix)
 
 
 class _GlobalCheck(ast.NodeVisitor):
