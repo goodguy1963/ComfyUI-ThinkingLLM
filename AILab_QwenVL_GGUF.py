@@ -1148,6 +1148,10 @@ class QwenVLGGUFBase:
             pool_size=pool_size,
             device=device,
             enable_thinking=bool(enable_thinking),
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
         )
 
         # Auto-retrieve saved prompt when seed is fixed

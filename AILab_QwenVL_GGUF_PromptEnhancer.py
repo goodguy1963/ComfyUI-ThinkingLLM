@@ -915,6 +915,10 @@ class AILab_QwenVL_GGUF_PromptEnhancer:
             english_output=bool(english_output),
             device=device,
             enable_thinking=bool(enable_thinking),
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
         )
 
         # Auto-retrieve saved prompt when seed is fixed (no keep_last_prompt needed)

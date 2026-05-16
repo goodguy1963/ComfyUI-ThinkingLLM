@@ -207,6 +207,10 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
             enhancement_style=enhancement_style,
             custom_system_prompt=custom_system_prompt,
             enable_thinking=bool(enable_thinking),
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
         )
 
         # Auto-retrieve saved prompt when seed is fixed (no keep_last_prompt needed)
