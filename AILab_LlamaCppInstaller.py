@@ -1,3 +1,4 @@
+import contextlib
 import importlib
 import os
 import platform
@@ -13,6 +14,17 @@ KNOWN_LINUX_WHEEL_SPECS = {
     ),
 }
 VISION_HANDLER_NAMES = ("Qwen3VLChatHandler", "Qwen25VLChatHandler")
+
+
+class _PathOnlyDllDirectoryHandle:
+    def close(self) -> None:
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
 
 def _normalize_bool_env(name: str, default: bool = True) -> bool:
@@ -65,20 +77,77 @@ def _clear_llama_cpp_modules() -> None:
     importlib.invalidate_caches()
 
 
+def _prepend_to_path_once(path: str) -> None:
+    current = os.environ.get("PATH", "")
+    normalized_path = os.path.normcase(os.path.normpath(path))
+    current_entries = [entry for entry in current.split(os.pathsep) if entry]
+    for entry in current_entries:
+        if os.path.normcase(os.path.normpath(entry)) == normalized_path:
+            return
+    os.environ["PATH"] = path if not current else path + os.pathsep + current
+
+
+def _is_windows_path_length_error(exc: OSError) -> bool:
+    return platform.system().lower() == "windows" and getattr(exc, "winerror", None) == 206
+
+
+def _get_windows_runtime_dll_dirs() -> list[str]:
+    runtime_dirs: list[str] = []
+    try:
+        import torch
+
+        torch_lib_dir = os.path.join(os.path.dirname(torch.__file__), "lib")
+        if os.path.isdir(torch_lib_dir):
+            runtime_dirs.append(torch_lib_dir)
+    except Exception:
+        pass
+
+    return runtime_dirs
+
+
+@contextlib.contextmanager
+def _relax_windows_dll_directory_for_long_paths():
+    if platform.system().lower() != "windows" or not hasattr(os, "add_dll_directory"):
+        yield
+        return
+
+    original_add_dll_directory = os.add_dll_directory
+
+    def _safe_add_dll_directory(path):
+        path_str = os.fspath(path)
+        try:
+            return original_add_dll_directory(path_str)
+        except OSError as exc:
+            if not _is_windows_path_length_error(exc) or not os.path.isdir(path_str):
+                raise
+            _prepend_to_path_once(path_str)
+            return _PathOnlyDllDirectoryHandle()
+
+    os.add_dll_directory = _safe_add_dll_directory
+    try:
+        for runtime_dir in _get_windows_runtime_dll_dirs():
+            _safe_add_dll_directory(runtime_dir)
+            _prepend_to_path_once(runtime_dir)
+        yield
+    finally:
+        os.add_dll_directory = original_add_dll_directory
+
+
 def _import_llama_cpp_backend(require_vision_handlers: bool):
     _clear_llama_cpp_modules()
-    llama_cpp = importlib.import_module("llama_cpp")
-    llama_class = getattr(llama_cpp, "Llama", None)
-    if llama_class is None:
-        raise ImportError("llama_cpp imported but does not expose Llama")
+    with _relax_windows_dll_directory_for_long_paths():
+        llama_cpp = importlib.import_module("llama_cpp")
+        llama_class = getattr(llama_cpp, "Llama", None)
+        if llama_class is None:
+            raise ImportError("llama_cpp imported but does not expose Llama")
 
-    if require_vision_handlers:
-        chat_format = importlib.import_module("llama_cpp.llama_chat_format")
-        if not any(hasattr(chat_format, name) for name in VISION_HANDLER_NAMES):
-            raise ImportError(
-                "llama_cpp is installed but missing Qwen vision chat handlers "
-                f"({', '.join(VISION_HANDLER_NAMES)})"
-            )
+        if require_vision_handlers:
+            chat_format = importlib.import_module("llama_cpp.llama_chat_format")
+            if not any(hasattr(chat_format, name) for name in VISION_HANDLER_NAMES):
+                raise ImportError(
+                    "llama_cpp is installed but missing Qwen vision chat handlers "
+                    f"({', '.join(VISION_HANDLER_NAMES)})"
+                )
 
     return llama_class
 

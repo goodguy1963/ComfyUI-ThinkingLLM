@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -186,6 +187,23 @@ def load_thinkingllm_loader_subset(module_filenames: list[str]):
                 sys.modules[name] = previous_modules[name]
             else:
                 sys.modules.pop(name, None)
+
+
+def load_module_from_file(filename: str, module_name: str):
+    previous_module = sys.modules.get(module_name)
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, PKG / filename)
+        if spec is None or spec.loader is None:
+            raise AssertionError(f"failed to create loader spec for {filename}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        if previous_module is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous_module
 
 
 def extract_dict_node(filename: str, name: str) -> ast.Dict:
@@ -495,6 +513,45 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
             "keep_last_prompt",
         ]
         self.assertEqual(parameter_names[: len(expected_prefix)], expected_prefix)
+
+
+class TestLlamaCppInstaller(unittest.TestCase):
+    def test_windows_runtime_dll_dirs_include_torch_lib(self):
+        installer = load_module_from_file(
+            "AILab_LlamaCppInstaller.py",
+            "thinkingllm_llama_installer_dirs_test",
+        )
+        torch_module = types.SimpleNamespace(__file__=r"C:\stub\torch\__init__.py")
+
+        with mock.patch.dict(sys.modules, {"torch": torch_module}, clear=False):
+            with mock.patch.object(installer.os.path, "isdir", return_value=True):
+                self.assertEqual(
+                    installer._get_windows_runtime_dll_dirs(),
+                    [r"C:\stub\torch\lib"],
+                )
+
+    def test_windows_long_path_dll_fallback_uses_path(self):
+        installer = load_module_from_file(
+            "AILab_LlamaCppInstaller.py",
+            "thinkingllm_llama_installer_test",
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_path = os.environ.get("PATH", "")
+
+            def raise_long_path_error(path):
+                error = FileNotFoundError(f"[WinError 206] path too long: {path}")
+                error.winerror = 206
+                raise error
+
+            with mock.patch.object(installer.platform, "system", return_value="Windows"):
+                with mock.patch.object(installer.os, "add_dll_directory", side_effect=raise_long_path_error):
+                    with mock.patch.dict(installer.os.environ, {"PATH": original_path}, clear=False):
+                        with installer._relax_windows_dll_directory_for_long_paths():
+                            handle = installer.os.add_dll_directory(temp_dir)
+
+                        self.assertTrue(installer.os.environ["PATH"].startswith(temp_dir))
+                        self.assertTrue(hasattr(handle, "close"))
 
 
 class _GlobalCheck(ast.NodeVisitor):

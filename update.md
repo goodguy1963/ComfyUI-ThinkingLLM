@@ -1,5 +1,18 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 1.0.6 (2026/05/16) — Windows GGUF Backend Import Fix
+
+### 1.0.6 Changes
+
+- Fixed Windows GGUF backend startup on portable ComfyUI installs by adding PyTorch runtime DLL directories before importing `llama_cpp`.
+- Kept a fallback for nested portable installs where `os.add_dll_directory(...)` can fail with `WinError 206`, so the loader falls back to `PATH` instead of treating `llama_cpp` as missing.
+- Added regression coverage for both the runtime DLL directory discovery and the long-path DLL-directory fallback.
+
+### 1.0.6 Validation
+
+- Embedded Python backend probe passes: `ensure_llama_cpp_backend(require_vision_handlers=True)` resolves `Llama`.
+- Local regression suite passes: `python tests/test_new_features.py`
+
 ## Version 1.0.5 (2026/05/16) — Streaming Toggle Fix And Release Retention
 
 ### 1.0.5 Changes
