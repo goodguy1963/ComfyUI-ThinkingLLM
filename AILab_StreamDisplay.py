@@ -183,19 +183,22 @@ class TerminalStreamDisplay:
         sys.stdout.write(msg)
         sys.stdout.flush()
 
-    def _write_stdout_line(self, text: str):
-        if not text:
+    def _write_rolling_line(self, label: str, tail: str, final: bool = False):
+        """Emit a carriage-return line showing the last ~200 chars, clearing to EOL.
+        'final' adds a trailing newline so the last frame stays visible."""
+        if not tail:
             return
-        msg = f"{text}\n"
+        msg = f"\r[{label}] {tail}\033[K"
         sys.stdout.write(msg)
+        if final:
+            sys.stdout.write("\n")
         sys.stdout.flush()
 
     def push_compact(self, text: str):
-        """Append *text* and print readable throttled snapshots.
+        """Append *text* and emit a carriage-return rolling tail every throttle interval.
 
-        Carriage-return rewrites look fine in a raw terminal, but ComfyUI's log
-        capture turns them into duplicated high-speed garbage. Emit a compact
-        line snapshot only when enough text or time has accumulated.
+        Uses \\r to redraw a single line so the terminal stays clean without
+        flooding the ComfyUI log buffer.
         """
         if not text:
             return
@@ -215,13 +218,13 @@ class TerminalStreamDisplay:
             self._stage_updates += 1
             self._last_compact_tail = tail
             self._last_compact_emit_at = now
-            self._write_stdout_line(f"[{self.label}] {tail}")
+            self._write_rolling_line(self.label, tail)
 
     def end_compact(self):
-        """Finish compact mode with one final readable snapshot."""
+        """Finish compact mode with one final newline-terminated snapshot."""
         tail = self._compact_tail()
         if tail and tail != self._last_compact_tail:
             self._stage_updates += 1
-            self._write_stdout_line(f"[{self.label}] {tail}")
         self._last_compact_tail = ""
         self._last_compact_emit_at = 0.0
+        self._write_rolling_line(self.label, tail or "", final=True)
