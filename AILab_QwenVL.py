@@ -27,8 +27,16 @@ import psutil
 import torch
 from PIL import Image
 from huggingface_hub import snapshot_download
-from tqdm.auto import tqdm
-from transformers import AutoProcessor, AutoTokenizer, BitsAndBytesConfig
+try:
+    from tqdm.auto import tqdm
+except ImportError:
+    tqdm = None
+try:
+    from transformers import AutoProcessor, AutoTokenizer, BitsAndBytesConfig
+except ImportError:
+    AutoProcessor = None
+    AutoTokenizer = None
+    BitsAndBytesConfig = None
 from AILab_StreamDisplay import TerminalStreamDisplay
 from comfy.model_management import throw_exception_if_processing_interrupted
 
@@ -159,6 +167,8 @@ class _DownloadProgressReporter:
         self._emit_terminal_text(f"[{self.label}] Failed - {detail}", force=True)
 
     def make_tqdm_class(self):
+        if tqdm is None:
+            return None
         reporter = self
 
         class _NodeDownloadTqdm(tqdm):
@@ -1089,13 +1099,16 @@ def _download_model_snapshot(repo_id: str, target: Path, *, force_clean_target: 
         shutil.rmtree(target, ignore_errors=False)
     reporter.stage("Preparing download", detail=target.name)
     try:
-        snapshot_download(
-            repo_id=repo_id,
-            local_dir=str(target),
-            ignore_patterns=["*.md", ".git*"],
-            force_download=force_clean_target,
-            tqdm_class=reporter.make_tqdm_class(),
-        )
+        download_kwargs = {
+            "repo_id": repo_id,
+            "local_dir": str(target),
+            "ignore_patterns": ["*.md", ".git*"],
+            "force_download": force_clean_target,
+        }
+        tqdm_cls = reporter.make_tqdm_class()
+        if tqdm_cls is not None:
+            download_kwargs["tqdm_class"] = tqdm_cls
+        snapshot_download(**download_kwargs)
     except Exception as exc:
         reporter.fail(str(exc))
         raise
@@ -1115,13 +1128,16 @@ def download_hf_file_to_path(repo_ids: list[str], filename: str, target_path: Pa
         reporter = _DownloadProgressReporter(node_id=node_id, label=progress_label, repo_id=repo_id)
         reporter.stage("Preparing download", detail=wanted_name)
         try:
-            snapshot_download(
-                repo_id=repo_id,
-                repo_type="model",
-                local_dir=str(target_path.parent),
-                allow_patterns=[filename, wanted_name, f"**/{wanted_name}"],
-                tqdm_class=reporter.make_tqdm_class(),
-            )
+            download_kwargs = {
+                "repo_id": repo_id,
+                "repo_type": "model",
+                "local_dir": str(target_path.parent),
+                "allow_patterns": [filename, wanted_name, f"**/{wanted_name}"],
+            }
+            tqdm_cls = reporter.make_tqdm_class()
+            if tqdm_cls is not None:
+                download_kwargs["tqdm_class"] = tqdm_cls
+            snapshot_download(**download_kwargs)
             found = list(target_path.parent.rglob(wanted_name))
             if found:
                 downloaded_path = found[0]
