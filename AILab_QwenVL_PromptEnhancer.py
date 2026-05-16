@@ -33,6 +33,7 @@ from AILab_QwenVL import (
     _make_node_state_key,
     apply_qwen_soft_thinking_directive,
     build_node_input_signature,
+    ensure_model,
     ensure_cuda_vram_headroom,
     get_cache_key,
     get_alternative_cache_key,
@@ -247,6 +248,7 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
                 keep_model_loaded,
                 seed,
                 stream_to_terminal=stream_tokens_to_terminal,
+                unique_id=unique_id,
                 enable_thinking=enable_thinking,
             )
             raw_trace = f"[HF TEXT GENERATION]\n{enhanced_raw}"
@@ -326,11 +328,19 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
         )
         return output[0]
 
-    def _load_text_model(self, model_name, quantization, device_choice):
+    def _load_text_model(self, model_name, quantization, device_choice, unique_id=None):
         info = HF_TEXT_MODELS.get(model_name, {})
         repo_id = info.get("repo_id")
         if not repo_id:
             raise ValueError(f"[QwenVL] Missing repo_id for text model: {model_name}")
+
+        prefers_processor = "gemma" in model_name.lower() or "gemma" in repo_id.lower()
+        model_source = ensure_model(
+            model_name,
+            require_processor=prefers_processor,
+            node_id=unique_id,
+            progress_label=f"QwenVL PromptEnhancer HF Download: {model_name}",
+        )
 
         if device_choice == "auto":
             device = "cuda" if torch.cuda.is_available() else ("mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu")
@@ -367,18 +377,17 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
 
         print(f"[QwenVL] Loading text model {model_name} ({quantization})")
         tokenizer_kwargs = {"trust_remote_code": True}
-        prefers_processor = "gemma" in model_name.lower() or "gemma" in repo_id.lower()
 
         def _load_tokenizer(prefer_slow: bool = False):
             if prefers_processor:
-                processor = AutoProcessor.from_pretrained(repo_id, use_fast=not prefer_slow, **tokenizer_kwargs)
+                processor = AutoProcessor.from_pretrained(model_source, use_fast=not prefer_slow, **tokenizer_kwargs)
                 tokenizer = getattr(processor, "tokenizer", None)
                 if tokenizer is None:
                     raise ValueError(f"[QwenVL] AutoProcessor for {repo_id} did not expose a tokenizer")
                 self.text_processor = processor
                 return tokenizer
             self.text_processor = None
-            return AutoTokenizer.from_pretrained(repo_id, use_fast=not prefer_slow, **tokenizer_kwargs)
+            return AutoTokenizer.from_pretrained(model_source, use_fast=not prefer_slow, **tokenizer_kwargs)
 
         try:
             self.text_tokenizer = _load_tokenizer(prefer_slow=False)
@@ -417,7 +426,7 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
                     f"[QwenVL] Failed to load tokenizer for {repo_id}. "
                     f"Initial error: {exc}. Retry error: {retry_exc}"
                 ) from retry_exc
-        self.text_model = AutoModelForCausalLM.from_pretrained(repo_id, trust_remote_code=True, **load_kwargs).eval()
+        self.text_model = AutoModelForCausalLM.from_pretrained(model_source, trust_remote_code=True, **load_kwargs).eval()
         self.text_model.to(device)
         ensure_cuda_vram_headroom("QwenVL PromptEnhancer HF", min_free_gb=1.0, min_free_ratio=0.08)
         # Detect architecture from loaded model config
@@ -442,10 +451,11 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
         keep_model_loaded,
         seed,
         stream_to_terminal=False,
+        unique_id=None,
         enable_thinking=True,
     ):
         """Returns (cleaned_prompt, raw_generated_text) tuple."""
-        self._load_text_model(model_name, quantization, device)
+        self._load_text_model(model_name, quantization, device, unique_id=unique_id)
         ensure_cuda_vram_headroom("QwenVL PromptEnhancer HF", min_free_gb=1.0, min_free_ratio=0.08)
 
         if device == "auto":

@@ -27,9 +27,20 @@ import psutil
 import torch
 from PIL import Image
 from huggingface_hub import snapshot_download
+from tqdm.auto import tqdm
 from transformers import AutoProcessor, AutoTokenizer, BitsAndBytesConfig
 from AILab_StreamDisplay import TerminalStreamDisplay
 from comfy.model_management import throw_exception_if_processing_interrupted
+
+try:
+    from comfy.utils import ProgressBar
+except Exception:
+    ProgressBar = None
+
+try:
+    from server import PromptServer
+except Exception:
+    PromptServer = None
 
 # SageAttention support
 try:
@@ -58,6 +69,140 @@ QWEN_FINAL_ANSWER_RESERVE_TOKENS = 256
 QWEN_CONTEXT_OVERHEAD_TOKENS = 128
 _QWEN_SOFT_SWITCHES = {"/think", "/no_think", "/nothink"}
 _STREAM_HEARTBEAT_INTERVAL_SECONDS = 3.0
+_DOWNLOAD_STATUS_INTERVAL_SECONDS = 0.75
+
+
+def _format_download_size(num_bytes) -> str:
+    if num_bytes is None:
+        return "? B"
+    value = float(num_bytes)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if value < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024.0
+    return f"{value:.1f} TB"
+
+
+class _DownloadProgressReporter:
+    def __init__(self, node_id=None, label: str = "QwenVL Download", repo_id: str | None = None):
+        self.node_id = node_id
+        self.label = label
+        self.repo_id = repo_id
+        self.progress_bar = ProgressBar(1, node_id=node_id) if ProgressBar is not None else None
+        self._last_text_at = 0.0
+        self._last_terminal_at = 0.0
+        self._last_percent = None
+
+    def _emit_ui_text(self, text: str, *, force: bool = False) -> None:
+        if PromptServer is None or self.node_id is None:
+            return
+        now = time.monotonic()
+        if not force and (now - self._last_text_at) < _DOWNLOAD_STATUS_INTERVAL_SECONDS:
+            return
+        PromptServer.instance.send_progress_text(text, self.node_id)
+        self._last_text_at = now
+
+    def _emit_terminal_text(self, text: str, *, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and (now - self._last_terminal_at) < _DOWNLOAD_STATUS_INTERVAL_SECONDS:
+            return
+        print(text)
+        self._last_terminal_at = now
+
+    def _build_message(self, stage: str, detail: str | None = None, current: int | float | None = None, total: int | float | None = None) -> str:
+        lines = [self.label, f"Stage: {stage}"]
+        if self.repo_id:
+            lines.append(f"Source: {self.repo_id}")
+        if detail:
+            lines.append(f"File: {detail}")
+        if total and total > 0:
+            percent = int(min(100, max(0, round((float(current or 0) / float(total)) * 100))))
+            lines.append(f"Progress: {percent}% ({_format_download_size(current)} / {_format_download_size(total)})")
+        elif current is not None:
+            lines.append(f"Downloaded: {_format_download_size(current)}")
+        return "\n".join(lines)
+
+    def stage(self, stage: str, *, detail: str | None = None, force: bool = True) -> None:
+        message = self._build_message(stage, detail=detail)
+        self._emit_ui_text(message, force=force)
+        self._emit_terminal_text(f"[{self.label}] {stage}{f' - {detail}' if detail else ''}", force=force)
+
+    def progress(self, stage: str, *, detail: str | None = None, current: int | float | None = None, total: int | float | None = None, force: bool = False) -> None:
+        if self.progress_bar is not None and total is not None and total > 0:
+            self.progress_bar.update_absolute(min(float(current or 0), float(total)), total=float(total))
+        percent = None
+        if total and total > 0:
+            percent = int(min(100, max(0, round((float(current or 0) / float(total)) * 100))))
+        message = self._build_message(stage, detail=detail, current=current, total=total)
+        self._emit_ui_text(message, force=force or percent != self._last_percent)
+        suffix = ""
+        if percent is not None:
+            suffix = f" {percent}% ({_format_download_size(current)} / {_format_download_size(total)})"
+        elif current is not None:
+            suffix = f" {_format_download_size(current)}"
+        self._emit_terminal_text(f"[{self.label}] {stage}{f' - {detail}' if detail else ''}{suffix}", force=force or percent != self._last_percent)
+        self._last_percent = percent
+
+    def finish(self, *, detail: str | None = None, force: bool = True) -> None:
+        if self.progress_bar is not None:
+            self.progress_bar.update_absolute(1, total=1)
+        message = self._build_message("Completed", detail=detail, current=1, total=1)
+        self._emit_ui_text(message, force=force)
+        self._emit_terminal_text(f"[{self.label}] Completed{f' - {detail}' if detail else ''}", force=force)
+
+    def fail(self, detail: str) -> None:
+        message = self._build_message("Failed", detail=detail)
+        self._emit_ui_text(message, force=True)
+        self._emit_terminal_text(f"[{self.label}] Failed - {detail}", force=True)
+
+    def make_tqdm_class(self):
+        reporter = self
+
+        class _NodeDownloadTqdm(tqdm):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                reporter.progress(
+                    "Downloading",
+                    detail=getattr(self, "desc", None),
+                    current=getattr(self, "n", 0),
+                    total=getattr(self, "total", None),
+                    force=True,
+                )
+
+            def update(self, n=1):
+                result = super().update(n)
+                reporter.progress(
+                    "Downloading",
+                    detail=getattr(self, "desc", None),
+                    current=getattr(self, "n", 0),
+                    total=getattr(self, "total", None),
+                )
+                return result
+
+            def refresh(self, *args, **kwargs):
+                result = super().refresh(*args, **kwargs)
+                reporter.progress(
+                    "Downloading",
+                    detail=getattr(self, "desc", None),
+                    current=getattr(self, "n", 0),
+                    total=getattr(self, "total", None),
+                )
+                return result
+
+            def close(self):
+                reporter.progress(
+                    "Downloading",
+                    detail=getattr(self, "desc", None),
+                    current=(getattr(self, "total", None) or getattr(self, "n", 0)),
+                    total=(getattr(self, "total", None) or getattr(self, "n", 0) or None),
+                    force=True,
+                )
+                return super().close()
+
+        return _NodeDownloadTqdm
 
 
 def _maybe_emit_hf_stream_heartbeat(stage_label: str, started_at: float, last_status_at: float, full_text: str) -> float:
@@ -936,19 +1081,66 @@ def _model_snapshot_has_required_files(target: Path, require_processor: bool = F
     return True
 
 
-def _download_model_snapshot(repo_id: str, target: Path, *, force_clean_target: bool = False) -> None:
+def _download_model_snapshot(repo_id: str, target: Path, *, force_clean_target: bool = False, node_id=None, progress_label: str | None = None) -> None:
+    reporter = _DownloadProgressReporter(node_id=node_id, label=progress_label or "QwenVL HF Download", repo_id=repo_id)
     if force_clean_target and target.exists() and target.is_dir():
         print(f"[QwenVL] Removing incomplete model snapshot before retry: {target}")
+        reporter.stage("Cleaning incomplete snapshot", detail=target.name)
         shutil.rmtree(target, ignore_errors=False)
-    snapshot_download(
-        repo_id=repo_id,
-        local_dir=str(target),
-        ignore_patterns=["*.md", ".git*"],
-        force_download=force_clean_target,
-    )
+    reporter.stage("Preparing download", detail=target.name)
+    try:
+        snapshot_download(
+            repo_id=repo_id,
+            local_dir=str(target),
+            ignore_patterns=["*.md", ".git*"],
+            force_download=force_clean_target,
+            tqdm_class=reporter.make_tqdm_class(),
+        )
+    except Exception as exc:
+        reporter.fail(str(exc))
+        raise
+    reporter.finish(detail=target.name)
 
 
-def ensure_model(model_name, require_processor=False):
+def download_hf_file_to_path(repo_ids: list[str], filename: str, target_path: Path, *, node_id=None, progress_label: str = "QwenVL GGUF Download") -> None:
+    if target_path.exists():
+        print(f"[QwenVL] Using cached file: {target_path}")
+        return
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    last_exc: Exception | None = None
+    wanted_name = Path(filename).name
+
+    for repo_id in repo_ids:
+        reporter = _DownloadProgressReporter(node_id=node_id, label=progress_label, repo_id=repo_id)
+        reporter.stage("Preparing download", detail=wanted_name)
+        try:
+            snapshot_download(
+                repo_id=repo_id,
+                repo_type="model",
+                local_dir=str(target_path.parent),
+                allow_patterns=[filename, wanted_name, f"**/{wanted_name}"],
+                tqdm_class=reporter.make_tqdm_class(),
+            )
+            found = list(target_path.parent.rglob(wanted_name))
+            if found:
+                downloaded_path = found[0]
+                if downloaded_path.exists() and downloaded_path.resolve() != target_path.resolve():
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    downloaded_path.replace(target_path)
+            if target_path.exists():
+                reporter.finish(detail=wanted_name)
+                return
+            reporter.fail(f"{wanted_name} was not found after snapshot download")
+        except Exception as exc:
+            last_exc = exc
+            reporter.fail(str(exc))
+            print(f"[QwenVL] snapshot_download failed from {repo_id}: {exc}")
+
+    raise FileNotFoundError(f"[QwenVL] Download failed for {wanted_name}: {last_exc}")
+
+
+def ensure_model(model_name, require_processor=False, node_id=None, progress_label: str | None = None):
     info = HF_ALL_MODELS.get(model_name)
     if not info:
         raise ValueError(f"Model '{model_name}' not in config")
@@ -984,11 +1176,22 @@ def ensure_model(model_name, require_processor=False):
     if target.exists() and target.is_dir():
         print(f"[QwenVL] Existing model snapshot is incomplete, refreshing: {target}")
 
-    _download_model_snapshot(repo_id, target)
+    _download_model_snapshot(
+        repo_id,
+        target,
+        node_id=node_id,
+        progress_label=progress_label or f"QwenVL HF Download: {model_name}",
+    )
 
     if not _model_snapshot_has_required_files(target, require_processor=require_processor):
         print(f"[QwenVL] Refreshed snapshot is still incomplete, retrying clean download: {target}")
-        _download_model_snapshot(repo_id, target, force_clean_target=True)
+        _download_model_snapshot(
+            repo_id,
+            target,
+            force_clean_target=True,
+            node_id=node_id,
+            progress_label=progress_label or f"QwenVL HF Download: {model_name}",
+        )
 
     if not _model_snapshot_has_required_files(target, require_processor=require_processor):
         missing = []
@@ -1098,6 +1301,7 @@ class QwenVLBase:
         use_compile,
         device_choice,
         keep_model_loaded,
+        unique_id=None,
     ):
         quant = Quantization.from_value(quant_value)  # Skip enforce_memory for now
         
@@ -1134,7 +1338,12 @@ class QwenVLBase:
             ensure_cuda_vram_headroom("QwenVL", min_free_gb=1.0, min_free_ratio=0.08)
             return
         self.clear()
-        model_path = ensure_model(model_name, require_processor=True)
+        model_path = ensure_model(
+            model_name,
+            require_processor=True,
+            node_id=unique_id,
+            progress_label=f"QwenVL HF Download: {model_name}",
+        )
         quant_config, dtype = quantization_config(model_name, quant)
         
         # Handle attention mode for loading
@@ -1464,6 +1673,7 @@ class QwenVLBase:
             use_torch_compile,
             device,
             keep_model_loaded,
+            unique_id=unique_id,
         )
         try:
             text, raw_text = self.generate(

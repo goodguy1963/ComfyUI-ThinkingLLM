@@ -41,6 +41,7 @@ from AILab_QwenVL import (
     PROMPT_CACHE,
     apply_qwen_soft_thinking_directive,
     build_node_input_signature,
+    download_hf_file_to_path,
     ensure_cuda_vram_headroom,
     estimate_qwen_text_tokens,
     get_cache_key,
@@ -570,7 +571,7 @@ class AILab_QwenVL_GGUF_PromptEnhancer:
 
         return base_dir / model_name
 
-    def _maybe_download_model(self, model_name, resolved):
+    def _maybe_download_model(self, model_name, resolved, unique_id=None):
         if resolved.exists():
             return
         # Local models should already exist on disk — don't attempt download
@@ -597,43 +598,24 @@ class AILab_QwenVL_GGUF_PromptEnhancer:
             attempted.append(repo_id)
             print(f"[QwenVL] Downloading GGUF {filename} from {repo_id}")
             try:
-                downloaded = hf_hub_download(
-                    repo_id=repo_id,
-                    filename=filename,
-                    repo_type="model",
-                    local_dir=str(target_dir),
-                )
-                downloaded_path = Path(downloaded)
-                if downloaded_path.exists() and downloaded_path.resolve() != resolved.resolve():
-                    resolved.parent.mkdir(parents=True, exist_ok=True)
-                    downloaded_path.replace(resolved)
-            except Exception as exc:
-                print(f"[QwenVL] hf_hub_download failed from {repo_id}: {exc}")
-            if resolved.exists():
-                break
-            try:
-                snapshot_download(
-                    repo_id=repo_id,
-                    repo_type="model",
-                    local_dir=str(target_dir),
-                    allow_patterns=[filename, f"**/{filename}"],
+                download_hf_file_to_path(
+                    [repo_id],
+                    filename,
+                    resolved,
+                    node_id=unique_id,
+                    progress_label=f"QwenVL PromptEnhancer GGUF Download: {Path(filename).name}",
                 )
             except Exception as exc:
-                print(f"[QwenVL] Filtered snapshot failed from {repo_id}: {exc}")
+                print(f"[QwenVL] Download failed from {repo_id}: {exc}")
             if resolved.exists():
-                break
-            found = list(target_dir.rglob(filename))
-            if found:
-                resolved.parent.mkdir(parents=True, exist_ok=True)
-                found[0].replace(resolved)
                 break
         if not resolved.exists():
             raise FileNotFoundError(f"[QwenVL] GGUF model not found after download: {resolved} (tried: {', '.join(attempted)})")
 
-    def _load_model(self, model_name, device, enable_thinking=True):
+    def _load_model(self, model_name, device, enable_thinking=True, unique_id=None):
         Llama = self._load_backend()
         resolved = self._resolve_model_path(model_name)
-        self._maybe_download_model(model_name, resolved)
+        self._maybe_download_model(model_name, resolved, unique_id=unique_id)
         model_cfg = self.gguf_models["models"].get(model_name, {})
         context_length = model_cfg.get("context_length", 32768)
         signature = (resolved, context_length, device, bool(enable_thinking))
@@ -995,7 +977,7 @@ class AILab_QwenVL_GGUF_PromptEnhancer:
             print("[QwenVL GGUF] Prompt enhancer terminal stream shows readable progress only; reasoning text may be hidden or stripped from the final prompt.")
         else:
             print("[QwenVL GGUF] Prompt enhancer compact terminal progress is active; enable stream_tokens_to_terminal for full readable chunk output.")
-        self._load_model(model_name, device, enable_thinking=effective_thinking)
+        self._load_model(model_name, device, enable_thinking=effective_thinking, unique_id=unique_id)
         enhanced, raw_trace = self._invoke_llama(
             system_prompt=system_prompt,
             user_prompt=merged_prompt,

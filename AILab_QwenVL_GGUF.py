@@ -37,6 +37,7 @@ from AILab_QwenVL import (
     PROMPT_CACHE,
     apply_qwen_soft_thinking_directive,
     build_node_input_signature,
+    download_hf_file_to_path,
     ensure_cuda_vram_headroom,
     estimate_qwen_text_tokens,
     get_cache_key,
@@ -525,34 +526,18 @@ def _pick_device(device_choice: str) -> str:
     return "cpu"
 
 
-def _download_single_file(repo_ids: list[str], filename: str, target_path: Path):
+def _download_single_file(repo_ids: list[str], filename: str, target_path: Path, *, node_id=None, progress_label: str = "QwenVL GGUF Download"):
     if target_path.exists():
         print(f"[QwenVL] Using cached file: {target_path}")
         return
 
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-
-    last_exc: Exception | None = None
-    for repo_id in repo_ids:
-        print(f"[QwenVL] Downloading {filename} from {repo_id} -> {target_path}")
-        try:
-            downloaded = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                repo_type="model",
-                local_dir=str(target_path.parent),
-            )
-            downloaded_path = Path(downloaded)
-            if downloaded_path.exists() and downloaded_path.resolve() != target_path.resolve():
-                downloaded_path.replace(target_path)
-            if target_path.exists():
-                print(f"[QwenVL] Download complete: {target_path}")
-            break
-        except Exception as exc:
-            last_exc = exc
-            print(f"[QwenVL] hf_hub_download failed from {repo_id}: {exc}")
-    else:
-        raise FileNotFoundError(f"[QwenVL] Download failed for {filename}: {last_exc}")
+    download_hf_file_to_path(
+        repo_ids,
+        filename,
+        target_path,
+        node_id=node_id,
+        progress_label=progress_label,
+    )
 
     if not target_path.exists():
         raise FileNotFoundError(f"[QwenVL] File not found after download: {target_path}")
@@ -691,6 +676,7 @@ class QwenVLGGUFBase:
         top_k: int | None,
         pool_size: int | None,
         enable_thinking: bool = True,
+        unique_id=None,
     ):
         Llama = self._load_backend()
 
@@ -745,12 +731,24 @@ class QwenVLGGUFBase:
             if not model_path.exists():
                 if not repo_ids:
                     raise FileNotFoundError(f"[QwenVL] GGUF model not found locally and no repo_id provided: {model_path}")
-                _download_single_file(repo_ids, resolved.model_filename, model_path)
+                _download_single_file(
+                    repo_ids,
+                    resolved.model_filename,
+                    model_path,
+                    node_id=unique_id,
+                    progress_label=f"QwenVL GGUF Download: {Path(resolved.model_filename).name}",
+                )
 
             if mmproj_path is not None and not mmproj_path.exists():
                 if not repo_ids:
                     raise FileNotFoundError(f"[QwenVL] mmproj not found locally and no repo_id provided: {mmproj_path}")
-                _download_single_file(repo_ids, resolved.mmproj_filename, mmproj_path)
+                _download_single_file(
+                    repo_ids,
+                    resolved.mmproj_filename,
+                    mmproj_path,
+                    node_id=unique_id,
+                    progress_label=f"QwenVL GGUF Download: {Path(resolved.mmproj_filename).name}",
+                )
 
         device_kind = _pick_device(device)
 
@@ -1223,6 +1221,7 @@ class QwenVLGGUFBase:
                         top_k=top_k,
                         pool_size=pool_size,
                         enable_thinking=effective_thinking,
+                        unique_id=unique_id,
                     )
                     print(f"[QwenVL GGUF DEBUG] Model loaded successfully")
                     if images_b64 and self.chat_handler is None:
