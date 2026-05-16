@@ -16,6 +16,7 @@
 import gc
 import json
 import platform
+import shutil
 import time
 from enum import Enum
 from pathlib import Path
@@ -935,6 +936,18 @@ def _model_snapshot_has_required_files(target: Path, require_processor: bool = F
     return True
 
 
+def _download_model_snapshot(repo_id: str, target: Path, *, force_clean_target: bool = False) -> None:
+    if force_clean_target and target.exists() and target.is_dir():
+        print(f"[QwenVL] Removing incomplete model snapshot before retry: {target}")
+        shutil.rmtree(target, ignore_errors=False)
+    snapshot_download(
+        repo_id=repo_id,
+        local_dir=str(target),
+        ignore_patterns=["*.md", ".git*"],
+        force_download=force_clean_target,
+    )
+
+
 def ensure_model(model_name, require_processor=False):
     info = HF_ALL_MODELS.get(model_name)
     if not info:
@@ -971,11 +984,11 @@ def ensure_model(model_name, require_processor=False):
     if target.exists() and target.is_dir():
         print(f"[QwenVL] Existing model snapshot is incomplete, refreshing: {target}")
 
-    snapshot_download(
-        repo_id=repo_id,
-        local_dir=str(target),
-        ignore_patterns=["*.md", ".git*"],
-    )
+    _download_model_snapshot(repo_id, target)
+
+    if not _model_snapshot_has_required_files(target, require_processor=require_processor):
+        print(f"[QwenVL] Refreshed snapshot is still incomplete, retrying clean download: {target}")
+        _download_model_snapshot(repo_id, target, force_clean_target=True)
 
     if not _model_snapshot_has_required_files(target, require_processor=require_processor):
         missing = []
