@@ -1528,9 +1528,13 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
 NODE_CLASS_MAPPINGS = {
     "ThinkingLLM_QwenVL_GGUF": ThinkingLLM_QwenVL_GGUF,
     "ThinkingLLM_QwenVL_GGUF_Advanced": ThinkingLLM_QwenVL_GGUF_Advanced,
+    "AILab_QwenVL_GGUF": ThinkingLLM_QwenVL_GGUF,
+    "AILab_QwenVL_GGUF_Advanced": ThinkingLLM_QwenVL_GGUF_Advanced,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ThinkingLLM_QwenVL_GGUF": "ThinkingLLM (GGUF)",
     "ThinkingLLM_QwenVL_GGUF_Advanced": "ThinkingLLM Advanced (GGUF)",
+    "AILab_QwenVL_GGUF": "ThinkingLLM (GGUF)",
+    "AILab_QwenVL_GGUF_Advanced": "ThinkingLLM Advanced (GGUF)",
 }

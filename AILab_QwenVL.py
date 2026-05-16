@@ -1847,9 +1847,13 @@ class ThinkingLLM_QwenVL_Advanced(QwenVLBase):
 NODE_CLASS_MAPPINGS = {
     "ThinkingLLM_QwenVL": ThinkingLLM_QwenVL,
     "ThinkingLLM_QwenVL_Advanced": ThinkingLLM_QwenVL_Advanced,
+    "AILab_QwenVL": ThinkingLLM_QwenVL,
+    "AILab_QwenVL_Advanced": ThinkingLLM_QwenVL_Advanced,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ThinkingLLM_QwenVL": "ThinkingLLM",
     "ThinkingLLM_QwenVL_Advanced": "ThinkingLLM Advanced",
+    "AILab_QwenVL": "ThinkingLLM",
+    "AILab_QwenVL_Advanced": "ThinkingLLM Advanced",
 }

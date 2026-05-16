@@ -1060,8 +1060,10 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
 
 NODE_CLASS_MAPPINGS = {
     "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": ThinkingLLM_QwenVL_GGUF_PromptEnhancer,
+    "AILab_QwenVL_GGUF_PromptEnhancer": ThinkingLLM_QwenVL_GGUF_PromptEnhancer,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": "ThinkingLLM Prompt Enhancer (GGUF)",
+    "AILab_QwenVL_GGUF_PromptEnhancer": "ThinkingLLM Prompt Enhancer (GGUF)",
 }

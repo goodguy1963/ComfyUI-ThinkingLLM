@@ -595,8 +595,10 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
 
 NODE_CLASS_MAPPINGS = {
     "ThinkingLLM_QwenVL_PromptEnhancer": ThinkingLLM_QwenVL_PromptEnhancer,
+    "AILab_QwenVL_PromptEnhancer": ThinkingLLM_QwenVL_PromptEnhancer,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ThinkingLLM_QwenVL_PromptEnhancer": "ThinkingLLM Prompt Enhancer",
+    "AILab_QwenVL_PromptEnhancer": "ThinkingLLM Prompt Enhancer",
 }

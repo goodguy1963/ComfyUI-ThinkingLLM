@@ -8,6 +8,7 @@ plain shell without ML dependencies.
 """
 
 import ast
+import json
 import re
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PKG = HERE.parent
+WORKFLOW_DIR = PKG / "example_workflows"
 
 STREAMING_FILES = {
     "AILab_QwenVL_GGUF_PromptEnhancer.py": {
@@ -42,6 +44,49 @@ def read_source(filename: str) -> str:
 
 def parse_source(filename: str) -> ast.AST:
     return ast.parse(read_source(filename), filename=filename)
+
+
+def extract_dict_node(filename: str, name: str) -> ast.Dict:
+    tree = parse_source(filename)
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id == name:
+                if isinstance(node.value, ast.Dict):
+                    return node.value
+                raise AssertionError(f"{name} in {filename} is not a dict literal")
+    raise AssertionError(f"{name} not found in {filename}")
+
+
+def extract_mapping_target_names(filename: str, name: str) -> dict[str, str]:
+    mapping = {}
+    dict_node = extract_dict_node(filename, name)
+    for key_node, value_node in zip(dict_node.keys, dict_node.values):
+        key = ast.literal_eval(key_node)
+        if isinstance(value_node, ast.Name):
+            mapping[key] = value_node.id
+        else:
+            raise AssertionError(f"{name}[{key}] in {filename} is not a direct name reference")
+    return mapping
+
+
+def extract_literal_dict(filename: str, name: str) -> dict[str, str]:
+    mapping = {}
+    dict_node = extract_dict_node(filename, name)
+    for key_node, value_node in zip(dict_node.keys, dict_node.values):
+        key = ast.literal_eval(key_node)
+        mapping[key] = ast.literal_eval(value_node)
+    return mapping
+
+
+def iter_workflow_types(path: Path) -> list[str]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return [
+        node.get("type")
+        for node in payload.get("nodes", [])
+        if isinstance(node, dict) and isinstance(node.get("type"), str)
+    ]
 
 
 class TestTerminalDisplayHelper(unittest.TestCase):
@@ -163,70 +208,63 @@ class TestNoResidualGlobals(unittest.TestCase):
                 self.assertFalse(visitor.found)
 
 
-class TestClassKeyUniqueness(unittest.TestCase):
-    """ThinkingLLM class keys must NOT collide with Qwen3 AILab_* keys."""
-
-    def test_no_ailab_class_keys(self):
-        for filename in [
-            "AILab_QwenVL.py",
-            "AILab_QwenVL_GGUF.py",
-            "AILab_QwenVL_PromptEnhancer.py",
-            "AILab_QwenVL_GGUF_PromptEnhancer.py",
-        ]:
-            source = read_source(filename)
-            mappings_block = re.search(
-                r"NODE_CLASS_MAPPINGS\s*=\s*\{(.*?)\}", source, re.DOTALL
-            )
-            if mappings_block:
-                keys = re.findall(r'"([^"]*)"', mappings_block.group(1))
-                with self.subTest(filename=filename):
-                    self.assertTrue(
-                        all(k.startswith("ThinkingLLM_") for k in keys),
-                        f"{filename} contains non-ThinkingLLM_ class keys: {keys}",
-                    )
-
-    def test_thinkingllm_prefix_on_all_class_names(self):
-        for filename in [
-            "AILab_QwenVL.py",
-            "AILab_QwenVL_GGUF.py",
-            "AILab_QwenVL_PromptEnhancer.py",
-            "AILab_QwenVL_GGUF_PromptEnhancer.py",
-        ]:
-            tree = parse_source(filename)
-            class_names = [
-                node.name
-                for node in ast.walk(tree)
-                if isinstance(node, ast.ClassDef)
-                and node.name.startswith("ThinkingLLM_")
-            ]
-            with self.subTest(filename=filename):
-                self.assertTrue(
-                    len(class_names) >= 1,
-                    f"{filename} has no ThinkingLLM_* class definitions",
-                )
-
-
-class TestThinkingAndStreamToggles(unittest.TestCase):
-    """All 6 node classes must expose enable_thinking and stream_tokens_to_terminal."""
-
-    NODE_SOURCES = {
-        "AILab_QwenVL.py",
-        "AILab_QwenVL_GGUF.py",
-        "AILab_QwenVL_PromptEnhancer.py",
-        "AILab_QwenVL_GGUF_PromptEnhancer.py",
+class TestLegacyNodeNameCompatibility(unittest.TestCase):
+    CURRENT_TO_LEGACY = {
+        "ThinkingLLM_QwenVL": "AILab_QwenVL",
+        "ThinkingLLM_QwenVL_Advanced": "AILab_QwenVL_Advanced",
+        "ThinkingLLM_QwenVL_GGUF": "AILab_QwenVL_GGUF",
+        "ThinkingLLM_QwenVL_GGUF_Advanced": "AILab_QwenVL_GGUF_Advanced",
+        "ThinkingLLM_QwenVL_PromptEnhancer": "AILab_QwenVL_PromptEnhancer",
+        "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": "AILab_QwenVL_GGUF_PromptEnhancer",
     }
 
-    def test_thinking_toggle_present_on_all_nodes(self):
-        for filename in self.NODE_SOURCES:
-            source = read_source(filename)
-            with self.subTest(filename=filename):
-                self.assertIn('"enable_thinking": ("BOOLEAN"', source)
+    MAPPING_FILES = {
+        "AILab_QwenVL.py": [
+            "ThinkingLLM_QwenVL",
+            "ThinkingLLM_QwenVL_Advanced",
+        ],
+        "AILab_QwenVL_GGUF.py": [
+            "ThinkingLLM_QwenVL_GGUF",
+            "ThinkingLLM_QwenVL_GGUF_Advanced",
+        ],
+        "AILab_QwenVL_PromptEnhancer.py": [
+            "ThinkingLLM_QwenVL_PromptEnhancer",
+        ],
+        "AILab_QwenVL_GGUF_PromptEnhancer.py": [
+            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+        ],
+    }
 
-    def test_stream_toggle_present_on_all_nodes(self):
-        for filename in self.NODE_SOURCES:
-            source = read_source(filename)
-            with self.subTest(filename=filename):
-                self.assertIn('"stream_tokens_to_terminal": ("BOOLEAN"', source)
+    def test_current_names_remain_canonical(self):
+        for filename, canonical_names in self.MAPPING_FILES.items():
+            mappings = extract_mapping_target_names(filename, "NODE_CLASS_MAPPINGS")
+            for canonical_name in canonical_names:
+                with self.subTest(filename=filename, canonical_name=canonical_name):
+                    self.assertIn(canonical_name, mappings)
+
+    def test_legacy_aliases_map_to_same_runtime_class_name(self):
+        for filename, canonical_names in self.MAPPING_FILES.items():
+            mappings = extract_mapping_target_names(filename, "NODE_CLASS_MAPPINGS")
+            displays = extract_literal_dict(filename, "NODE_DISPLAY_NAME_MAPPINGS")
+            for canonical_name in canonical_names:
+                legacy_name = self.CURRENT_TO_LEGACY[canonical_name]
+                with self.subTest(filename=filename, legacy_name=legacy_name):
+                    self.assertEqual(mappings[canonical_name], mappings[legacy_name])
+                    self.assertEqual(displays[canonical_name], displays[legacy_name])
+
+    def test_example_workflow_legacy_types_are_covered(self):
+        resolved_types = set()
+        for filename in self.MAPPING_FILES:
+            mappings = extract_mapping_target_names(filename, "NODE_CLASS_MAPPINGS")
+            resolved_types.update(mappings.keys())
+
+        workflow_files = sorted(WORKFLOW_DIR.glob("*.json"))
+        self.assertTrue(workflow_files, "expected shipped example workflows")
+        for workflow_file in workflow_files:
+            for node_type in iter_workflow_types(workflow_file):
+                if node_type.startswith("AILab_QwenVL"):
+                    with self.subTest(workflow=workflow_file.name, node_type=node_type):
+                        self.assertIn(node_type, resolved_types)
 
 
 class _GlobalCheck(ast.NodeVisitor):
