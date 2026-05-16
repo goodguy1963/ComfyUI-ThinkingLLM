@@ -33,7 +33,7 @@ from comfy.model_management import throw_exception_if_processing_interrupted
 
 # Import cache functions from main module
 sys.path.append(str(Path(__file__).parent))
-from ThinkingLLM_QwenVL import (
+from AILab_QwenVL import (
     PROMPT_CACHE,
     apply_qwen_soft_thinking_directive,
     build_node_input_signature,

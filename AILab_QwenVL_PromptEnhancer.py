@@ -23,7 +23,7 @@ from AILab_OutputCleaner import OutputCleanConfig, clean_model_output, prompt_ou
 from AILab_StreamDisplay import TerminalStreamDisplay
 from comfy.model_management import throw_exception_if_processing_interrupted
 
-from ThinkingLLM_QwenVL import (
+from AILab_QwenVL import (
     ATTENTION_MODES,
     HF_ALL_MODELS,
     HF_TEXT_MODELS,

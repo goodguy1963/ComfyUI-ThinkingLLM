@@ -8,10 +8,15 @@ plain shell without ML dependencies.
 """
 
 import ast
+import importlib.util
 import json
+import os
 import re
+import sys
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 HERE = Path(__file__).resolve().parent
@@ -44,6 +49,142 @@ def read_source(filename: str) -> str:
 
 def parse_source(filename: str) -> ast.AST:
     return ast.parse(read_source(filename), filename=filename)
+
+
+def build_stub_module(name: str, **attrs):
+    module = types.ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+class _StubQuantization:
+    FP16 = types.SimpleNamespace(value="fp16")
+
+    @classmethod
+    def get_values(cls):
+        return [cls.FP16.value]
+
+
+def build_loader_test_stubs() -> dict[str, types.ModuleType]:
+    pil_image = build_stub_module("PIL.Image", Image=object)
+    pil_package = build_stub_module("PIL", Image=pil_image)
+    comfy_model_management = build_stub_module(
+        "comfy.model_management",
+        throw_exception_if_processing_interrupted=lambda: None,
+    )
+    comfy_package = build_stub_module("comfy", model_management=comfy_model_management)
+    output_clean_config = type("OutputCleanConfig", (), {"__init__": lambda self, *args, **kwargs: None})
+    terminal_stream_display = type("TerminalStreamDisplay", (), {})
+    qwen_base = type("QwenVLBase", (), {"__init__": lambda self, *args, **kwargs: None})
+    return {
+        "numpy": build_stub_module("numpy", ndarray=object),
+        "torch": build_stub_module(
+            "torch",
+            Tensor=object,
+            dtype=object,
+            float16=object,
+            float32=object,
+            device=type("device", (), {}),
+            cuda=types.SimpleNamespace(device_count=lambda: 0, is_available=lambda: False),
+            backends=types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: False)),
+            no_grad=lambda func=None, *args, **kwargs: (lambda inner: inner) if func is None else func,
+            inference_mode=lambda func=None, *args, **kwargs: (lambda inner: inner) if func is None else func,
+        ),
+        "huggingface_hub": build_stub_module("huggingface_hub", snapshot_download=lambda *args, **kwargs: ""),
+        "PIL": pil_package,
+        "PIL.Image": pil_image,
+        "folder_paths": build_stub_module("folder_paths", models_dir=str(PKG)),
+        "AILab_StreamDisplay": build_stub_module("AILab_StreamDisplay", TerminalStreamDisplay=terminal_stream_display),
+        "AILab_LlamaCppInstaller": build_stub_module(
+            "AILab_LlamaCppInstaller",
+            ensure_llama_cpp_backend=lambda *args, **kwargs: object(),
+        ),
+        "AILab_OutputCleaner": build_stub_module(
+            "AILab_OutputCleaner",
+            OutputCleanConfig=output_clean_config,
+            clean_model_output=lambda text, *args, **kwargs: text,
+            prompt_output_guard=lambda text, *args, **kwargs: text,
+        ),
+        "transformers": build_stub_module(
+            "transformers",
+            AutoModelForCausalLM=object,
+            AutoProcessor=object,
+            AutoTokenizer=object,
+            BitsAndBytesConfig=type("BitsAndBytesConfig", (), {}),
+        ),
+        "comfy": comfy_package,
+        "comfy.model_management": comfy_model_management,
+        "AILab_QwenVL": build_stub_module(
+            "AILab_QwenVL",
+            ATTENTION_MODES=["auto"],
+            HF_ALL_MODELS={"stub-model": {}},
+            HF_TEXT_MODELS={},
+            HF_VL_MODELS={},
+            NODE_PROMPT_STATE={},
+            PROMPT_CACHE={},
+            _make_node_state_key=lambda *args, **kwargs: "node-key",
+            _build_workflow_fingerprint=lambda *args, **kwargs: "workflow-fingerprint",
+            apply_qwen_soft_thinking_directive=lambda *args, **kwargs: None,
+            build_node_input_signature=lambda *args, **kwargs: {},
+            download_hf_file_to_path=lambda *args, **kwargs: None,
+            ensure_model=lambda *args, **kwargs: None,
+            ensure_cuda_vram_headroom=lambda *args, **kwargs: None,
+            estimate_qwen_text_tokens=lambda *args, **kwargs: 0,
+            get_cache_key=lambda *args, **kwargs: "cache-key",
+            get_alternative_cache_key=lambda *args, **kwargs: "alt-cache-key",
+            get_image_hash=lambda *args, **kwargs: "image-hash",
+            get_video_hash=lambda *args, **kwargs: "video-hash",
+            save_prompt_cache=lambda *args, **kwargs: None,
+            get_node_saved_prompt=lambda *args, **kwargs: None,
+            get_node_saved_prompt_with_seed=lambda *args, **kwargs: None,
+            resolve_qwen_thinking_mode=lambda *args, **kwargs: False,
+            resolve_qwen_context_window=lambda *args, **kwargs: 0,
+            set_node_saved_prompt=lambda *args, **kwargs: None,
+            load_node_prompt_state=lambda *args, **kwargs: None,
+            QwenVLBase=qwen_base,
+            Quantization=_StubQuantization,
+            TOOLTIPS={},
+        ),
+    }
+
+
+def load_thinkingllm_loader_subset(module_filenames: list[str]):
+    package_name = "thinkingllm_loader_smoke"
+    tracked_names = [package_name, *[Path(filename).stem for filename in module_filenames]]
+    previous_modules = {
+        name: sys.modules[name]
+        for name in tracked_names
+        if name in sys.modules
+    }
+    real_listdir = os.listdir
+    pkg_path = PKG.resolve()
+    nodes_path = (PKG / "nodes").resolve()
+
+    def fake_listdir(path):
+        resolved = Path(path).resolve()
+        if resolved == pkg_path:
+            return ["__init__.py", *module_filenames]
+        if resolved == nodes_path:
+            return []
+        return real_listdir(path)
+
+    try:
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            with mock.patch("os.listdir", side_effect=fake_listdir):
+                spec = importlib.util.spec_from_file_location(package_name, PKG / "__init__.py")
+                if spec is None or spec.loader is None:
+                    raise AssertionError("failed to create loader spec for ThinkingLLM package")
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[package_name] = module
+                spec.loader.exec_module(module)
+                return module
+    finally:
+        for name in tracked_names:
+            if name in previous_modules:
+                sys.modules[name] = previous_modules[name]
+            else:
+                sys.modules.pop(name, None)
 
 
 def extract_dict_node(filename: str, name: str) -> ast.Dict:
@@ -206,6 +347,26 @@ class TestNoResidualGlobals(unittest.TestCase):
             visitor.visit(tree)
             with self.subTest(filename=filename):
                 self.assertFalse(visitor.found)
+
+
+class TestLoaderModuleRegistration(unittest.TestCase):
+    def test_loader_registers_qwenvl_modules_with_stubbed_dependencies(self):
+        package = load_thinkingllm_loader_subset(
+            [
+                "AILab_QwenVL_GGUF.py",
+                "AILab_QwenVL_PromptEnhancer.py",
+                "AILab_QwenVL_GGUF_PromptEnhancer.py",
+            ]
+        )
+
+        for node_name in [
+            "ThinkingLLM_QwenVL_GGUF",
+            "ThinkingLLM_QwenVL_GGUF_Advanced",
+            "ThinkingLLM_QwenVL_PromptEnhancer",
+            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+        ]:
+            with self.subTest(node_name=node_name):
+                self.assertIn(node_name, package.NODE_CLASS_MAPPINGS)
 
 
 class TestLegacyNodeNameCompatibility(unittest.TestCase):

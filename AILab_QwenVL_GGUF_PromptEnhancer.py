@@ -37,7 +37,7 @@ from comfy.model_management import throw_exception_if_processing_interrupted
 import sys
 sys.path.append(str(Path(__file__).parent))
 from AILab_StreamDisplay import TerminalStreamDisplay
-from ThinkingLLM_QwenVL import (
+from AILab_QwenVL import (
     PROMPT_CACHE,
     apply_qwen_soft_thinking_directive,
     build_node_input_signature,
@@ -55,7 +55,7 @@ from ThinkingLLM_QwenVL import (
     _make_node_state_key,
     _build_workflow_fingerprint,
 )
-from ThinkingLLM_QwenVL_GGUF import read_gguf_architecture, register_active_gguf_loader, release_other_gguf_loaders
+from AILab_QwenVL_GGUF import read_gguf_architecture, register_active_gguf_loader, release_other_gguf_loaders
 
 
 def _parse_repo_quant_sizes(repo_key: str) -> dict[str, str] | None:
