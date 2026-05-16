@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import snapshot_download
 from PIL import Image
 from AILab_StreamDisplay import TerminalStreamDisplay
 from AILab_LlamaCppInstaller import ensure_llama_cpp_backend

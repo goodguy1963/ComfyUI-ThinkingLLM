@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 import torch
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import snapshot_download
 from AILab_LlamaCppInstaller import ensure_llama_cpp_backend
 
 import folder_paths
