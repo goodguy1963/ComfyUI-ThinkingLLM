@@ -671,10 +671,16 @@ class QwenVLGGUFBase:
         device: str,
         ctx: int | None,
         n_batch: int | None,
+        n_ubatch: int | None,
         gpu_layers: int | None,
         image_max_tokens: int | None,
         top_k: int | None,
         pool_size: int | None,
+        n_threads: int | None,
+        n_threads_batch: int | None,
+        flash_attn: bool,
+        offload_kqv: bool,
+        ctx_checkpoints: int | None,
         enable_thinking: bool = True,
         unique_id=None,
     ):
@@ -754,8 +760,12 @@ class QwenVLGGUFBase:
 
         n_ctx = int(ctx) if ctx is not None else resolved.context_length
         n_batch_val = int(n_batch) if n_batch is not None else resolved.n_batch
+        n_ubatch_val = int(n_ubatch) if n_ubatch is not None else min(n_batch_val, 512)
         top_k_val = int(top_k) if top_k is not None else resolved.top_k
         pool_size_val = int(pool_size) if pool_size is not None else resolved.pool_size
+        n_threads_val = int(n_threads) if n_threads is not None and int(n_threads) > 0 else None
+        n_threads_batch_val = int(n_threads_batch) if n_threads_batch is not None and int(n_threads_batch) > 0 else None
+        ctx_checkpoints_val = int(ctx_checkpoints) if ctx_checkpoints is not None and int(ctx_checkpoints) >= 0 else 0
 
         if device_kind == "cuda":
             n_gpu_layers = int(gpu_layers) if gpu_layers is not None else resolved.gpu_layers
@@ -772,10 +782,16 @@ class QwenVLGGUFBase:
             n_ctx,
             n_gpu_layers,
             n_batch_val,
+            n_ubatch_val,
             device_kind,
             img_max,
             top_k_val,
             pool_size_val,
+            n_threads_val,
+            n_threads_batch_val,
+            bool(flash_attn),
+            bool(offload_kqv),
+            ctx_checkpoints_val,
             bool(enable_thinking),
         )
         if self.llm is not None and self.current_signature == signature:
@@ -829,10 +845,16 @@ class QwenVLGGUFBase:
             "n_ctx": n_ctx,
             "n_gpu_layers": n_gpu_layers,
             "n_batch": n_batch_val,
+            "n_ubatch": n_ubatch_val,
             "swa_full": True,
             "verbose": False,
             "pool_size": pool_size_val,
             "top_k": top_k_val,
+            "n_threads": n_threads_val,
+            "n_threads_batch": n_threads_batch_val,
+            "flash_attn": bool(flash_attn),
+            "offload_kqv": bool(offload_kqv),
+            "ctx_checkpoints": ctx_checkpoints_val,
         }
 
         # Detect architecture from GGUF metadata instead of relying on model name
@@ -856,12 +878,25 @@ class QwenVLGGUFBase:
         self.current_context_length = n_ctx
         self.current_image_token_budget = img_max
 
-        print(f"[QwenVL] Loading GGUF: {model_path.name} (device={device_kind}, gpu_layers={n_gpu_layers}, ctx={n_ctx})")
+        print(
+            f"[QwenVL] Loading GGUF: {model_path.name} "
+            f"(device={device_kind}, gpu_layers={n_gpu_layers}, ctx={n_ctx}, batch={n_batch_val}, ubatch={n_ubatch_val})"
+        )
         llm_kwargs_filtered = _filter_kwargs_for_callable(getattr(Llama, "__init__", Llama), llm_kwargs)
         if has_mmproj and self.chat_handler is not None and "chat_handler" not in llm_kwargs_filtered:
             print(
                 "[QwenVL] Warning: installed llama_cpp Llama() does not accept chat_handler; images will be ignored. "
                 "Update llama-cpp-python to a multimodal-capable build."
+            )
+        dropped_perf_kwargs = [
+            key
+            for key in ("n_ubatch", "n_threads", "n_threads_batch", "flash_attn", "offload_kqv", "ctx_checkpoints")
+            if key in llm_kwargs and key not in llm_kwargs_filtered
+        ]
+        if dropped_perf_kwargs:
+            print(
+                "[QwenVL] Warning: installed llama_cpp Llama() does not accept performance kwargs: "
+                f"{', '.join(dropped_perf_kwargs)}"
             )
         if device_kind == "cuda" and n_gpu_layers == 0:
             print("[QwenVL] Warning: device=cuda selected but n_gpu_layers=0; model will run on CPU.")
@@ -1119,10 +1154,16 @@ class QwenVLGGUFBase:
         device,
         ctx=None,
         n_batch=None,
+        n_ubatch=None,
         gpu_layers=None,
         image_max_tokens=None,
         top_k=None,
         pool_size=None,
+        n_threads=None,
+        n_threads_batch=None,
+        flash_attn=True,
+        offload_kqv=True,
+        ctx_checkpoints=0,
         keep_last_prompt=False,
         unique_id=None,
         extra_pnginfo=None,
@@ -1142,11 +1183,17 @@ class QwenVLGGUFBase:
             frame_count=frame_count,
             ctx=ctx,
             n_batch=n_batch,
+            n_ubatch=n_ubatch,
             gpu_layers=gpu_layers,
             image_max_tokens=image_max_tokens,
             top_k=top_k,
             pool_size=pool_size,
+            n_threads=n_threads,
+            n_threads_batch=n_threads_batch,
             device=device,
+            flash_attn=bool(flash_attn),
+            offload_kqv=bool(offload_kqv),
+            ctx_checkpoints=ctx_checkpoints,
             enable_thinking=bool(enable_thinking),
             max_tokens=max_tokens,
             temperature=temperature,
@@ -1248,10 +1295,16 @@ class QwenVLGGUFBase:
                         device=device,
                         ctx=ctx,
                         n_batch=attempt_n_batch,
+                        n_ubatch=n_ubatch,
                         gpu_layers=gpu_layers,
                         image_max_tokens=attempt_image_max_tokens,
                         top_k=top_k,
                         pool_size=pool_size,
+                        n_threads=n_threads,
+                        n_threads_batch=n_threads_batch,
+                        flash_attn=flash_attn,
+                        offload_kqv=offload_kqv,
+                        ctx_checkpoints=ctx_checkpoints,
                         enable_thinking=effective_thinking,
                         unique_id=unique_id,
                     )
@@ -1393,10 +1446,16 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             device="auto",
             ctx=None,
             n_batch=None,
+            n_ubatch=None,
             gpu_layers=None,
             image_max_tokens=None,
             top_k=None,
             pool_size=None,
+            n_threads=None,
+            n_threads_batch=None,
+            flash_attn=True,
+            offload_kqv=True,
+            ctx_checkpoints=0,
             keep_last_prompt=keep_last_prompt,
             unique_id=unique_id,
             extra_pnginfo=extra_pnginfo,
@@ -1439,10 +1498,16 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
                 "frame_count": ("INT", {"default": 16, "min": 1, "max": 64}),
                 "ctx": ("INT", {"default": 32768, "min": 1024, "max": 262144, "step": 512}),
                 "n_batch": ("INT", {"default": 512, "min": 64, "max": 32768, "step": 64}),
+                "n_ubatch": ("INT", {"default": 512, "min": 32, "max": 32768, "step": 32, "tooltip": "Physical batch size. Keep at or below n_batch. Lower values can help throughput or memory stability depending on the backend."}),
                 "gpu_layers": ("INT", {"default": -1, "min": -1, "max": 200}),
                 "image_max_tokens": ("INT", {"default": 4096, "min": 256, "max": 1024000, "step": 256}),
                 "top_k": ("INT", {"default": 20, "min": 0, "max": 32768}),
                 "pool_size": ("INT", {"default": 4194304, "min": 1048576, "max": 10485760, "step": 524288}),
+                "n_threads": ("INT", {"default": 0, "min": 0, "max": 256, "tooltip": "CPU generation threads. Set 0 to let llama.cpp choose."}),
+                "n_threads_batch": ("INT", {"default": 0, "min": 0, "max": 256, "tooltip": "CPU prompt/batch threads. Set 0 to let llama.cpp choose."}),
+                "flash_attn": ("BOOLEAN", {"default": True, "tooltip": "Enable flash attention when the installed llama.cpp backend supports it."}),
+                "offload_kqv": ("BOOLEAN", {"default": True, "tooltip": "Keep K/Q/V and KV-cache related work on GPU when supported."}),
+                "ctx_checkpoints": ("INT", {"default": 0, "min": 0, "max": 32, "tooltip": "Checkpoint count for multimodal context handling. JamePeng docs recommend 0 for single-turn ComfyUI-style multimodal runs."}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
                 "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1}),
                 "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep the last generated prompt instead of creating a new one"}),
@@ -1477,10 +1542,16 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
         frame_count,
         ctx,
         n_batch,
+        n_ubatch,
         gpu_layers,
         image_max_tokens,
         top_k,
         pool_size,
+        n_threads,
+        n_threads_batch,
+        flash_attn,
+        offload_kqv,
+        ctx_checkpoints,
         keep_model_loaded,
         seed,
         keep_last_prompt,
@@ -1507,10 +1578,16 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             device=device,
             ctx=ctx,
             n_batch=n_batch,
+            n_ubatch=n_ubatch,
             gpu_layers=gpu_layers,
             image_max_tokens=image_max_tokens,
             top_k=top_k,
             pool_size=pool_size,
+            n_threads=n_threads if int(n_threads) > 0 else None,
+            n_threads_batch=n_threads_batch if int(n_threads_batch) > 0 else None,
+            flash_attn=flash_attn,
+            offload_kqv=offload_kqv,
+            ctx_checkpoints=ctx_checkpoints,
             keep_last_prompt=keep_last_prompt,
             unique_id=unique_id,
             extra_pnginfo=extra_pnginfo,
