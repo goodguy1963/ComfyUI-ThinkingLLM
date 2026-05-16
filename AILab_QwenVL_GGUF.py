@@ -959,33 +959,61 @@ class QwenVLGGUFBase:
                 cleaned = clean_model_output(raw_full, OutputCleanConfig(mode="text"))
                 return cleaned.strip(), raw_full
 
-            result = self.llm.create_chat_completion(
-                messages=messages,
-                max_tokens=int(max_tokens),
-                temperature=float(temperature),
-                top_p=float(top_p),
-                repeat_penalty=float(repetition_penalty),
-                seed=int(seed_value),
-                stop=["<|im_end|>", "<|im_start|>"]
-            )
+            # Thread-based interrupt: always stream, poll interrupt on main thread
+            import threading, queue as qmod
+            abort_event = threading.Event()
+            chunk_queue: qmod.Queue = qmod.Queue()
+            full_text_acc = ""
+            worker_error: Exception | None = None
+
+            def _stream_worker():
+                nonlocal worker_error
+                try:
+                    result = self.llm.create_chat_completion(
+                        messages=messages,
+                        max_tokens=int(max_tokens),
+                        temperature=float(temperature),
+                        top_p=float(top_p),
+                        repeat_penalty=float(repetition_penalty),
+                        seed=int(seed_value),
+                        stop=["<|im_end|>", "<|im_start|>"],
+                        stream=True,
+                    )
+                    for chunk in result:
+                        if abort_event.is_set():
+                            return
+                        chunk_queue.put(chunk)
+                    chunk_queue.put(None)
+                except Exception as exc:
+                    worker_error = exc
+                    chunk_queue.put(None)
+
+            worker = threading.Thread(target=_stream_worker, daemon=True)
+            worker.start()
+            try:
+                while True:
+                    try:
+                        chunk = chunk_queue.get(timeout=0.25)
+                    except qmod.Empty:
+                        throw_exception_if_processing_interrupted()
+                        continue
+                    if chunk is None:
+                        break
+                    token = (
+                        chunk.get("choices", [{}])[0]
+                        .get("delta", {})
+                        .get("content", "")
+                    )
+                    if token:
+                        full_text_acc += token
+            finally:
+                abort_event.set()
+                worker.join(timeout=5.0)
+            if worker_error:
+                raise worker_error
             throw_exception_if_processing_interrupted()
             elapsed = max(time.perf_counter() - start, 1e-6)
-
-            usage = result.get("usage") or {}
-            prompt_tokens = usage.get("prompt_tokens")
-            completion_tokens = usage.get("completion_tokens")
-            if isinstance(completion_tokens, int) and completion_tokens > 0:
-                tok_s = completion_tokens / elapsed
-                if isinstance(prompt_tokens, int) and prompt_tokens >= 0:
-                    print(
-                        f"[QwenVL] Tokens: prompt={prompt_tokens}, completion={completion_tokens}, "
-                        f"time={elapsed:.2f}s, speed={tok_s:.2f} tok/s"
-                    )
-                else:
-                    print(f"[QwenVL] Tokens: completion={completion_tokens}, time={elapsed:.2f}s, speed={tok_s:.2f} tok/s")
-
-            content = (result.get("choices") or [{}])[0].get("message", {}).get("content", "")
-            raw_content = str(content or "").strip()
+            raw_content = full_text_acc.strip()
             cleaned = clean_model_output(raw_content, OutputCleanConfig(mode="text"))
             return cleaned.strip(), raw_content
 

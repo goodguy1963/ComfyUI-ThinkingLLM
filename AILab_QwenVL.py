@@ -1596,34 +1596,40 @@ class QwenVLBase:
                 print("[QwenVL] TextIteratorStreamer not available — falling back to non-streaming")
                 stream_to_terminal = False
 
-        # Generate with memory monitoring
-        try:
-            outputs = self.model.generate(**model_inputs, **kwargs)
-            throw_exception_if_processing_interrupted()
-        except torch.cuda.OutOfMemoryError as e:
-            # Clear memory and retry with reduced parameters
-            print(f"[QwenVL] OOM detected, clearing memory and retrying...")
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-            # Retry with smaller max_tokens
-            reduced_tokens = max(256, max_tokens // 2)
-            kwargs["max_new_tokens"] = reduced_tokens
-            print(f"[QwenVL] Retrying with reduced tokens: {reduced_tokens}")
-            
+        # Generate with interrupt support via background thread
+        import threading, queue as qmod
+        abort_event = threading.Event()
+        output_queue: qmod.Queue = qmod.Queue()
+        worker_error: Exception | None = None
+
+        def _generate_worker():
+            nonlocal worker_error
             try:
-                outputs = self.model.generate(**model_inputs, **kwargs)
-                throw_exception_if_processing_interrupted()
-            except torch.cuda.OutOfMemoryError:
-                print(f"[QwenVL] OOM still occurs with {reduced_tokens} tokens, falling back to CPU")
-                # Fallback to CPU if GPU still OOM
-                device_backup = model_inputs["input_ids"].device
-                for key in model_inputs:
-                    if torch.is_tensor(model_inputs[key]):
-                        model_inputs[key] = model_inputs[key].cpu()
-                outputs = self.model.generate(**model_inputs, **kwargs)
-                throw_exception_if_processing_interrupted()
+                result = self.model.generate(**model_inputs, **kwargs)
+                output_queue.put(("ok", result))
+            except Exception as exc:
+                worker_error = exc
+                output_queue.put(("error", None))
+
+        worker = threading.Thread(target=_generate_worker, daemon=True)
+        worker.start()
+        try:
+            while True:
+                try:
+                    kind, result = output_queue.get(timeout=0.25)
+                except qmod.Empty:
+                    throw_exception_if_processing_interrupted()
+                    continue
+                if kind == "error":
+                    break
+                outputs = result
+                break
+        finally:
+            abort_event.set()
+            worker.join(timeout=5.0)
+        if worker_error:
+            raise worker_error
+        throw_exception_if_processing_interrupted()
         
         if torch.cuda.is_available():
             torch.cuda.synchronize()
