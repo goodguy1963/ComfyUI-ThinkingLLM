@@ -1,4 +1,4 @@
-# ComfyUI-QwenVL GGUF prompt enhancer
+﻿# ComfyUI-QwenVL GGUF prompt enhancer
 #
 # GGUF nodes powered by llama.cpp for Qwen-VL models, including Qwen3-VL and Qwen2.5-VL.
 # Provides vision-capable GGUF inference and prompt execution.
@@ -37,7 +37,7 @@ from comfy.model_management import throw_exception_if_processing_interrupted
 import sys
 sys.path.append(str(Path(__file__).parent))
 from AILab_StreamDisplay import TerminalStreamDisplay
-from AILab_QwenVL import (
+from ThinkingLLM_QwenVL import (
     PROMPT_CACHE,
     apply_qwen_soft_thinking_directive,
     build_node_input_signature,
@@ -55,7 +55,7 @@ from AILab_QwenVL import (
     _make_node_state_key,
     _build_workflow_fingerprint,
 )
-from AILab_QwenVL_GGUF import read_gguf_architecture, register_active_gguf_loader, release_other_gguf_loaders
+from ThinkingLLM_QwenVL_GGUF import read_gguf_architecture, register_active_gguf_loader, release_other_gguf_loaders
 
 
 def _parse_repo_quant_sizes(repo_key: str) -> dict[str, str] | None:
@@ -325,7 +325,7 @@ def _find_existing_local_file(base_dir: Path, filename: str) -> Path | None:
     return None
 
 
-class AILab_QwenVL_GGUF_PromptEnhancer:
+class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("ENHANCED_OUTPUT", "RAW_TRACE")
     FUNCTION = "process"
@@ -450,7 +450,7 @@ class AILab_QwenVL_GGUF_PromptEnhancer:
         except Exception:
             pass
         for scan_dir in scan_dirs:
-            local_models = AILab_QwenVL_GGUF_PromptEnhancer._scan_local_gguf_text_models(scan_dir, existing_filenames)
+            local_models = ThinkingLLM_QwenVL_GGUF_PromptEnhancer._scan_local_gguf_text_models(scan_dir, existing_filenames)
             models.update(local_models)
             existing_filenames.update(Path(e.get("filename", "")).name for e in local_models.values() if e.get("filename"))
 
@@ -906,7 +906,7 @@ class AILab_QwenVL_GGUF_PromptEnhancer:
         extra_pnginfo=None,
         enable_thinking=True,
     ):
-        node_class = "AILab_QwenVL_GGUF_PromptEnhancer"
+        node_class = "ThinkingLLM_QwenVL_GGUF_PromptEnhancer"
         input_signature = build_node_input_signature(
             model_name=model_name,
             prompt_text=prompt_text,
@@ -1059,9 +1059,9 @@ class AILab_QwenVL_GGUF_PromptEnhancer:
 
 
 NODE_CLASS_MAPPINGS = {
-    "AILab_QwenVL_GGUF_PromptEnhancer": AILab_QwenVL_GGUF_PromptEnhancer,
+    "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": ThinkingLLM_QwenVL_GGUF_PromptEnhancer,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "AILab_QwenVL_GGUF_PromptEnhancer": "ThinkingLLM Prompt Enhancer (GGUF)",
+    "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": "ThinkingLLM Prompt Enhancer (GGUF)",
 }

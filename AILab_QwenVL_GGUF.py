@@ -1,4 +1,4 @@
-# ComfyUI-QwenVL (GGUF)
+﻿# ComfyUI-QwenVL (GGUF)
 # GGUF nodes powered by llama.cpp for Qwen-VL models, including Qwen3-VL and Qwen2.5-VL.
 # Provides vision-capable GGUF inference and prompt execution.
 #
@@ -33,7 +33,7 @@ from comfy.model_management import throw_exception_if_processing_interrupted
 
 # Import cache functions from main module
 sys.path.append(str(Path(__file__).parent))
-from AILab_QwenVL import (
+from ThinkingLLM_QwenVL import (
     PROMPT_CACHE,
     apply_qwen_soft_thinking_directive,
     build_node_input_signature,
@@ -1323,7 +1323,7 @@ class QwenVLGGUFBase:
                 self.clear()
 
 
-class AILab_QwenVL_GGUF(QwenVLGGUFBase):
+class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
     @classmethod
     def INPUT_TYPES(cls):
         all_models = GGUF_VL_CATALOG.get("models") or {}
@@ -1400,18 +1400,18 @@ class AILab_QwenVL_GGUF(QwenVLGGUFBase):
             keep_last_prompt=keep_last_prompt,
             unique_id=unique_id,
             extra_pnginfo=extra_pnginfo,
-            node_class="AILab_QwenVL_GGUF",
+            node_class="ThinkingLLM_QwenVL_GGUF",
             stream_to_terminal=stream_tokens_to_terminal,
             enable_thinking=enable_thinking,
         )
         # Read back raw_trace from just-saved per-node state
-        key = _make_node_state_key("AILab_QwenVL_GGUF", unique_id, extra_pnginfo)
+        key = _make_node_state_key("ThinkingLLM_QwenVL_GGUF", unique_id, extra_pnginfo)
         entry = NODE_PROMPT_STATE.get(key, {})
         raw_trace = entry.get("raw_trace", "") if isinstance(entry, dict) else ""
         return (result[0], raw_trace)
 
 
-class AILab_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
+class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
     @classmethod
     def INPUT_TYPES(cls):
         all_models = GGUF_VL_CATALOG.get("models") or {}
@@ -1514,23 +1514,23 @@ class AILab_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             keep_last_prompt=keep_last_prompt,
             unique_id=unique_id,
             extra_pnginfo=extra_pnginfo,
-            node_class="AILab_QwenVL_GGUF_Advanced",
+            node_class="ThinkingLLM_QwenVL_GGUF_Advanced",
             stream_to_terminal=stream_tokens_to_terminal,
             enable_thinking=enable_thinking,
         )
         # Read back raw_trace from just-saved per-node state
-        key = _make_node_state_key("AILab_QwenVL_GGUF_Advanced", unique_id, extra_pnginfo)
+        key = _make_node_state_key("ThinkingLLM_QwenVL_GGUF_Advanced", unique_id, extra_pnginfo)
         entry = NODE_PROMPT_STATE.get(key, {})
         raw_trace = entry.get("raw_trace", "") if isinstance(entry, dict) else ""
         return (result[0], raw_trace)
 
 
 NODE_CLASS_MAPPINGS = {
-    "AILab_QwenVL_GGUF": AILab_QwenVL_GGUF,
-    "AILab_QwenVL_GGUF_Advanced": AILab_QwenVL_GGUF_Advanced,
+    "ThinkingLLM_QwenVL_GGUF": ThinkingLLM_QwenVL_GGUF,
+    "ThinkingLLM_QwenVL_GGUF_Advanced": ThinkingLLM_QwenVL_GGUF_Advanced,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "AILab_QwenVL_GGUF": "ThinkingLLM (GGUF)",
-    "AILab_QwenVL_GGUF_Advanced": "ThinkingLLM Advanced (GGUF)",
+    "ThinkingLLM_QwenVL_GGUF": "ThinkingLLM (GGUF)",
+    "ThinkingLLM_QwenVL_GGUF_Advanced": "ThinkingLLM Advanced (GGUF)",
 }

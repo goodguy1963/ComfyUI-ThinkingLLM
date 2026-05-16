@@ -1,4 +1,4 @@
-# ComfyUI-QwenVL
+﻿# ComfyUI-QwenVL
 # This custom node integrates the Qwen-VL series, including the latest Qwen3-VL models,
 # including Qwen2.5-VL and the latest Qwen3-VL, to enable advanced multimodal AI for text generation,
 # image understanding, and video analysis.
@@ -1740,7 +1740,7 @@ class QwenVLBase:
             if not keep_model_loaded:
                 self.clear()
 
-class AILab_QwenVL(QwenVLBase):
+class ThinkingLLM_QwenVL(QwenVLBase):
     @classmethod
     def INPUT_TYPES(cls):
         models = list(HF_VL_MODELS.keys())
@@ -1779,14 +1779,14 @@ class AILab_QwenVL(QwenVLBase):
     def process(self, model_name, preset_prompt, custom_prompt, attention_mode, max_tokens, keep_model_loaded, seed, keep_last_prompt=False, image=None, video=None, unique_id=None, extra_pnginfo=None, stream_tokens_to_terminal=False, enable_thinking=True):
         # Always use FP16 - dropdown removed but keep working logic
         quantization = Quantization.FP16.value
-        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, 16, max_tokens, 0.6, 0.9, 1, 1.2, seed, keep_model_loaded, attention_mode, False, "auto", keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="AILab_QwenVL", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking)
+        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, 16, max_tokens, 0.6, 0.9, 1, 1.2, seed, keep_model_loaded, attention_mode, False, "auto", keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="ThinkingLLM_QwenVL", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking)
         # Retrieve the raw_trace that was saved alongside the cleaned prompt in run()
-        key = _make_node_state_key("AILab_QwenVL", unique_id, extra_pnginfo)
+        key = _make_node_state_key("ThinkingLLM_QwenVL", unique_id, extra_pnginfo)
         entry = NODE_PROMPT_STATE.get(key, {})
         raw_trace = entry.get("raw_trace", "") if isinstance(entry, dict) else ""
         return (result[0], raw_trace)
 
-class AILab_QwenVL_Advanced(QwenVLBase):
+class ThinkingLLM_QwenVL_Advanced(QwenVLBase):
     @classmethod
     def INPUT_TYPES(cls):
         models = list(HF_VL_MODELS.keys())
@@ -1837,19 +1837,19 @@ class AILab_QwenVL_Advanced(QwenVLBase):
     def process(self, model_name, attention_mode, use_torch_compile, device, preset_prompt, custom_prompt, max_tokens, temperature, top_p, num_beams, repetition_penalty, frame_count, keep_model_loaded, seed, keep_last_prompt, image=None, video=None, unique_id=None, extra_pnginfo=None, stream_tokens_to_terminal=False, enable_thinking=True):
         # Always use FP16 - dropdown removed but keep working logic
         quantization = Quantization.FP16.value
-        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="AILab_QwenVL_Advanced", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking)
+        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="ThinkingLLM_QwenVL_Advanced", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking)
         # Read back raw_trace from just-saved per-node state
-        key = _make_node_state_key("AILab_QwenVL_Advanced", unique_id, extra_pnginfo)
+        key = _make_node_state_key("ThinkingLLM_QwenVL_Advanced", unique_id, extra_pnginfo)
         entry = NODE_PROMPT_STATE.get(key, {})
         raw_trace = entry.get("raw_trace", "") if isinstance(entry, dict) else ""
         return (result[0], raw_trace)
 
 NODE_CLASS_MAPPINGS = {
-    "AILab_QwenVL": AILab_QwenVL,
-    "AILab_QwenVL_Advanced": AILab_QwenVL_Advanced,
+    "ThinkingLLM_QwenVL": ThinkingLLM_QwenVL,
+    "ThinkingLLM_QwenVL_Advanced": ThinkingLLM_QwenVL_Advanced,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "AILab_QwenVL": "ThinkingLLM",
-    "AILab_QwenVL_Advanced": "ThinkingLLM Advanced",
+    "ThinkingLLM_QwenVL": "ThinkingLLM",
+    "ThinkingLLM_QwenVL_Advanced": "ThinkingLLM Advanced",
 }

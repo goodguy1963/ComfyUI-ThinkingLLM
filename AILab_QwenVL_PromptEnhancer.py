@@ -1,4 +1,4 @@
-# This integration script follows GPL-3.0 License.
+﻿# This integration script follows GPL-3.0 License.
 # When using or modifying this code, please respect both the original model licenses
 # and this integration's license terms.
 #
@@ -23,7 +23,7 @@ from AILab_OutputCleaner import OutputCleanConfig, clean_model_output, prompt_ou
 from AILab_StreamDisplay import TerminalStreamDisplay
 from comfy.model_management import throw_exception_if_processing_interrupted
 
-from AILab_QwenVL import (
+from ThinkingLLM_QwenVL import (
     ATTENTION_MODES,
     HF_ALL_MODELS,
     HF_TEXT_MODELS,
@@ -125,7 +125,7 @@ PROMPT_STYLES = _load_prompt_styles()
 PROMPT_STYLES = {CUSTOM_ONLY_STYLE: "", **PROMPT_STYLES}
 
 
-class AILab_QwenVL_PromptEnhancer(QwenVLBase):
+class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
     STYLES = PROMPT_STYLES
 
     RETURN_TYPES = ("STRING", "STRING")
@@ -196,7 +196,7 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
         extra_pnginfo=None,
         enable_thinking=True,
     ):
-        node_class = "AILab_QwenVL_PromptEnhancer"
+        node_class = "ThinkingLLM_QwenVL_PromptEnhancer"
         input_signature = build_node_input_signature(
             model_name=model_name,
             quantization=quantization,
@@ -326,7 +326,7 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
             device=device,
             unique_id=unique_id,
             extra_pnginfo=extra_pnginfo,
-            node_class="AILab_QwenVL_PromptEnhancer",
+            node_class="ThinkingLLM_QwenVL_PromptEnhancer",
             stream_to_terminal=stream_to_terminal,
             enable_thinking=enable_thinking,
         )
@@ -594,9 +594,9 @@ class AILab_QwenVL_PromptEnhancer(QwenVLBase):
         return result, raw_text
 
 NODE_CLASS_MAPPINGS = {
-    "AILab_QwenVL_PromptEnhancer": AILab_QwenVL_PromptEnhancer,
+    "ThinkingLLM_QwenVL_PromptEnhancer": ThinkingLLM_QwenVL_PromptEnhancer,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "AILab_QwenVL_PromptEnhancer": "ThinkingLLM Prompt Enhancer",
+    "ThinkingLLM_QwenVL_PromptEnhancer": "ThinkingLLM Prompt Enhancer",
 }
