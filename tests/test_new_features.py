@@ -278,6 +278,12 @@ class TestBufferedStreamingIntegration(unittest.TestCase):
                     "expected .start_stage() or .push_compact()"
                 )
 
+    def test_gguf_prompt_enhancer_has_no_off_toggle_text_stream_fallback(self):
+        source = read_source("AILab_QwenVL_GGUF_PromptEnhancer.py")
+        self.assertNotIn("_maybe_emit_prompt_compact_progress", source)
+        self.assertNotIn("Prompt enhancer compact terminal progress is active", source)
+        self.assertIn("_maybe_emit_prompt_background_heartbeat", source)
+
 
 class TestPromptEnhancerMetadata(unittest.TestCase):
     def test_hf_prompt_enhancer_metadata_matches_runtime(self):

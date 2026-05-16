@@ -19,7 +19,6 @@ import json
 import os
 import queue
 import re
-import shutil
 import threading
 import time
 from dataclasses import dataclass
@@ -134,63 +133,16 @@ def _maybe_emit_prompt_waiting_heartbeat(stage_label: str, started_at: float, la
     return now
 
 
-def _compact_progress_line_width(limit: int = 60) -> int:
-    terminal_half_width = max(24, shutil.get_terminal_size(fallback=(120, 20)).columns // 2)
-    return max(24, min(int(limit), terminal_half_width))
-
-
-def _normalize_compact_progress_text(text: str) -> str:
-    return re.sub(r"[ \t]+", " ", (text or "").replace("\r", "").replace("\n", " ")).strip()
-
-
-def _split_compact_progress_lines(text: str, line_width: int) -> tuple[list[str], str]:
-    lines: list[str] = []
-    remaining = text.lstrip()
-    while len(remaining) > line_width:
-        split_at = remaining.rfind(" ", 0, line_width + 1)
-        if split_at <= 0:
-            split_at = line_width
-        line = remaining[:split_at].strip()
-        if line:
-            lines.append(line)
-        remaining = remaining[split_at:].lstrip()
-    return lines, remaining
-
-
-def _maybe_emit_prompt_compact_progress(stage_label: str, started_at: float, last_status_at: float, full_text: str, progress_state: dict, *, force: bool = False, final: bool = False) -> float:
+def _maybe_emit_prompt_background_heartbeat(stage_label: str, started_at: float, last_status_at: float, full_text: str = "") -> float:
     now = time.monotonic()
-    if not final and not force and (now - last_status_at) < _STREAM_HEARTBEAT_INTERVAL_SECONDS:
+    if (now - last_status_at) < _STREAM_HEARTBEAT_INTERVAL_SECONDS:
         return last_status_at
-    rendered_text = _normalize_compact_progress_text(clean_model_output(full_text, OutputCleanConfig(mode="prompt")) or full_text)
-    if not rendered_text:
+    elapsed = max(0.0, now - started_at)
+    if not full_text:
         print("[QwenVL GGUF] generating...")
         return now
-
-    line_width = int(progress_state.get("line_width") or _compact_progress_line_width())
-    progress_state["line_width"] = line_width
-    previous_snapshot = progress_state.get("rendered_snapshot", "")
-    pending_text = progress_state.get("pending_text", "")
-    if previous_snapshot and rendered_text.startswith(previous_snapshot):
-        delta = rendered_text[len(previous_snapshot):]
-        pending_text = f"{pending_text}{delta}"
-    else:
-        pending_text = rendered_text
-    progress_state["rendered_snapshot"] = rendered_text
-
-    lines, pending_text = _split_compact_progress_lines(pending_text, line_width)
-    emitted = False
-    for line in lines:
-        print(line)
-        emitted = True
-    if final and pending_text:
-        print(pending_text)
-        pending_text = ""
-        emitted = True
-    progress_state["pending_text"] = pending_text
-
-    if emitted or final:
-        return now
-    return last_status_at
+    print(f"[QwenVL GGUF] {stage_label}: generation in progress... ({len(full_text)} chars buffered, {elapsed:.1f}s)")
+    return now
 
 
 def _install_llama_abort_callback(llm, should_abort):
@@ -733,7 +685,6 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             full_text = ""
             stage_started_at = time.monotonic()
             last_status_at = stage_started_at
-            compact_progress_state = {"rendered_snapshot": "", "pending_text": ""}
             if stream_to_terminal:
                 if stream_display is None:
                     raise RuntimeError("[QwenVL] Stream display was not initialized")
@@ -777,7 +728,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                             if stream_display is not None:
                                 last_status_at = _maybe_emit_prompt_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_text)
                             else:
-                                last_status_at = _maybe_emit_prompt_compact_progress(stage_label, stage_started_at, last_status_at, full_text, compact_progress_state)
+                                last_status_at = _maybe_emit_prompt_background_heartbeat(stage_label, stage_started_at, last_status_at, full_text)
                         else:
                             last_status_at = _maybe_emit_prompt_waiting_heartbeat(stage_label, stage_started_at, last_status_at)
                         continue
@@ -791,20 +742,10 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                             .get("content", "")
                         )
                         if token:
-                            had_text_before = bool(full_text)
                             full_text += token
                             if stream_display is not None:
                                 stream_display.push(token)
                                 last_status_at = _maybe_emit_prompt_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_text)
-                            else:
-                                last_status_at = _maybe_emit_prompt_compact_progress(
-                                    stage_label,
-                                    stage_started_at,
-                                    last_status_at,
-                                    full_text,
-                                    compact_progress_state,
-                                    force=not had_text_before,
-                                )
                         continue
 
                     if kind == "done":
@@ -822,15 +763,6 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                     clear_abort_callback()
                 if stream_display is not None:
                     stream_display.end_stage()
-                elif full_text:
-                    _maybe_emit_prompt_compact_progress(
-                        stage_label,
-                        stage_started_at,
-                        last_status_at,
-                        full_text,
-                        compact_progress_state,
-                        final=True,
-                    )
             if not full_text.strip():
                 raise RuntimeError("[QwenVL] llama_cpp streaming returned empty response")
             return full_text.strip()
@@ -979,8 +911,6 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         )
         if stream_tokens_to_terminal:
             print("[QwenVL GGUF] Prompt enhancer terminal stream shows readable progress only; reasoning text may be hidden or stripped from the final prompt.")
-        else:
-            print("[QwenVL GGUF] Prompt enhancer compact terminal progress is active; enable stream_tokens_to_terminal for full readable chunk output.")
         self._load_model(model_name, device, enable_thinking=effective_thinking, unique_id=unique_id)
         enhanced, raw_trace = self._invoke_llama(
             system_prompt=system_prompt,

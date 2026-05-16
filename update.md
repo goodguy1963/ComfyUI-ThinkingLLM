@@ -1,13 +1,32 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 1.0.5 (2026/05/16) — Streaming Toggle Fix And Release Retention
+
+### 1.0.5 Changes
+
+- Stopped the GGUF prompt enhancer from printing generated prompt text to the terminal when `stream_tokens_to_terminal` is turned off.
+- Kept the rest of the node set unchanged after confirming the stream-toggle wiring is correct for the HF node, GGUF node, HF prompt enhancer, and wrapper nodes.
+- Added regression coverage so the GGUF prompt enhancer cannot reintroduce an off-toggle text-stream fallback.
+
+### Release Retention
+
+- Added tag-driven GitHub release automation so each version tag creates or updates only its own release entry.
+- Older releases remain available side-by-side instead of being replaced by the newest published version.
+
+### 1.0.5 Validation
+
+- Local regression suite passes: `python tests/test_new_features.py`
+
 ## Version 1.0.4 (2026/05/16) — GGUF Workflow Compatibility Fix
 
-### Fixed
+### 1.0.4 Changes
+
 - Restored legacy widget ordering compatibility for `ThinkingLLM_QwenVL_GGUF_Advanced` so older saved workflows no longer shift values into the wrong advanced GGUF fields.
 - Added compatibility shims for deprecated legacy fields (`seed_mode` and `unload_after_run`) so old workflows deserialize cleanly without affecting current runtime behavior.
 - Added regression tests that lock the advanced GGUF widget order and `process()` signature alignment.
 
-### Validation
+### 1.0.4 Validation
+
 - Local regression suite passes: `python tests/test_new_features.py`
 
 ## Version 2.2.5-local-locked (2026/05/14) — Complete Feature Parity
