@@ -1,4 +1,4 @@
-﻿# ComfyUI-QwenVL (GGUF)
+# ComfyUI-QwenVL (GGUF)
 # GGUF nodes powered by llama.cpp for Qwen-VL models, including Qwen3-VL and Qwen2.5-VL.
 # Provides vision-capable GGUF inference and prompt execution.
 #

@@ -1,4 +1,4 @@
-﻿# ComfyUI-QwenVL
+# ComfyUI-QwenVL
 # This custom node integrates the Qwen-VL series, including the latest Qwen3-VL models,
 # including Qwen2.5-VL and the latest Qwen3-VL, to enable advanced multimodal AI for text generation,
 # image understanding, and video analysis.

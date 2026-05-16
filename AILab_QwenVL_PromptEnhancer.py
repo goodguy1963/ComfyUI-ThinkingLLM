@@ -1,4 +1,4 @@
-﻿# This integration script follows GPL-3.0 License.
+# This integration script follows GPL-3.0 License.
 # When using or modifying this code, please respect both the original model licenses
 # and this integration's license terms.
 #

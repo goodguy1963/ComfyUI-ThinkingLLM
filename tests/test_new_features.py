@@ -163,6 +163,72 @@ class TestNoResidualGlobals(unittest.TestCase):
                 self.assertFalse(visitor.found)
 
 
+class TestClassKeyUniqueness(unittest.TestCase):
+    """ThinkingLLM class keys must NOT collide with Qwen3 AILab_* keys."""
+
+    def test_no_ailab_class_keys(self):
+        for filename in [
+            "AILab_QwenVL.py",
+            "AILab_QwenVL_GGUF.py",
+            "AILab_QwenVL_PromptEnhancer.py",
+            "AILab_QwenVL_GGUF_PromptEnhancer.py",
+        ]:
+            source = read_source(filename)
+            mappings_block = re.search(
+                r"NODE_CLASS_MAPPINGS\s*=\s*\{(.*?)\}", source, re.DOTALL
+            )
+            if mappings_block:
+                keys = re.findall(r'"([^"]*)"', mappings_block.group(1))
+                with self.subTest(filename=filename):
+                    self.assertTrue(
+                        all(k.startswith("ThinkingLLM_") for k in keys),
+                        f"{filename} contains non-ThinkingLLM_ class keys: {keys}",
+                    )
+
+    def test_thinkingllm_prefix_on_all_class_names(self):
+        for filename in [
+            "AILab_QwenVL.py",
+            "AILab_QwenVL_GGUF.py",
+            "AILab_QwenVL_PromptEnhancer.py",
+            "AILab_QwenVL_GGUF_PromptEnhancer.py",
+        ]:
+            tree = parse_source(filename)
+            class_names = [
+                node.name
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ClassDef)
+                and node.name.startswith("ThinkingLLM_")
+            ]
+            with self.subTest(filename=filename):
+                self.assertTrue(
+                    len(class_names) >= 1,
+                    f"{filename} has no ThinkingLLM_* class definitions",
+                )
+
+
+class TestThinkingAndStreamToggles(unittest.TestCase):
+    """All 6 node classes must expose enable_thinking and stream_tokens_to_terminal."""
+
+    NODE_SOURCES = {
+        "AILab_QwenVL.py",
+        "AILab_QwenVL_GGUF.py",
+        "AILab_QwenVL_PromptEnhancer.py",
+        "AILab_QwenVL_GGUF_PromptEnhancer.py",
+    }
+
+    def test_thinking_toggle_present_on_all_nodes(self):
+        for filename in self.NODE_SOURCES:
+            source = read_source(filename)
+            with self.subTest(filename=filename):
+                self.assertIn('"enable_thinking": ("BOOLEAN"', source)
+
+    def test_stream_toggle_present_on_all_nodes(self):
+        for filename in self.NODE_SOURCES:
+            source = read_source(filename)
+            with self.subTest(filename=filename):
+                self.assertIn('"stream_tokens_to_terminal": ("BOOLEAN"', source)
+
+
 class _GlobalCheck(ast.NodeVisitor):
     def __init__(self):
         self.found = False
