@@ -28,7 +28,7 @@ import torch
 from huggingface_hub import snapshot_download
 from PIL import Image
 from AILab_StreamDisplay import TerminalStreamDisplay
-from AILab_LlamaCppInstaller import ensure_llama_cpp_backend
+from AILab_LlamaCppInstaller import ensure_llama_cpp_backend, relax_windows_dll_directory_for_long_paths
 from comfy.model_management import throw_exception_if_processing_interrupted
 
 # Import cache functions from main module
@@ -60,7 +60,7 @@ from AILab_OutputCleaner import OutputCleanConfig, clean_model_output
 # DEPRECATED: per-node state via set_node_saved_prompt / get_node_saved_prompt is used instead.
 LAST_SAVED_PROMPT = None  # kept only to avoid ImportError in legacy importers
 
-# Load per-node state at startup so keep_last_prompt works across restarts
+# Load per-node state at startup for per-node prompt and trace access
 load_node_prompt_state()
 
 
@@ -760,7 +760,9 @@ class QwenVLGGUFBase:
 
         n_ctx = int(ctx) if ctx is not None else resolved.context_length
         n_batch_val = int(n_batch) if n_batch is not None else resolved.n_batch
-        n_ubatch_val = int(n_ubatch) if n_ubatch is not None else min(n_batch_val, 512)
+        n_ubatch_val = int(n_ubatch) if n_ubatch is not None else 0
+        if n_ubatch_val <= 0:
+            n_ubatch_val = min(n_batch_val, 512)
         top_k_val = int(top_k) if top_k is not None else resolved.top_k
         pool_size_val = int(pool_size) if pool_size is not None else resolved.pool_size
         n_threads_val = int(n_threads) if n_threads is not None and int(n_threads) > 0 else None
@@ -838,7 +840,8 @@ class QwenVLGGUFBase:
                     "[QwenVL] Warning: installed llama_cpp chat handler does not support image_max_tokens; "
                     "image token budget will be controlled by ctx only."
                 )
-            self.chat_handler = handler_cls(**mmproj_kwargs)
+            with relax_windows_dll_directory_for_long_paths():
+                self.chat_handler = handler_cls(**mmproj_kwargs)
 
         llm_kwargs = {
             "model_path": str(model_path),
@@ -901,7 +904,8 @@ class QwenVLGGUFBase:
         if device_kind == "cuda" and n_gpu_layers == 0:
             print("[QwenVL] Warning: device=cuda selected but n_gpu_layers=0; model will run on CPU.")
 
-        self.llm = Llama(**llm_kwargs_filtered)
+        with relax_windows_dll_directory_for_long_paths():
+            self.llm = Llama(**llm_kwargs_filtered)
         self.current_signature = signature
 
     def _invoke(
@@ -1164,14 +1168,13 @@ class QwenVLGGUFBase:
         flash_attn=True,
         offload_kqv=True,
         ctx_checkpoints=0,
-        keep_last_prompt=False,
         unique_id=None,
         extra_pnginfo=None,
         node_class="QwenVLGGUF",
         stream_to_terminal=False,
         enable_thinking=True,
     ):
-        print(f"[QwenVL GGUF DEBUG] Starting run with seed={seed}, keep_last_prompt={keep_last_prompt}")
+        print(f"[QwenVL GGUF DEBUG] Starting run with seed={seed}")
         image_hash = get_image_hash(image)
         video_hash = get_video_hash(video)
         input_signature = build_node_input_signature(
@@ -1200,19 +1203,6 @@ class QwenVLGGUFBase:
             top_p=top_p,
             repetition_penalty=repetition_penalty,
         )
-
-        # Auto-retrieve saved prompt when seed is fixed
-        saved = get_node_saved_prompt_with_seed(node_class, unique_id, extra_pnginfo, seed=int(seed), max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
-        if keep_last_prompt:
-            print(f"[QwenVL GGUF] Keep last prompt enabled — looking up per-node state")
-            if saved:
-                print(f"[QwenVL GGUF] Using per-node prompt: {saved[:50]}...")
-                return (saved,)
-            else:
-                print(f"[QwenVL GGUF] No per-node prompt found, returning empty")
-                return ("",)
-
-        # Always generate unless keep_last_prompt was requested
         print(f"[QwenVL GGUF] Generating new prompt")
 
         prompt_template = "" if preset_prompt == "🚫 No preset (image-only)" else SYSTEM_PROMPTS.get(preset_prompt, preset_prompt)
@@ -1395,7 +1385,6 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
                 "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 8192}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
                 "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1}),
-                "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep the last generated prompt instead of creating a new one"}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Print every generated token live to the ComfyUI terminal/console"}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. For non-Qwen GGUF models this is advisory and may not be honored by the backend."}),
                             },
@@ -1422,7 +1411,6 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
         max_tokens,
         keep_model_loaded,
         seed,
-        keep_last_prompt,
         image=None,
         video=None,
         unique_id=None,
@@ -1456,7 +1444,6 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             flash_attn=True,
             offload_kqv=True,
             ctx_checkpoints=0,
-            keep_last_prompt=keep_last_prompt,
             unique_id=unique_id,
             extra_pnginfo=extra_pnginfo,
             node_class="ThinkingLLM_QwenVL_GGUF",
@@ -1504,15 +1491,14 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
                 "pool_size": ("INT", {"default": 4194304, "min": 1048576, "max": 10485760, "step": 524288}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False}),
                 "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1}),
-                "legacy_seed_mode": (["fixed", "randomize", "increment", "decrement"], {"default": "fixed", "tooltip": "Legacy workflow compatibility only. This widget is ignored by current ThinkingLLM logic."}),
+                "legacy_seed_mode": ([False, "fixed", "randomize", "increment", "decrement"], {"default": "fixed", "tooltip": "Legacy workflow compatibility only. This widget is ignored by current ThinkingLLM logic."}),
                 "legacy_unload_after_run": ("BOOLEAN", {"default": False, "tooltip": "Legacy workflow compatibility only. Model unloading is controlled by keep_model_loaded."}),
-                "n_ubatch": ("INT", {"default": 512, "min": 32, "max": 32768, "step": 32, "tooltip": "Physical batch size. Keep at or below n_batch. Lower values can help throughput or memory stability depending on the backend."}),
+                "n_ubatch": ("INT", {"default": 512, "min": 0, "max": 32768, "step": 32, "tooltip": "Physical batch size. Keep at or below n_batch. Lower values can help throughput or memory stability depending on the backend. Legacy workflows may serialize 0, which falls back to the current automatic default."}),
                 "n_threads": ("INT", {"default": 0, "min": 0, "max": 256, "tooltip": "CPU generation threads. Set 0 to let llama.cpp choose."}),
                 "n_threads_batch": ("INT", {"default": 0, "min": 0, "max": 256, "tooltip": "CPU prompt/batch threads. Set 0 to let llama.cpp choose."}),
                 "flash_attn": ("BOOLEAN", {"default": True, "tooltip": "Enable flash attention when the installed llama.cpp backend supports it."}),
                 "offload_kqv": ("BOOLEAN", {"default": True, "tooltip": "Keep K/Q/V and KV-cache related work on GPU when supported."}),
                 "ctx_checkpoints": ("INT", {"default": 0, "min": 0, "max": 32, "tooltip": "Checkpoint count for multimodal context handling. JamePeng docs recommend 0 for single-turn ComfyUI-style multimodal runs."}),
-                "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep the last generated prompt instead of creating a new one"}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Print every generated token live to the ComfyUI terminal/console"}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. For non-Qwen GGUF models this is advisory."}),
                             },
@@ -1558,7 +1544,6 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
         flash_attn,
         offload_kqv,
         ctx_checkpoints,
-        keep_last_prompt,
         image=None,
         video=None,
         unique_id=None,
@@ -1594,7 +1579,6 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             flash_attn=flash_attn,
             offload_kqv=offload_kqv,
             ctx_checkpoints=ctx_checkpoints,
-            keep_last_prompt=keep_last_prompt,
             unique_id=unique_id,
             extra_pnginfo=extra_pnginfo,
             node_class="ThinkingLLM_QwenVL_GGUF_Advanced",

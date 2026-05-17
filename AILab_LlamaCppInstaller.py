@@ -106,12 +106,14 @@ def _get_windows_runtime_dll_dirs() -> list[str]:
 
 
 @contextlib.contextmanager
-def _relax_windows_dll_directory_for_long_paths():
+def relax_windows_dll_directory_for_long_paths():
     if platform.system().lower() != "windows" or not hasattr(os, "add_dll_directory"):
         yield
         return
 
     original_add_dll_directory = os.add_dll_directory
+    path_was_present = "PATH" in os.environ
+    original_path = os.environ.get("PATH")
 
     def _safe_add_dll_directory(path):
         path_str = os.fspath(path)
@@ -130,12 +132,19 @@ def _relax_windows_dll_directory_for_long_paths():
             _prepend_to_path_once(runtime_dir)
         yield
     finally:
+        if path_was_present:
+            os.environ["PATH"] = original_path or ""
+        else:
+            os.environ.pop("PATH", None)
         os.add_dll_directory = original_add_dll_directory
+
+
+_relax_windows_dll_directory_for_long_paths = relax_windows_dll_directory_for_long_paths
 
 
 def _import_llama_cpp_backend(require_vision_handlers: bool):
     _clear_llama_cpp_modules()
-    with _relax_windows_dll_directory_for_long_paths():
+    with relax_windows_dll_directory_for_long_paths():
         llama_cpp = importlib.import_module("llama_cpp")
         llama_class = getattr(llama_cpp, "Llama", None)
         if llama_class is None:

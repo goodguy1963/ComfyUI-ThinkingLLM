@@ -8,6 +8,7 @@ plain shell without ML dependencies.
 """
 
 import ast
+import contextlib
 import importlib.util
 import inspect
 import json
@@ -101,6 +102,7 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
         "AILab_LlamaCppInstaller": build_stub_module(
             "AILab_LlamaCppInstaller",
             ensure_llama_cpp_backend=lambda *args, **kwargs: object(),
+            relax_windows_dll_directory_for_long_paths=contextlib.nullcontext,
         ),
         "AILab_OutputCleaner": build_stub_module(
             "AILab_OutputCleaner",
@@ -510,9 +512,26 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
             "flash_attn",
             "offload_kqv",
             "ctx_checkpoints",
-            "keep_last_prompt",
         ]
         self.assertEqual(parameter_names[: len(expected_prefix)], expected_prefix)
+
+    def test_gguf_advanced_accepts_legacy_serialized_values(self):
+        node_cls = self._load_gguf_advanced_class()
+        required = node_cls.INPUT_TYPES()["required"]
+
+        legacy_seed_mode_options, legacy_seed_mode_meta = required["legacy_seed_mode"]
+        n_ubatch_type, n_ubatch_meta = required["n_ubatch"]
+
+        self.assertIn(False, legacy_seed_mode_options)
+        self.assertEqual(legacy_seed_mode_meta["default"], "fixed")
+        self.assertEqual(n_ubatch_type, "INT")
+        self.assertEqual(n_ubatch_meta["min"], 0)
+
+    def test_gguf_runtime_normalizes_legacy_zero_ubatch(self):
+        source = read_source("AILab_QwenVL_GGUF.py")
+        self.assertIn("n_ubatch_val = int(n_ubatch) if n_ubatch is not None else 0", source)
+        self.assertIn("if n_ubatch_val <= 0:", source)
+        self.assertIn("n_ubatch_val = min(n_batch_val, 512)", source)
 
 
 class TestLlamaCppInstaller(unittest.TestCase):
@@ -549,9 +568,117 @@ class TestLlamaCppInstaller(unittest.TestCase):
                     with mock.patch.dict(installer.os.environ, {"PATH": original_path}, clear=False):
                         with installer._relax_windows_dll_directory_for_long_paths():
                             handle = installer.os.add_dll_directory(temp_dir)
+                            self.assertTrue(installer.os.environ["PATH"].startswith(temp_dir))
 
-                        self.assertTrue(installer.os.environ["PATH"].startswith(temp_dir))
+                        self.assertFalse(installer.os.environ["PATH"].startswith(temp_dir + ";"))
                         self.assertTrue(hasattr(handle, "close"))
+
+
+class TestGGUFWindllRuntimeFallback(unittest.TestCase):
+    def test_gguf_runtime_reuses_windows_dll_relaxation_for_handler_and_llama(self):
+        enter_events = []
+
+        @contextlib.contextmanager
+        def tracking_relaxation():
+            enter_events.append("enter")
+            try:
+                yield
+            finally:
+                enter_events.append("exit")
+
+        class DummyChatHandler:
+            def __init__(self, **kwargs):
+                enter_events.append(("chat", sorted(kwargs)))
+
+        class DummyLlama:
+            def __init__(self, **kwargs):
+                enter_events.append(("llama", sorted(kwargs)))
+
+        chat_format_module = build_stub_module(
+            "llama_cpp.llama_chat_format",
+            Qwen3VLChatHandler=DummyChatHandler,
+        )
+        installer_module = build_stub_module(
+            "AILab_LlamaCppInstaller",
+            ensure_llama_cpp_backend=lambda *args, **kwargs: DummyLlama,
+            relax_windows_dll_directory_for_long_paths=tracking_relaxation,
+        )
+        stub_modules = build_loader_test_stubs()
+        stub_modules.update(
+            {
+                "AILab_LlamaCppInstaller": installer_module,
+                "llama_cpp": build_stub_module("llama_cpp", llama_chat_format=chat_format_module),
+                "llama_cpp.llama_chat_format": chat_format_module,
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_path = Path(temp_dir) / "model.gguf"
+            mmproj_path = Path(temp_dir) / "mmproj.gguf"
+            model_path.write_bytes(b"GGUF")
+            mmproj_path.write_bytes(b"mmproj")
+
+            with mock.patch.dict(sys.modules, stub_modules, clear=False):
+                module = load_module_from_file(
+                    "AILab_QwenVL_GGUF.py",
+                    "thinkingllm_gguf_runtime_dll_test",
+                )
+                loader = module.QwenVLGGUFBase()
+                resolved = module.GGUFVLResolved(
+                    display_name="stub",
+                    repo_id=None,
+                    alt_repo_ids=[],
+                    author=None,
+                    repo_dirname="stub",
+                    model_filename=str(model_path),
+                    mmproj_filename=str(mmproj_path),
+                    context_length=4096,
+                    image_max_tokens=1024,
+                    n_batch=64,
+                    gpu_layers=0,
+                    top_k=20,
+                    pool_size=1024,
+                )
+
+                with mock.patch.object(module, "_resolve_model_entry", return_value=resolved):
+                    with mock.patch.object(module, "_pick_device", return_value="cpu"):
+                        with mock.patch.object(module, "read_gguf_architecture", return_value="qwen3"):
+                            loader._load_model(
+                                model_name="stub",
+                                device="cpu",
+                                ctx=None,
+                                n_batch=None,
+                                n_ubatch=None,
+                                gpu_layers=None,
+                                image_max_tokens=None,
+                                top_k=None,
+                                pool_size=None,
+                                n_threads=None,
+                                n_threads_batch=None,
+                                flash_attn=False,
+                                offload_kqv=False,
+                                ctx_checkpoints=None,
+                                enable_thinking=True,
+                                unique_id=None,
+                            )
+
+        self.assertEqual(enter_events[0:3], [
+            "enter",
+            ("chat", ["clip_model_path", "force_reasoning", "image_max_tokens", "verbose"]),
+            "exit",
+        ])
+        self.assertEqual(enter_events[3], "enter")
+        self.assertEqual(enter_events[5], "exit")
+        self.assertEqual(enter_events[4][0], "llama")
+        self.assertTrue(
+            {
+                "chat_handler",
+                "model_path",
+                "n_ctx",
+                "image_max_tokens",
+                "image_min_tokens",
+            }.issubset(set(enter_events[4][1]))
+        )
 
 
 class _GlobalCheck(ast.NodeVisitor):
