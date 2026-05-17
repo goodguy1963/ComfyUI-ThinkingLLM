@@ -535,6 +535,76 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
 
 
 class TestLlamaCppInstaller(unittest.TestCase):
+    def _resolve_linux_install_spec(self, installer, *, py_minor, cuda_version, machine="x86_64"):
+        with mock.patch.dict(installer.os.environ, {}, clear=True):
+            with mock.patch.object(
+                installer.sys,
+                "version_info",
+                types.SimpleNamespace(major=3, minor=py_minor),
+            ):
+                with mock.patch.object(installer.platform, "machine", return_value=machine):
+                    with mock.patch.object(installer, "_detect_cuda_version", return_value=cuda_version):
+                        return installer._resolve_linux_install_spec()
+
+    def test_linux_install_spec_prefers_known_cuda_128_wheels_for_verified_python_tags(self):
+        installer = load_module_from_file(
+            "AILab_LlamaCppInstaller.py",
+            "thinkingllm_llama_installer_linux_spec_test",
+        )
+
+        for py_tag in ("cp310", "cp311", "cp312", "cp313", "cp314"):
+            with self.subTest(py_tag=py_tag):
+                install_spec, install_reason = self._resolve_linux_install_spec(
+                    installer,
+                    py_minor=int(py_tag[-2:]),
+                    cuda_version="12.8",
+                )
+                expected_spec = (
+                    "https://github.com/JamePeng/llama-cpp-python/releases/download/"
+                    "v0.3.35-cu128-Basic-linux-20260406/"
+                    f"llama_cpp_python-0.3.35+cu128.basic-{py_tag}-{py_tag}-linux_x86_64.whl"
+                )
+
+                self.assertEqual(install_spec, expected_spec)
+                self.assertEqual(install_reason, "known Linux wheel")
+                self.assertNotEqual(install_spec, installer.DEFAULT_JAMEPENG_GIT_SPEC)
+
+    def test_linux_install_spec_keeps_existing_known_cuda_124_wheel(self):
+        installer = load_module_from_file(
+            "AILab_LlamaCppInstaller.py",
+            "thinkingllm_llama_installer_linux_spec_124_test",
+        )
+
+        install_spec, install_reason = self._resolve_linux_install_spec(
+            installer,
+            py_minor=12,
+            cuda_version="12.4",
+        )
+
+        self.assertEqual(
+            install_spec,
+            "https://github.com/JamePeng/llama-cpp-python/releases/download/"
+            "v0.3.34-cu124-Basic-linux-20260331/"
+            "llama_cpp_python-0.3.34+cu124.basic-cp312-cp312-linux_x86_64.whl",
+        )
+        self.assertEqual(install_reason, "known Linux wheel")
+        self.assertNotEqual(install_spec, installer.DEFAULT_JAMEPENG_GIT_SPEC)
+
+    def test_linux_install_spec_falls_back_for_unverified_combinations(self):
+        installer = load_module_from_file(
+            "AILab_LlamaCppInstaller.py",
+            "thinkingllm_llama_installer_linux_spec_fallback_test",
+        )
+
+        install_spec, install_reason = self._resolve_linux_install_spec(
+            installer,
+            py_minor=11,
+            cuda_version="12.4",
+        )
+
+        self.assertEqual(install_spec, installer.DEFAULT_JAMEPENG_GIT_SPEC)
+        self.assertEqual(install_reason, "source-build fallback")
+
     def test_windows_runtime_dll_dirs_include_torch_lib(self):
         installer = load_module_from_file(
             "AILab_LlamaCppInstaller.py",

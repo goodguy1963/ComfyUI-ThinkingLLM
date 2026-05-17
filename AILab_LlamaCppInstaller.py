@@ -7,6 +7,36 @@ import sys
 
 DEFAULT_JAMEPENG_GIT_SPEC = "llama-cpp-python @ git+https://github.com/JamePeng/llama-cpp-python.git"
 KNOWN_LINUX_WHEEL_SPECS = {
+    ("cp312", "linux_x86_64", "12.4"): (
+        "https://github.com/JamePeng/llama-cpp-python/releases/download/"
+        "v0.3.34-cu124-Basic-linux-20260331/"
+        "llama_cpp_python-0.3.34+cu124.basic-cp312-cp312-linux_x86_64.whl"
+    ),
+    ("cp310", "linux_x86_64", "12.8"): (
+        "https://github.com/JamePeng/llama-cpp-python/releases/download/"
+        "v0.3.35-cu128-Basic-linux-20260406/"
+        "llama_cpp_python-0.3.35+cu128.basic-cp310-cp310-linux_x86_64.whl"
+    ),
+    ("cp311", "linux_x86_64", "12.8"): (
+        "https://github.com/JamePeng/llama-cpp-python/releases/download/"
+        "v0.3.35-cu128-Basic-linux-20260406/"
+        "llama_cpp_python-0.3.35+cu128.basic-cp311-cp311-linux_x86_64.whl"
+    ),
+    ("cp312", "linux_x86_64", "12.8"): (
+        "https://github.com/JamePeng/llama-cpp-python/releases/download/"
+        "v0.3.35-cu128-Basic-linux-20260406/"
+        "llama_cpp_python-0.3.35+cu128.basic-cp312-cp312-linux_x86_64.whl"
+    ),
+    ("cp313", "linux_x86_64", "12.8"): (
+        "https://github.com/JamePeng/llama-cpp-python/releases/download/"
+        "v0.3.35-cu128-Basic-linux-20260406/"
+        "llama_cpp_python-0.3.35+cu128.basic-cp313-cp313-linux_x86_64.whl"
+    ),
+    ("cp314", "linux_x86_64", "12.8"): (
+        "https://github.com/JamePeng/llama-cpp-python/releases/download/"
+        "v0.3.35-cu128-Basic-linux-20260406/"
+        "llama_cpp_python-0.3.35+cu128.basic-cp314-cp314-linux_x86_64.whl"
+    ),
     ("cp312", "linux_x86_64", "13.0"): (
         "https://github.com/JamePeng/llama-cpp-python/releases/download/"
         "v0.3.34-cu130-Basic-linux-20260331/"
