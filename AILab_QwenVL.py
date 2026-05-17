@@ -1072,6 +1072,15 @@ def _model_snapshot_has_weights(target: Path) -> bool:
     return any(target.glob("*.safetensors")) or any(target.glob("*.bin"))
 
 
+def _cleanup_unneeded_snapshot_weights(target: Path) -> None:
+    unwanted_markers = ("fp32", "bf16", "fp8", "q2_k", "q3_k", "q4_k", "q5_k", "q6_k", "q8_0", "f32")
+    for weight_file in target.rglob("*.safetensors"):
+        name = weight_file.name.lower()
+        if any(marker in name for marker in unwanted_markers):
+            print(f"[QwenVL] Removing unneeded quantized weight: {weight_file.name}")
+            weight_file.unlink(missing_ok=True)
+
+
 def _model_snapshot_has_required_files(target: Path, require_processor: bool = False) -> bool:
     if not target.exists() or not target.is_dir():
         return False
@@ -1109,6 +1118,7 @@ def _download_model_snapshot(repo_id: str, target: Path, *, force_clean_target: 
         if tqdm_cls is not None:
             download_kwargs["tqdm_class"] = tqdm_cls
         snapshot_download(**download_kwargs)
+        _cleanup_unneeded_snapshot_weights(target)
     except Exception as exc:
         reporter.fail(str(exc))
         raise
@@ -1285,7 +1295,7 @@ def quantization_config(model_name, quantization):
         return cfg, None
     if quantization == Quantization.Q8:
         return BitsAndBytesConfig(load_in_8bit=True), None
-    return None, torch.float16 if torch.cuda.is_available() else torch.float32
+    return None, torch.float16
 
 class QwenVLBase:
     def __init__(self):
@@ -1388,27 +1398,25 @@ class QwenVLBase:
         # Quantization is back - enforce_memory was the problem
         
         load_kwargs = {
-            "device_map": "cpu",  # Force CPU loading to test
-            "dtype": torch.float16,  # Use dtype instead of deprecated torch_dtype
+            "device_map": "auto" if device != "cpu" and torch.cuda.is_available() else "cpu",
+            "dtype": dtype or torch.float16,
             "attn_implementation": actual_attn_impl,
             "use_safetensors": True,
             "low_cpu_mem_usage": True,
         }
+
+        if device != "cpu" and torch.cuda.is_available():
+            gpu_mem = torch.cuda.get_device_properties(0).total_memory
+            gpu_mem_gb = max(1, int(gpu_mem / (1024**3)))
+            load_kwargs["max_memory"] = {
+                0: f"{gpu_mem_gb}GB",
+                "cpu": "16GB",
+            }
             
         if quant_config:
             load_kwargs["quantization_config"] = quant_config
             
         self.model = AutoModelForVision2Seq.from_pretrained(model_path, **load_kwargs).eval()
-        
-        # Move to GPU manually if loading was on CPU
-        if device != "cpu" and torch.cuda.is_available():
-            print(f"[QwenVL] 🔄 Moving model from CPU to {device}...")
-            try:
-                self.model = self.model.to(device)
-                print(f"[QwenVL] ✅ Model moved to {device}")
-            except Exception as e:
-                print(f"[QwenVL] ❌ Failed to move to GPU: {e}")
-                print("[QwenVL] Keeping model on CPU (will be very slow)")
         
         # Apply SageAttention patching if needed
         if attn_impl == "sage":
@@ -1568,15 +1576,16 @@ class QwenVLBase:
         # Optional: staged readable terminal streaming
         if stream_to_terminal:
             try:
+                from AILab_StreamDisplay import TerminalStreamDisplay
                 from transformers import TextIteratorStreamer
                 from threading import Thread
                 stage_label = "STREAMING"
-                sd = TerminalStreamDisplay("QwenVL HF", suppress_planning=True, compact=False)
+                stream_display = TerminalStreamDisplay("QwenVL HF", suppress_planning=True, compact=True)
                 streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
                 kwargs["streamer"] = streamer
                 thread = Thread(target=self.model.generate, kwargs={**model_inputs, **kwargs})
                 print(f"[QwenVL HF] STREAMING {stage_label}")
-                sd.start_stage(stage_label)
+                stream_display.start_stage(stage_label)
                 stage_started_at = time.monotonic()
                 last_status_at = stage_started_at
                 thread.start()
@@ -1585,13 +1594,15 @@ class QwenVLBase:
                     if token_str:
                         throw_exception_if_processing_interrupted()
                         full_streamed += token_str
-                        sd.push(token_str)
+                        stream_display.push(token_str)
                         last_status_at = _maybe_emit_hf_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_streamed)
                 thread.join()
-                sd.end_stage()
+                stream_display.end_stage()
                 if not full_streamed.strip():
                     raise RuntimeError("[QwenVL] HF streaming returned empty response")
-                return full_streamed.strip(), full_streamed.strip()
+                cleaned_text = full_streamed.strip()
+                raw_text = full_streamed.strip()
+                return cleaned_text, raw_text
             except ImportError:
                 print("[QwenVL] TextIteratorStreamer not available — falling back to non-streaming")
                 stream_to_terminal = False
@@ -1662,6 +1673,11 @@ class QwenVLBase:
         
         # Auto-retrieve saved prompt when seed is fixed
         saved = get_node_saved_prompt_with_seed(node_class, unique_id, extra_pnginfo, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
+        if saved and not stream_to_terminal:
+            print(f"[QwenVL] Fixed seed {seed} matched — using per-node prompt: {saved[:50]}...")
+            return (saved,)
+        if saved and stream_to_terminal:
+            print("[QwenVL] Streaming requested — bypassing fixed-seed prompt reuse for a fresh streamed run")
         if keep_last_prompt:
             print(f"[QwenVL] Keep last prompt enabled — looking up per-node state")
             if saved:
