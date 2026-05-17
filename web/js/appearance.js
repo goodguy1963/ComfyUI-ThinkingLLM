@@ -20,6 +20,32 @@ const NODE_COLORS = {
     "AILab_QwenVL_PromptLibrary": "Tools",
 };
 
+const THINKINGLLM_NODE_NAMES = new Set([
+    "AILab_QwenVL",
+    "AILab_QwenVL_Advanced",
+    "AILab_QwenVL_PromptEnhancer",
+    "AILab_QwenVL_GGUF",
+    "AILab_QwenVL_GGUF_Advanced",
+    "AILab_QwenVL_GGUF_PromptEnhancer",
+    "ThinkingLLM_QwenVL",
+    "ThinkingLLM_QwenVL_Advanced",
+    "ThinkingLLM_QwenVL_PromptEnhancer",
+    "ThinkingLLM_QwenVL_GGUF",
+    "ThinkingLLM_QwenVL_GGUF_Advanced",
+    "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+]);
+
+const GGUF_ADVANCED_INTERNAL_WIDGETS = new Set([
+    "legacy_seed_mode",
+    "legacy_unload_after_run",
+    "n_ubatch",
+    "n_threads",
+    "n_threads_batch",
+    "flash_attn",
+    "offload_kqv",
+    "ctx_checkpoints",
+]);
+
 function setNodeColors(node, theme) {
     if (!theme) { return; }
     if (theme.nodeColor) {
@@ -34,6 +60,49 @@ function setNodeColors(node, theme) {
     }
 }
 
+function findWidget(node, name) {
+    return node.widgets?.find((widget) => widget.name === name);
+}
+
+function hideStableWidget(node, widget) {
+    if (!widget || widget._thinkingllmHidden) { return; }
+    widget._thinkingllmHidden = true;
+    widget._thinkingllmOriginalType = widget.type;
+    widget._thinkingllmOriginalComputeSize = widget.computeSize;
+    widget.hidden = true;
+    widget.type = `thinkingllm_hidden_${widget.type || "widget"}`;
+    widget.computeSize = () => [0, -4];
+}
+
+function hideGgufAdvancedInternals(node) {
+    if (!["AILab_QwenVL_GGUF_Advanced", "ThinkingLLM_QwenVL_GGUF_Advanced"].includes(node.comfyClass)) {
+        return;
+    }
+    for (const widgetName of GGUF_ADVANCED_INTERNAL_WIDGETS) {
+        hideStableWidget(node, findWidget(node, widgetName));
+    }
+    if (node.widgets?.length) {
+        requestAnimationFrame(() => node.setSize([node.size[0], node.computeSize()[1]]));
+    }
+}
+
+function clearHfTokenAfterExecution(node) {
+    if (!THINKINGLLM_NODE_NAMES.has(node.comfyClass) || node._thinkingllmClearsToken) {
+        return;
+    }
+    node._thinkingllmClearsToken = true;
+    const originalOnExecuted = node.onExecuted;
+    node.onExecuted = function (...args) {
+        const result = originalOnExecuted?.apply(this, args);
+        const tokenWidget = findWidget(this, "hf_token");
+        if (tokenWidget?.value) {
+            tokenWidget.value = "";
+            app.graph?.setDirtyCanvas?.(true, true);
+        }
+        return result;
+    };
+}
+
 const ext = {
     name: "QwenVL.appearance",
 
@@ -44,6 +113,8 @@ const ext = {
             const theme = COLOR_THEMES[colorKey];
             setNodeColors(node, theme);
         }
+        hideGgufAdvancedInternals(node);
+        clearHfTokenAfterExecution(node);
     }
 };
 

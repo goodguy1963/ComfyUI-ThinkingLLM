@@ -94,14 +94,25 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             no_grad=lambda func=None, *args, **kwargs: (lambda inner: inner) if func is None else func,
             inference_mode=lambda func=None, *args, **kwargs: (lambda inner: inner) if func is None else func,
         ),
-        "huggingface_hub": build_stub_module("huggingface_hub", snapshot_download=lambda *args, **kwargs: ""),
+        "huggingface_hub": build_stub_module(
+            "huggingface_hub",
+            hf_hub_download=lambda *args, **kwargs: "",
+            snapshot_download=lambda *args, **kwargs: "",
+        ),
         "PIL": pil_package,
         "PIL.Image": pil_image,
-        "folder_paths": build_stub_module("folder_paths", models_dir=str(PKG)),
+        "folder_paths": build_stub_module(
+            "folder_paths",
+            models_dir=str(PKG),
+            folder_names_and_paths={},
+            get_folder_paths=lambda *args, **kwargs: [],
+        ),
         "AILab_StreamDisplay": build_stub_module("AILab_StreamDisplay", TerminalStreamDisplay=terminal_stream_display),
         "AILab_LlamaCppInstaller": build_stub_module(
             "AILab_LlamaCppInstaller",
             ensure_llama_cpp_backend=lambda *args, **kwargs: object(),
+            format_llama_cpp_backend_info=lambda info=None: "stub backend",
+            get_last_llama_cpp_backend_info=lambda: {"gpu_offload": None, "vision_handlers": ["Qwen3VLChatHandler"]},
             relax_windows_dll_directory_for_long_paths=contextlib.nullcontext,
         ),
         "AILab_OutputCleaner": build_stub_module(
@@ -113,6 +124,8 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
         "transformers": build_stub_module(
             "transformers",
             AutoModelForCausalLM=object,
+            AutoModelForVision2Seq=object,
+            AutoModelForImageTextToText=object,
             AutoProcessor=object,
             AutoTokenizer=object,
             BitsAndBytesConfig=type("BitsAndBytesConfig", (), {}),
@@ -324,6 +337,147 @@ class TestPromptEnhancerMetadata(unittest.TestCase):
         for filename, marker in expectations.items():
             with self.subTest(filename=filename):
                 self.assertIn(marker, read_source(filename))
+
+
+class TestHuggingFaceTokenSupport(unittest.TestCase):
+    TOKEN_NODE_FILES = [
+        "AILab_QwenVL.py",
+        "AILab_QwenVL_GGUF.py",
+        "AILab_QwenVL_PromptEnhancer.py",
+        "AILab_QwenVL_GGUF_PromptEnhancer.py",
+    ]
+
+    def _load_qwenvl_with_stubs(self):
+        stub_modules = build_loader_test_stubs()
+        stub_modules.pop("AILab_QwenVL", None)
+        with mock.patch.dict(sys.modules, stub_modules, clear=False):
+            return load_module_from_file("AILab_QwenVL.py", "thinkingllm_qwenvl_hf_token_test")
+
+    def test_hf_token_widget_exists_in_download_nodes(self):
+        for filename in self.TOKEN_NODE_FILES:
+            source = read_source(filename)
+            with self.subTest(filename=filename):
+                self.assertIn('"hf_token": ("STRING"', source)
+                self.assertRegex(source, r'"hf_token": \("STRING", \{[^\n]+"tooltip"')
+
+    def test_hf_token_is_not_part_of_prompt_or_cache_signatures(self):
+        for filename in self.TOKEN_NODE_FILES:
+            tree = parse_source(filename)
+            with self.subTest(filename=filename):
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    if isinstance(node.func, ast.Name):
+                        function_name = node.func.id
+                    elif isinstance(node.func, ast.Attribute):
+                        function_name = node.func.attr
+                    else:
+                        continue
+                    if function_name not in {"build_node_input_signature", "get_cache_key"}:
+                        continue
+                    keyword_names = {keyword.arg for keyword in node.keywords if keyword.arg}
+                    self.assertNotIn("hf_token", keyword_names)
+                    for arg in node.args:
+                        self.assertNotEqual(getattr(arg, "id", None), "hf_token")
+
+    def test_hf_download_prefers_exact_file_and_passes_token(self):
+        module = self._load_qwenvl_with_stubs()
+        captured_kwargs = []
+
+        def fake_hf_hub_download(**kwargs):
+            captured_kwargs.append(dict(kwargs))
+            local_dir = Path(kwargs["local_dir"])
+            local_dir.mkdir(parents=True, exist_ok=True)
+            downloaded_path = local_dir / kwargs["filename"]
+            downloaded_path.parent.mkdir(parents=True, exist_ok=True)
+            downloaded_path.write_bytes(b"GGUF")
+            return str(downloaded_path)
+
+        def fail_snapshot_download(**kwargs):
+            raise AssertionError("snapshot_download should not run when exact file download succeeds")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_path = Path(temp_dir) / "model.gguf"
+            with mock.patch.object(module, "hf_hub_download", side_effect=fake_hf_hub_download):
+                with mock.patch.object(module, "snapshot_download", side_effect=fail_snapshot_download):
+                    module.download_hf_file_to_path(
+                        ["private/repo"],
+                        "model.gguf",
+                        target_path,
+                        hf_token="hf_secret_test_token",
+                    )
+
+        self.assertEqual(captured_kwargs[0]["token"], "hf_secret_test_token")
+        self.assertEqual(captured_kwargs[0]["filename"], "model.gguf")
+
+    def test_hf_download_errors_redact_token_and_add_access_hint(self):
+        module = self._load_qwenvl_with_stubs()
+        secret = "hf_secret_test_token"
+        message = module._hf_download_error_message(
+            RuntimeError(f"401 Unauthorized: {secret}"),
+            repo_id="private/repo",
+            hf_token=secret,
+        )
+
+        self.assertNotIn(secret, message)
+        self.assertIn("<redacted HF token>", message)
+        self.assertIn("access was rejected", message)
+
+    def test_hf_token_can_fall_back_to_environment(self):
+        module = self._load_qwenvl_with_stubs()
+        with mock.patch.dict(module.os.environ, {"HF_TOKEN": "hf_env_secret"}, clear=True):
+            self.assertEqual(module._clean_hf_token(""), "hf_env_secret")
+            message = module._hf_download_error_message(
+                RuntimeError("401 Unauthorized: hf_env_secret"),
+                repo_id="private/repo",
+                hf_token="",
+            )
+
+        self.assertNotIn("hf_env_secret", message)
+        self.assertIn("<redacted HF token>", message)
+        self.assertIn("access was rejected", message)
+
+    def test_hf_file_download_failure_raises_redacted_message(self):
+        module = self._load_qwenvl_with_stubs()
+        secret = "hf_secret_test_token"
+
+        def fake_snapshot_download(**kwargs):
+            raise RuntimeError(f"403 Forbidden: {secret}")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target_path = Path(temp_dir) / "missing.gguf"
+            with mock.patch.object(module, "hf_hub_download", side_effect=fake_snapshot_download):
+                with mock.patch.object(module, "snapshot_download", side_effect=fake_snapshot_download):
+                    with self.assertRaises(FileNotFoundError) as raised:
+                        module.download_hf_file_to_path(
+                            ["private/repo"],
+                            "missing.gguf",
+                            target_path,
+                            hf_token=secret,
+                        )
+
+        message = str(raised.exception)
+        self.assertNotIn(secret, message)
+        self.assertIn("<redacted HF token>", message)
+        self.assertIn("access was rejected", message)
+
+    def test_frontend_hides_only_internal_gguf_advanced_tail(self):
+        source = read_source("web/js/appearance.js")
+        for widget_name in [
+            "legacy_seed_mode",
+            "legacy_unload_after_run",
+            "n_ubatch",
+            "n_threads",
+            "n_threads_batch",
+            "flash_attn",
+            "offload_kqv",
+            "ctx_checkpoints",
+        ]:
+            with self.subTest(widget_name=widget_name):
+                self.assertIn(f'"{widget_name}"', source)
+        self.assertNotIn('GGUF_ADVANCED_INTERNAL_WIDGETS = new Set([\n    "hf_token"', source)
+        self.assertIn("hideStableWidget", source)
+        self.assertIn("clearHfTokenAfterExecution", source)
 
 
 class TestInterruptSupport(unittest.TestCase):
@@ -543,7 +697,14 @@ class TestLlamaCppInstaller(unittest.TestCase):
                 types.SimpleNamespace(major=3, minor=py_minor),
             ):
                 with mock.patch.object(installer.platform, "machine", return_value=machine):
-                    with mock.patch.object(installer, "_detect_cuda_version", return_value=cuda_version):
+                    cuda_versions = {
+                        "toolkit": "",
+                        "torch": cuda_version,
+                        "nvidia_smi": "",
+                        "selected": cuda_version,
+                        "selected_source": "torch" if cuda_version else "unknown",
+                    }
+                    with mock.patch.object(installer, "_detect_cuda_versions", return_value=cuda_versions):
                         return installer._resolve_linux_install_spec()
 
     def test_linux_install_spec_prefers_known_cuda_128_wheels_for_verified_python_tags(self):
@@ -566,7 +727,7 @@ class TestLlamaCppInstaller(unittest.TestCase):
                 )
 
                 self.assertEqual(install_spec, expected_spec)
-                self.assertEqual(install_reason, "known Linux wheel")
+                self.assertEqual(install_reason, "known Linux wheel (torch CUDA 12.8)")
                 self.assertNotEqual(install_spec, installer.DEFAULT_JAMEPENG_GIT_SPEC)
 
     def test_linux_install_spec_keeps_existing_known_cuda_124_wheel(self):
@@ -587,10 +748,10 @@ class TestLlamaCppInstaller(unittest.TestCase):
             "v0.3.34-cu124-Basic-linux-20260331/"
             "llama_cpp_python-0.3.34+cu124.basic-cp312-cp312-linux_x86_64.whl",
         )
-        self.assertEqual(install_reason, "known Linux wheel")
+        self.assertEqual(install_reason, "known Linux wheel (torch CUDA 12.4)")
         self.assertNotEqual(install_spec, installer.DEFAULT_JAMEPENG_GIT_SPEC)
 
-    def test_linux_install_spec_falls_back_for_unverified_combinations(self):
+    def test_linux_install_spec_blocks_unverified_combinations_by_default(self):
         installer = load_module_from_file(
             "AILab_LlamaCppInstaller.py",
             "thinkingllm_llama_installer_linux_spec_fallback_test",
@@ -602,8 +763,41 @@ class TestLlamaCppInstaller(unittest.TestCase):
             cuda_version="12.4",
         )
 
+        self.assertEqual(install_spec, "")
+        self.assertEqual(install_reason, "no verified Linux wheel match")
+
+    def test_linux_install_spec_source_build_requires_explicit_opt_in(self):
+        installer = load_module_from_file(
+            "AILab_LlamaCppInstaller.py",
+            "thinkingllm_llama_installer_linux_spec_source_opt_in_test",
+        )
+
+        with mock.patch.dict(installer.os.environ, {"THINKINGLLM_LLAMA_CPP_ALLOW_SOURCE_BUILD": "1"}, clear=True):
+            with mock.patch.object(installer.sys, "version_info", types.SimpleNamespace(major=3, minor=11)):
+                with mock.patch.object(installer.platform, "machine", return_value="x86_64"):
+                    with mock.patch.object(
+                        installer,
+                        "_detect_cuda_versions",
+                        return_value={"toolkit": "", "torch": "12.4", "nvidia_smi": "", "selected": "12.4", "selected_source": "torch"},
+                    ):
+                        install_spec, install_reason = installer._resolve_linux_install_spec()
+
         self.assertEqual(install_spec, installer.DEFAULT_JAMEPENG_GIT_SPEC)
-        self.assertEqual(install_reason, "source-build fallback")
+        self.assertEqual(install_reason, "source-build fallback (explicit opt-in)")
+
+    def test_source_build_env_enables_cuda_when_toolkit_exists(self):
+        installer = load_module_from_file(
+            "AILab_LlamaCppInstaller.py",
+            "thinkingllm_llama_installer_source_env_test",
+        )
+
+        with mock.patch.dict(installer.os.environ, {"CMAKE_ARGS": "-DOTHER=1"}, clear=True):
+            with mock.patch.object(installer, "_detect_cuda_home_version", return_value="12.8"):
+                install_env = installer._build_source_install_env()
+
+        self.assertIn("-DOTHER=1", install_env["CMAKE_ARGS"])
+        self.assertIn("-DGGML_CUDA=on", install_env["CMAKE_ARGS"])
+        self.assertEqual(install_env["FORCE_CMAKE"], "1")
 
     def test_windows_runtime_dll_dirs_include_torch_lib(self):
         installer = load_module_from_file(
@@ -671,6 +865,8 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         installer_module = build_stub_module(
             "AILab_LlamaCppInstaller",
             ensure_llama_cpp_backend=lambda *args, **kwargs: DummyLlama,
+            format_llama_cpp_backend_info=lambda info=None: "stub backend",
+            get_last_llama_cpp_backend_info=lambda: {"gpu_offload": True, "vision_handlers": ["Qwen3VLChatHandler"]},
             relax_windows_dll_directory_for_long_paths=tracking_relaxation,
         )
         stub_modules = build_loader_test_stubs()
@@ -749,6 +945,40 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
                 "image_min_tokens",
             }.issubset(set(enter_events[4][1]))
         )
+
+    def test_gguf_thinking_toggle_updates_without_reload_signature(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gguf_thinking_toggle_test",
+            )
+        source = read_source("AILab_QwenVL_GGUF.py")
+        self.assertNotIn("ctx_checkpoints_val,\n            bool(enable_thinking),", source)
+
+        captured_kwargs = []
+
+        class DummyLlama:
+            def __init__(self):
+                self.chat_template_kwargs = {"enable_thinking": True}
+
+            def create_chat_completion(self, **kwargs):
+                captured_kwargs.append(kwargs)
+                return {"choices": [{"message": {"content": "ok"}}]}
+
+        loader = module.QwenVLGGUFBase()
+        loader.llm = DummyLlama()
+        loader.uses_qwen_template_thinking = True
+        loader._create_chat_completion(
+            enable_thinking=False,
+            messages=[],
+            max_tokens=1,
+            temperature=0.0,
+            top_p=1.0,
+            stream=False,
+        )
+
+        self.assertEqual(loader.llm.chat_template_kwargs["enable_thinking"], False)
+        self.assertEqual(captured_kwargs[0]["chat_template_kwargs"], {"enable_thinking": False})
 
 
 class _GlobalCheck(ast.NodeVisitor):

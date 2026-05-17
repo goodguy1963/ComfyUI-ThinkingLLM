@@ -57,6 +57,26 @@ from AILab_QwenVL import (
 from AILab_QwenVL_GGUF import read_gguf_architecture, register_active_gguf_loader, release_other_gguf_loaders
 
 
+GGUF_PROMPT_TOOLTIPS = {
+    "model_name": "GGUF text model from config or auto-detected local files. First run downloads the selected GGUF when it is not already on disk.",
+    "prompt_text": "Prompt text to enhance. Leave blank to emit the selected preset instruction as the base prompt.",
+    "preset_system_prompt": "Preset enhancement style. Use Custom Only when you want custom_system_prompt to fully control the instruction.",
+    "custom_system_prompt": "Optional extra instruction. Required when using Custom Only; otherwise it is prepended to the selected style.",
+    "max_tokens": "Maximum new tokens for the enhanced prompt. Increase only when the model truncates useful detail.",
+    "temperature": "Sampling randomness. Lower is more stable; higher is more varied.",
+    "top_p": "Nucleus sampling cutoff. Lower values restrict token choice; 0.9 is a balanced default.",
+    "repetition_penalty": "Values above 1.0 reduce repeated phrases in the enhanced prompt.",
+    "english_output": "Ask the model to return the final enhanced prompt in English.",
+    "device": "auto prefers GPU when available. If generation is unexpectedly slow, run tools/check_llama_backend.py to verify llama.cpp GPU offload.",
+    "keep_model_loaded": "Keep the GGUF model in memory after generation so repeated prompt enhancement skips model loading.",
+    "seed": "Sampling seed. Reusing it with identical inputs can reuse the saved prompt result.",
+    "keep_last_prompt": "Return the saved per-node prompt instead of generating a new one when available.",
+    "stream_tokens_to_terminal": "Show readable generation progress and thinking-status summaries in the ComfyUI terminal. Streaming bypasses fixed-seed reuse for a fresh run.",
+    "enable_thinking": "Enable model reasoning/thinking when supported. The node still returns the cleaned final prompt, so reasoning may be hidden or empty.",
+    "hf_token": "Optional Hugging Face access token for private or gated GGUF downloads. It is passed only to the download call, never logged or cached, and the in-memory copy is dropped after the download attempt. Clear this field before saving or sharing workflows.",
+}
+
+
 def _parse_repo_quant_sizes(repo_key: str) -> dict[str, str] | None:
     """Parse bracket info from repo key like 'Gemma-4-E4B-it-GGUF [Q4:5.4GB|Q8:8GB|VRAM:~7GB]'.
     Returns a dict mapping quant names to size strings, or None if no bracket info."""
@@ -418,21 +438,22 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         default_model = model_keys[0]
         return {
             "required": {
-                "model_name": (model_keys, {"default": default_model, "tooltip": "GGUF model from config or auto-detected from models/LLM/GGUF directory. [local] prefix = found on disk."}),
-                "prompt_text": ("STRING", {"default": "", "multiline": True, "tooltip": "Prompt text to enhance. Leave blank to just emit the preset instruction."}),
-                "preset_system_prompt": (styles, {"default": default_style}),
-                "custom_system_prompt": ("STRING", {"default": "", "multiline": True}),
-                "max_tokens": ("INT", {"default": 1024, "min": 32, "max": 16384}),
-                "temperature": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.0}),
-                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0}),
-                "repetition_penalty": ("FLOAT", {"default": 1.1, "min": 0.5, "max": 2.0}),
-                "english_output": ("BOOLEAN", {"default": False, "tooltip": "Force final output in English using translation prompt."}),
-                "device": (["auto", "cuda", "cpu", "mps"], {"default": "auto", "tooltip": "Select device; auto prefers GPU when available."}),
-                "keep_model_loaded": ("BOOLEAN", {"default": False, "tooltip": "Keep model loaded in memory for faster repeated inference (uses more VRAM)."}),
-                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1}),
-                "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep the last generated prompt instead of creating a new one"}),
-                "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Show readable generation progress and thinking-status summaries in the ComfyUI terminal. When enabled, fixed-seed and prompt-cache reuse are bypassed so a fresh streamed run can occur."}),
-                "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. Prompt enhancers still return a cleaned final prompt, so terminal reasoning may be hidden or empty."}),
+                "model_name": (model_keys, {"default": default_model, "tooltip": GGUF_PROMPT_TOOLTIPS["model_name"]}),
+                "prompt_text": ("STRING", {"default": "", "multiline": True, "tooltip": GGUF_PROMPT_TOOLTIPS["prompt_text"]}),
+                "preset_system_prompt": (styles, {"default": default_style, "tooltip": GGUF_PROMPT_TOOLTIPS["preset_system_prompt"]}),
+                "custom_system_prompt": ("STRING", {"default": "", "multiline": True, "tooltip": GGUF_PROMPT_TOOLTIPS["custom_system_prompt"]}),
+                "max_tokens": ("INT", {"default": 1024, "min": 32, "max": 16384, "tooltip": GGUF_PROMPT_TOOLTIPS["max_tokens"]}),
+                "temperature": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.0, "tooltip": GGUF_PROMPT_TOOLTIPS["temperature"]}),
+                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "tooltip": GGUF_PROMPT_TOOLTIPS["top_p"]}),
+                "repetition_penalty": ("FLOAT", {"default": 1.1, "min": 0.5, "max": 2.0, "tooltip": GGUF_PROMPT_TOOLTIPS["repetition_penalty"]}),
+                "english_output": ("BOOLEAN", {"default": False, "tooltip": GGUF_PROMPT_TOOLTIPS["english_output"]}),
+                "device": (["auto", "cuda", "cpu", "mps"], {"default": "auto", "tooltip": GGUF_PROMPT_TOOLTIPS["device"]}),
+                "keep_model_loaded": ("BOOLEAN", {"default": False, "tooltip": GGUF_PROMPT_TOOLTIPS["keep_model_loaded"]}),
+                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": GGUF_PROMPT_TOOLTIPS["seed"]}),
+                "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": GGUF_PROMPT_TOOLTIPS["keep_last_prompt"]}),
+                "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": GGUF_PROMPT_TOOLTIPS["stream_tokens_to_terminal"]}),
+                "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": GGUF_PROMPT_TOOLTIPS["enable_thinking"]}),
+                "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_PROMPT_TOOLTIPS["hf_token"]}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -523,7 +544,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
 
         return base_dir / model_name
 
-    def _maybe_download_model(self, model_name, resolved, unique_id=None):
+    def _maybe_download_model(self, model_name, resolved, unique_id=None, hf_token: str | None = None):
         if resolved.exists():
             return
         # Local models should already exist on disk — don't attempt download
@@ -556,18 +577,21 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                     resolved,
                     node_id=unique_id,
                     progress_label=f"QwenVL PromptEnhancer GGUF Download: {Path(filename).name}",
+                    hf_token=hf_token,
                 )
             except Exception as exc:
                 print(f"[QwenVL] Download failed from {repo_id}: {exc}")
             if resolved.exists():
                 break
+        hf_token = None
         if not resolved.exists():
             raise FileNotFoundError(f"[QwenVL] GGUF model not found after download: {resolved} (tried: {', '.join(attempted)})")
 
-    def _load_model(self, model_name, device, enable_thinking=True, unique_id=None):
+    def _load_model(self, model_name, device, enable_thinking=True, unique_id=None, hf_token: str | None = None):
         Llama = self._load_backend()
         resolved = self._resolve_model_path(model_name)
-        self._maybe_download_model(model_name, resolved, unique_id=unique_id)
+        self._maybe_download_model(model_name, resolved, unique_id=unique_id, hf_token=hf_token)
+        hf_token = None
         model_cfg = self.gguf_models["models"].get(model_name, {})
         context_length = model_cfg.get("context_length", 32768)
         signature = (resolved, context_length, device, bool(enable_thinking))
@@ -837,6 +861,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         unique_id=None,
         extra_pnginfo=None,
         enable_thinking=True,
+        hf_token="",
     ):
         node_class = "ThinkingLLM_QwenVL_GGUF_PromptEnhancer"
         input_signature = build_node_input_signature(
@@ -911,7 +936,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         )
         if stream_tokens_to_terminal:
             print("[QwenVL GGUF] Prompt enhancer terminal stream shows readable progress only; reasoning text may be hidden or stripped from the final prompt.")
-        self._load_model(model_name, device, enable_thinking=effective_thinking, unique_id=unique_id)
+        self._load_model(model_name, device, enable_thinking=effective_thinking, unique_id=unique_id, hf_token=hf_token)
+        hf_token = ""
         enhanced, raw_trace = self._invoke_llama(
             system_prompt=system_prompt,
             user_prompt=merged_prompt,

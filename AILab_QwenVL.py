@@ -14,7 +14,9 @@
 # Source: https://github.com/1038lab/ComfyUI-QwenVL
 
 import gc
+import inspect
 import json
+import os
 import platform
 import shutil
 import time
@@ -26,7 +28,11 @@ import numpy as np
 import psutil
 import torch
 from PIL import Image
-from huggingface_hub import snapshot_download
+try:
+    from huggingface_hub import hf_hub_download, snapshot_download
+except ImportError:
+    from huggingface_hub import snapshot_download
+    hf_hub_download = None
 try:
     from tqdm.auto import tqdm
 except ImportError:
@@ -77,7 +83,8 @@ QWEN_FINAL_ANSWER_RESERVE_TOKENS = 256
 QWEN_CONTEXT_OVERHEAD_TOKENS = 128
 _QWEN_SOFT_SWITCHES = {"/think", "/no_think", "/nothink"}
 _STREAM_HEARTBEAT_INTERVAL_SECONDS = 3.0
-_DOWNLOAD_STATUS_INTERVAL_SECONDS = 0.75
+_DOWNLOAD_STATUS_INTERVAL_SECONDS = 0.25
+_HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
 
 
 def _format_download_size(num_bytes) -> str:
@@ -658,7 +665,80 @@ TOOLTIPS = {
     "num_beams": "Beam-search width. Values >1 disable temperature/top_p and trade speed for more stable answers.",
     "repetition_penalty": "Values >1 (e.g., 1.1–1.3) penalize repeated phrases; 1.0 leaves logits untouched.",
     "frame_count": "Number of frames extracted from video inputs before prompting Qwen-VL. More frames provide context but cost time.",
+    "hf_token": "Optional Hugging Face access token for private or gated model downloads. It is passed only to the download call, never logged or cached, and the in-memory copy is dropped after the download attempt. Clear this field before saving or sharing workflows.",
 }
+
+
+def _iter_hf_token_candidates(hf_token: str | None):
+    token = str(hf_token or "").strip()
+    if token:
+        yield token
+    for env_name in _HF_TOKEN_ENV_VARS:
+        token = str(os.environ.get(env_name) or "").strip()
+        if token:
+            yield token
+
+
+def _clean_hf_token(hf_token: str | None) -> str | None:
+    return next(_iter_hf_token_candidates(hf_token), None)
+
+
+def _redact_hf_token(text: str, hf_token: str | None) -> str:
+    redacted = str(text)
+    for token in _iter_hf_token_candidates(hf_token):
+        redacted = redacted.replace(token, "<redacted HF token>")
+    return redacted
+
+
+def _hf_download_error_message(exc: Exception, *, repo_id: str, hf_token: str | None) -> str:
+    message = _redact_hf_token(str(exc), hf_token)
+    lower = message.lower()
+    access_markers = (
+        "401",
+        "403",
+        "unauthorized",
+        "forbidden",
+        "gated",
+        "private",
+        "repository not found",
+        "requires authentication",
+    )
+    if any(marker in lower for marker in access_markers):
+        if _clean_hf_token(hf_token):
+            message += (
+                f"\n[QwenVL] Hugging Face access hint for {repo_id}: a token was supplied but access was rejected. "
+                "Confirm the token has read permission and that you accepted the model license/gate on Hugging Face."
+            )
+        else:
+            message += (
+                f"\n[QwenVL] Hugging Face access hint for {repo_id}: this model may be private or gated. "
+                "Paste a read token into the hf_token field for this run, or set up access on Hugging Face first."
+            )
+    return message
+
+
+def _call_hf_hub_download(*, repo_id: str, filename: str, local_dir: Path, token: str | None, reporter: _DownloadProgressReporter) -> Path:
+    if hf_hub_download is None:
+        raise RuntimeError("huggingface_hub.hf_hub_download is unavailable in this environment")
+    download_kwargs = {
+        "repo_id": repo_id,
+        "repo_type": "model",
+        "filename": filename,
+        "local_dir": str(local_dir),
+    }
+    if token:
+        download_kwargs["token"] = token
+    tqdm_cls = reporter.make_tqdm_class()
+    if tqdm_cls is not None:
+        try:
+            if "tqdm_class" in inspect.signature(hf_hub_download).parameters:
+                download_kwargs["tqdm_class"] = tqdm_cls
+        except (TypeError, ValueError):
+            pass
+    try:
+        return Path(hf_hub_download(**download_kwargs))
+    finally:
+        download_kwargs.pop("token", None)
 
 class Quantization(str, Enum):
     Q4 = "4-bit (VRAM-friendly)"
@@ -1100,8 +1180,10 @@ def _model_snapshot_has_required_files(target: Path, require_processor: bool = F
     return True
 
 
-def _download_model_snapshot(repo_id: str, target: Path, *, force_clean_target: bool = False, node_id=None, progress_label: str | None = None) -> None:
+def _download_model_snapshot(repo_id: str, target: Path, *, force_clean_target: bool = False, node_id=None, progress_label: str | None = None, hf_token: str | None = None) -> None:
     reporter = _DownloadProgressReporter(node_id=node_id, label=progress_label or "QwenVL HF Download", repo_id=repo_id)
+    token_for_download = _clean_hf_token(hf_token)
+    download_kwargs = {}
     if force_clean_target and target.exists() and target.is_dir():
         print(f"[QwenVL] Removing incomplete model snapshot before retry: {target}")
         reporter.stage("Cleaning incomplete snapshot", detail=target.name)
@@ -1114,18 +1196,23 @@ def _download_model_snapshot(repo_id: str, target: Path, *, force_clean_target: 
             "ignore_patterns": ["*.md", ".git*"],
             "force_download": force_clean_target,
         }
+        if token_for_download:
+            download_kwargs["token"] = token_for_download
         tqdm_cls = reporter.make_tqdm_class()
         if tqdm_cls is not None:
             download_kwargs["tqdm_class"] = tqdm_cls
         snapshot_download(**download_kwargs)
         _cleanup_unneeded_snapshot_weights(target)
     except Exception as exc:
-        reporter.fail(str(exc))
-        raise
+        reporter.fail(_hf_download_error_message(exc, repo_id=repo_id, hf_token=token_for_download))
+        raise RuntimeError(_hf_download_error_message(exc, repo_id=repo_id, hf_token=token_for_download)) from exc
+    finally:
+        download_kwargs.pop("token", None)
+        token_for_download = None
     reporter.finish(detail=target.name)
 
 
-def download_hf_file_to_path(repo_ids: list[str], filename: str, target_path: Path, *, node_id=None, progress_label: str = "QwenVL GGUF Download") -> None:
+def download_hf_file_to_path(repo_ids: list[str], filename: str, target_path: Path, *, node_id=None, progress_label: str = "QwenVL GGUF Download", hf_token: str | None = None) -> None:
     if target_path.exists():
         print(f"[QwenVL] Using cached file: {target_path}")
         return
@@ -1133,40 +1220,77 @@ def download_hf_file_to_path(repo_ids: list[str], filename: str, target_path: Pa
     target_path.parent.mkdir(parents=True, exist_ok=True)
     last_exc: Exception | None = None
     wanted_name = Path(filename).name
+    token_for_download = _clean_hf_token(hf_token)
+    exact_candidates = []
+    for candidate in (filename, wanted_name):
+        if candidate and candidate not in exact_candidates:
+            exact_candidates.append(candidate)
 
-    for repo_id in repo_ids:
-        reporter = _DownloadProgressReporter(node_id=node_id, label=progress_label, repo_id=repo_id)
-        reporter.stage("Preparing download", detail=wanted_name)
-        try:
-            download_kwargs = {
-                "repo_id": repo_id,
-                "repo_type": "model",
-                "local_dir": str(target_path.parent),
-                "allow_patterns": [filename, wanted_name, f"**/{wanted_name}"],
-            }
-            tqdm_cls = reporter.make_tqdm_class()
-            if tqdm_cls is not None:
-                download_kwargs["tqdm_class"] = tqdm_cls
-            snapshot_download(**download_kwargs)
-            found = list(target_path.parent.rglob(wanted_name))
-            if found:
-                downloaded_path = found[0]
-                if downloaded_path.exists() and downloaded_path.resolve() != target_path.resolve():
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    downloaded_path.replace(target_path)
-            if target_path.exists():
-                reporter.finish(detail=wanted_name)
-                return
-            reporter.fail(f"{wanted_name} was not found after snapshot download")
-        except Exception as exc:
-            last_exc = exc
-            reporter.fail(str(exc))
-            print(f"[QwenVL] snapshot_download failed from {repo_id}: {exc}")
+    try:
+        for repo_id in repo_ids:
+            reporter = _DownloadProgressReporter(node_id=node_id, label=progress_label, repo_id=repo_id)
+            auth_label = "Preparing authenticated download" if token_for_download else "Preparing download"
+            reporter.stage(auth_label, detail=wanted_name)
+            if hf_hub_download is not None:
+                for candidate in exact_candidates:
+                    try:
+                        reporter.stage("Resolving exact file", detail=candidate, force=False)
+                        downloaded_path = _call_hf_hub_download(
+                            repo_id=repo_id,
+                            filename=candidate,
+                            local_dir=target_path.parent,
+                            token=token_for_download,
+                            reporter=reporter,
+                        )
+                        if downloaded_path.exists() and downloaded_path.resolve() != target_path.resolve():
+                            target_path.parent.mkdir(parents=True, exist_ok=True)
+                            downloaded_path.replace(target_path)
+                        if target_path.exists():
+                            reporter.finish(detail=wanted_name)
+                            return
+                    except Exception as exc:
+                        hint = _hf_download_error_message(exc, repo_id=repo_id, hf_token=token_for_download)
+                        last_exc = RuntimeError(hint)
+                        print(f"[QwenVL] exact file download failed from {repo_id}/{candidate}: {hint}")
+            reporter.stage("Falling back to snapshot scan", detail=wanted_name, force=False)
+            download_kwargs = {}
+            try:
+                download_kwargs = {
+                    "repo_id": repo_id,
+                    "repo_type": "model",
+                    "local_dir": str(target_path.parent),
+                    "allow_patterns": [filename, wanted_name, f"**/{wanted_name}"],
+                }
+                if token_for_download:
+                    download_kwargs["token"] = token_for_download
+                tqdm_cls = reporter.make_tqdm_class()
+                if tqdm_cls is not None:
+                    download_kwargs["tqdm_class"] = tqdm_cls
+                snapshot_download(**download_kwargs)
+                found = list(target_path.parent.rglob(wanted_name))
+                if found:
+                    downloaded_path = found[0]
+                    if downloaded_path.exists() and downloaded_path.resolve() != target_path.resolve():
+                        target_path.parent.mkdir(parents=True, exist_ok=True)
+                        downloaded_path.replace(target_path)
+                if target_path.exists():
+                    reporter.finish(detail=wanted_name)
+                    return
+                reporter.fail(f"{wanted_name} was not found after snapshot download")
+            except Exception as exc:
+                hint = _hf_download_error_message(exc, repo_id=repo_id, hf_token=token_for_download)
+                last_exc = RuntimeError(hint)
+                reporter.fail(hint)
+                print(f"[QwenVL] snapshot_download failed from {repo_id}: {hint}")
+            finally:
+                download_kwargs.pop("token", None)
+    finally:
+        token_for_download = None
 
     raise FileNotFoundError(f"[QwenVL] Download failed for {wanted_name}: {last_exc}")
 
 
-def ensure_model(model_name, require_processor=False, node_id=None, progress_label: str | None = None):
+def ensure_model(model_name, require_processor=False, node_id=None, progress_label: str | None = None, hf_token: str | None = None):
     info = HF_ALL_MODELS.get(model_name)
     if not info:
         raise ValueError(f"Model '{model_name}' not in config")
@@ -1207,6 +1331,7 @@ def ensure_model(model_name, require_processor=False, node_id=None, progress_lab
         target,
         node_id=node_id,
         progress_label=progress_label or f"QwenVL HF Download: {model_name}",
+        hf_token=hf_token,
     )
 
     if not _model_snapshot_has_required_files(target, require_processor=require_processor):
@@ -1217,6 +1342,7 @@ def ensure_model(model_name, require_processor=False, node_id=None, progress_lab
             force_clean_target=True,
             node_id=node_id,
             progress_label=progress_label or f"QwenVL HF Download: {model_name}",
+            hf_token=hf_token,
         )
 
     if not _model_snapshot_has_required_files(target, require_processor=require_processor):
@@ -1328,6 +1454,7 @@ class QwenVLBase:
         device_choice,
         keep_model_loaded,
         unique_id=None,
+        hf_token: str | None = None,
     ):
         quant = Quantization.from_value(quant_value)  # Skip enforce_memory for now
         
@@ -1369,6 +1496,7 @@ class QwenVLBase:
             require_processor=True,
             node_id=unique_id,
             progress_label=f"QwenVL HF Download: {model_name}",
+            hf_token=hf_token,
         )
         quant_config, dtype = quantization_config(model_name, quant)
         
@@ -1649,7 +1777,7 @@ class QwenVLBase:
         cleaned_text = raw_text  # generate() returns raw; caller cleans if needed
         return cleaned_text, raw_text
 
-    def run(self, model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt=False, unique_id=None, extra_pnginfo=None, node_class="QwenVL", stream_to_terminal=False, enable_thinking=True):
+    def run(self, model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt=False, unique_id=None, extra_pnginfo=None, node_class="QwenVL", stream_to_terminal=False, enable_thinking=True, hf_token: str | None = None):
         torch.manual_seed(seed)
         image_hash = get_image_hash(image)
         video_hash = get_video_hash(video)
@@ -1716,7 +1844,9 @@ class QwenVLBase:
             device,
             keep_model_loaded,
             unique_id=unique_id,
+            hf_token=hf_token,
         )
+        hf_token = None
         try:
             text, raw_text = self.generate(
                 prompt,
@@ -1776,6 +1906,7 @@ class ThinkingLLM_QwenVL(QwenVLBase):
                 "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep the last generated prompt instead of creating a new one"}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Print every generated token live to the ComfyUI terminal/console"}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. For non-Qwen models (Gemma, LLaMA) this is advisory."}),
+                "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": TOOLTIPS["hf_token"]}),
             },
             "optional": {
                 "image": ("IMAGE",),
@@ -1792,10 +1923,11 @@ class ThinkingLLM_QwenVL(QwenVLBase):
     FUNCTION = "process"
     CATEGORY = "ThinkingLLM"
 
-    def process(self, model_name, preset_prompt, custom_prompt, attention_mode, max_tokens, keep_model_loaded, seed, keep_last_prompt=False, image=None, video=None, unique_id=None, extra_pnginfo=None, stream_tokens_to_terminal=False, enable_thinking=True):
+    def process(self, model_name, preset_prompt, custom_prompt, attention_mode, max_tokens, keep_model_loaded, seed, keep_last_prompt=False, image=None, video=None, unique_id=None, extra_pnginfo=None, stream_tokens_to_terminal=False, enable_thinking=True, hf_token=""):
         # Always use FP16 - dropdown removed but keep working logic
         quantization = Quantization.FP16.value
-        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, 16, max_tokens, 0.6, 0.9, 1, 1.2, seed, keep_model_loaded, attention_mode, False, "auto", keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="ThinkingLLM_QwenVL", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking)
+        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, 16, max_tokens, 0.6, 0.9, 1, 1.2, seed, keep_model_loaded, attention_mode, False, "auto", keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="ThinkingLLM_QwenVL", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking, hf_token=hf_token)
+        hf_token = ""
         # Retrieve the raw_trace that was saved alongside the cleaned prompt in run()
         key = _make_node_state_key("ThinkingLLM_QwenVL", unique_id, extra_pnginfo)
         entry = NODE_PROMPT_STATE.get(key, {})
@@ -1834,6 +1966,7 @@ class ThinkingLLM_QwenVL_Advanced(QwenVLBase):
                 "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep last generated prompt instead of creating a new one"}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Print every generated token live to the ComfyUI terminal/console"}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. For non-Qwen models (Gemma, LLaMA) this is advisory."}),
+                "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": TOOLTIPS["hf_token"]}),
             },
             "optional": {
                 "image": ("IMAGE",),
@@ -1850,10 +1983,11 @@ class ThinkingLLM_QwenVL_Advanced(QwenVLBase):
     FUNCTION = "process"
     CATEGORY = "ThinkingLLM"
 
-    def process(self, model_name, attention_mode, use_torch_compile, device, preset_prompt, custom_prompt, max_tokens, temperature, top_p, num_beams, repetition_penalty, frame_count, keep_model_loaded, seed, keep_last_prompt, image=None, video=None, unique_id=None, extra_pnginfo=None, stream_tokens_to_terminal=False, enable_thinking=True):
+    def process(self, model_name, attention_mode, use_torch_compile, device, preset_prompt, custom_prompt, max_tokens, temperature, top_p, num_beams, repetition_penalty, frame_count, keep_model_loaded, seed, keep_last_prompt, image=None, video=None, unique_id=None, extra_pnginfo=None, stream_tokens_to_terminal=False, enable_thinking=True, hf_token=""):
         # Always use FP16 - dropdown removed but keep working logic
         quantization = Quantization.FP16.value
-        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="ThinkingLLM_QwenVL_Advanced", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking)
+        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="ThinkingLLM_QwenVL_Advanced", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking, hf_token=hf_token)
+        hf_token = ""
         # Read back raw_trace from just-saved per-node state
         key = _make_node_state_key("ThinkingLLM_QwenVL_Advanced", unique_id, extra_pnginfo)
         entry = NODE_PROMPT_STATE.get(key, {})

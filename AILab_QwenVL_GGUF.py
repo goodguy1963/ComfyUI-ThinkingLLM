@@ -28,7 +28,12 @@ import torch
 from huggingface_hub import snapshot_download
 from PIL import Image
 from AILab_StreamDisplay import TerminalStreamDisplay
-from AILab_LlamaCppInstaller import ensure_llama_cpp_backend, relax_windows_dll_directory_for_long_paths
+from AILab_LlamaCppInstaller import (
+    ensure_llama_cpp_backend,
+    format_llama_cpp_backend_info,
+    get_last_llama_cpp_backend_info,
+    relax_windows_dll_directory_for_long_paths,
+)
 from comfy.model_management import throw_exception_if_processing_interrupted
 
 # Import cache functions from main module
@@ -434,6 +439,29 @@ def _load_gguf_vl_catalog():
 
 GGUF_VL_CATALOG = _load_gguf_vl_catalog()
 
+GGUF_TOOLTIPS = {
+    "model_name": "GGUF vision model from gguf_models.json or auto-detected local files. First run downloads the selected GGUF and mmproj files when they are not already on disk.",
+    "device": "auto prefers CUDA when PyTorch sees an NVIDIA GPU. If RAW_TRACE says GPU offload is no or unknown, verify your llama-cpp-python CUDA wheel before blaming the model.",
+    "max_tokens": "Maximum new tokens to generate. Larger values give more room for reasoning but increase runtime and memory use.",
+    "keep_model_loaded": "Keep the GGUF model in RAM/VRAM after the run so repeated prompts skip model loading. Disable if you need memory back for other nodes.",
+    "seed": "Sampling seed. The node also uses fixed-seed prompt persistence, so identical inputs can reuse the saved result.",
+    "frame_count": "Number of video frames to sample. More frames improve video context but raise image-token, batch, and context pressure.",
+    "ctx": "llama.cpp context window. Too large can reduce speed and increase KV-cache memory even on strong GPUs.",
+    "n_batch": "Prompt processing batch size. Higher can improve prompt ingestion but may raise memory use or fail with image/video inputs.",
+    "gpu_layers": "Number of model layers to offload to GPU. -1 asks llama.cpp to offload all possible layers; 0 is CPU-only.",
+    "image_max_tokens": "Upper token budget for each image/video frame. Lower it if multimodal decode fails or VRAM use is too high.",
+    "top_k": "llama.cpp sampler top-k. 0 disables top-k filtering; 20 is a conservative default.",
+    "pool_size": "llama.cpp memory pool size for multimodal work. Increase only when backend errors point at pool/context capacity.",
+    "n_ubatch": "Physical batch size. Keep at or below n_batch. Lower values can improve stability; 0 uses min(n_batch, 512).",
+    "n_threads": "CPU generation threads. On high-core/NUMA servers, auto can be slower; try 8-16 if GPU utilization is low.",
+    "n_threads_batch": "CPU prompt/batch threads. Tune separately from generation threads on server CPUs.",
+    "flash_attn": "Enable llama.cpp flash attention when the installed backend accepts and supports it. RAW_TRACE reports if the kwarg was dropped.",
+    "offload_kqv": "Keep K/Q/V and KV-cache related work on GPU when supported. RAW_TRACE warns when the backend drops this kwarg.",
+    "ctx_checkpoints": "Checkpoint count for multimodal context handling. JamePeng builds usually recommend 0 for single-turn ComfyUI runs.",
+    "stream_tokens_to_terminal": "Print generated tokens live in the ComfyUI terminal. Useful for long runs and backend troubleshooting.",
+    "hf_token": "Optional Hugging Face access token for private or gated GGUF/mmproj downloads. It is passed only to the download call, never logged or cached, and the in-memory copy is dropped after the download attempt. Clear this field before saving or sharing workflows.",
+}
+
 
 def _filter_kwargs_for_callable(fn, kwargs: dict) -> dict:
     try:
@@ -450,6 +478,64 @@ def _filter_kwargs_for_callable(fn, kwargs: dict) -> dict:
         if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
             allowed.add(p.name)
     return {k: v for k, v in kwargs.items() if k in allowed}
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _format_backend_trace(
+    backend_info: dict | None,
+    *,
+    model_path: Path,
+    device_kind: str,
+    n_gpu_layers: int,
+    n_ctx: int,
+    n_batch: int,
+    n_ubatch: int,
+    n_threads: int | None,
+    n_threads_batch: int | None,
+    flash_attn: bool,
+    offload_kqv: bool,
+    accepted_kwargs: list[str],
+    dropped_perf_kwargs: list[str],
+    warnings: list[str],
+) -> str:
+    lines = [
+        "[BACKEND]",
+        format_llama_cpp_backend_info(backend_info),
+        (
+            f"model={model_path.name}; device={device_kind}; gpu_layers={n_gpu_layers}; "
+            f"ctx={n_ctx}; batch={n_batch}; ubatch={n_ubatch}"
+        ),
+        (
+            f"threads={n_threads if n_threads is not None else 'auto'}; "
+            f"threads_batch={n_threads_batch if n_threads_batch is not None else 'auto'}; "
+            f"flash_attn={bool(flash_attn)}; offload_kqv={bool(offload_kqv)}"
+        ),
+        "accepted_kwargs=" + (", ".join(accepted_kwargs) if accepted_kwargs else "unknown"),
+        "dropped_performance_kwargs=" + (", ".join(dropped_perf_kwargs) if dropped_perf_kwargs else "none"),
+    ]
+    if warnings:
+        lines.append("warnings=" + " | ".join(warnings))
+        advice: list[str] = []
+        warning_text = " ".join(warnings).lower()
+        if "no gpu offload" in warning_text or "cpu-only" in warning_text:
+            advice.append("Install a CUDA-enabled llama-cpp-python vision wheel or rebuild with GGML_CUDA=on, then rerun tools/check_llama_backend.py --strict-gpu.")
+        if "unknown" in warning_text:
+            advice.append("Set THINKINGLLM_LLAMA_CPP_VERBOSE_LOAD=1 and check llama.cpp logs for offloaded layers, CUDA buffers, KV buffers, and flash_attn status.")
+        if "performance kwargs" in warning_text:
+            advice.append("Update to a llama-cpp-python/JamePeng build that accepts flash_attn, offload_kqv, n_ubatch, and thread kwargs.")
+        if "automatic thread counts" in warning_text:
+            advice.append("On large Linux servers, start with n_threads=8-16 and tune n_threads_batch while watching token/s and GPU utilization.")
+        if "chat_handler" in warning_text:
+            advice.append("Install a multimodal llama-cpp-python build with Qwen vision chat handlers so image/video inputs are used.")
+        if advice:
+            lines.append("recommended_actions=" + " | ".join(dict.fromkeys(advice)))
+    return "\n".join(lines)
 
 
 def _tensor_to_base64_png(tensor) -> str | None:
@@ -526,7 +612,7 @@ def _pick_device(device_choice: str) -> str:
     return "cpu"
 
 
-def _download_single_file(repo_ids: list[str], filename: str, target_path: Path, *, node_id=None, progress_label: str = "QwenVL GGUF Download"):
+def _download_single_file(repo_ids: list[str], filename: str, target_path: Path, *, node_id=None, progress_label: str = "QwenVL GGUF Download", hf_token: str | None = None):
     if target_path.exists():
         print(f"[QwenVL] Using cached file: {target_path}")
         return
@@ -537,7 +623,9 @@ def _download_single_file(repo_ids: list[str], filename: str, target_path: Path,
         target_path,
         node_id=node_id,
         progress_label=progress_label,
+        hf_token=hf_token,
     )
+    hf_token = None
 
     if not target_path.exists():
         raise FileNotFoundError(f"[QwenVL] File not found after download: {target_path}")
@@ -609,7 +697,34 @@ class QwenVLGGUFBase:
         self.llm = None
         self.chat_handler = None
         self.current_signature = None
+        self.last_backend_trace = ""
+        self.uses_qwen_template_thinking = False
         register_active_gguf_loader(self)
+
+    def _uses_chat_template_thinking(self) -> bool:
+        return bool(getattr(self, "uses_qwen_template_thinking", False))
+
+    def _sync_live_chat_template_kwargs(self, enable_thinking: bool) -> None:
+        if self.llm is None or not self._uses_chat_template_thinking():
+            return
+        template_kwargs = {"enable_thinking": bool(enable_thinking)}
+        for attr_name in ("chat_template_kwargs", "_chat_template_kwargs"):
+            try:
+                current = getattr(self.llm, attr_name, None)
+                if isinstance(current, dict):
+                    current.update(template_kwargs)
+                else:
+                    setattr(self.llm, attr_name, dict(template_kwargs))
+            except Exception:
+                continue
+
+    def _create_chat_completion(self, *, enable_thinking: bool, **kwargs):
+        self._sync_live_chat_template_kwargs(enable_thinking)
+        if self._uses_chat_template_thinking():
+            kwargs = dict(kwargs)
+            kwargs["chat_template_kwargs"] = {"enable_thinking": bool(enable_thinking)}
+            kwargs = _filter_kwargs_for_callable(getattr(self.llm, "create_chat_completion"), kwargs)
+        return self.llm.create_chat_completion(**kwargs)
 
     def clear(self):
         print(f"[QwenVL GGUF DEBUG] Starting VRAM cleanup...")
@@ -682,9 +797,11 @@ class QwenVLGGUFBase:
         offload_kqv: bool,
         ctx_checkpoints: int | None,
         enable_thinking: bool = True,
+        hf_token: str | None = None,
         unique_id=None,
     ):
         Llama = self._load_backend()
+        backend_info = get_last_llama_cpp_backend_info()
 
         resolved = _resolve_model_entry(model_name)
 
@@ -743,6 +860,7 @@ class QwenVLGGUFBase:
                     model_path,
                     node_id=unique_id,
                     progress_label=f"QwenVL GGUF Download: {Path(resolved.model_filename).name}",
+                    hf_token=hf_token,
                 )
 
             if mmproj_path is not None and not mmproj_path.exists():
@@ -754,7 +872,9 @@ class QwenVLGGUFBase:
                     mmproj_path,
                     node_id=unique_id,
                     progress_label=f"QwenVL GGUF Download: {Path(resolved.mmproj_filename).name}",
+                    hf_token=hf_token,
                 )
+        hf_token = None
 
         device_kind = _pick_device(device)
 
@@ -768,11 +888,18 @@ class QwenVLGGUFBase:
         n_threads_val = int(n_threads) if n_threads is not None and int(n_threads) > 0 else None
         n_threads_batch_val = int(n_threads_batch) if n_threads_batch is not None and int(n_threads_batch) > 0 else None
         ctx_checkpoints_val = int(ctx_checkpoints) if ctx_checkpoints is not None and int(ctx_checkpoints) >= 0 else 0
+        load_warnings: list[str] = []
 
         if device_kind == "cuda":
             n_gpu_layers = int(gpu_layers) if gpu_layers is not None else resolved.gpu_layers
         else:
             n_gpu_layers = 0
+
+        logical_cpus = os.cpu_count() or 0
+        if logical_cpus > 32 and n_threads_val is None and n_threads_batch_val is None:
+            load_warnings.append(
+                f"automatic thread counts on {logical_cpus} logical CPUs may be slower on NUMA/server systems; try n_threads=8-16 and tune n_threads_batch"
+            )
 
         img_max = int(image_max_tokens) if image_max_tokens is not None else resolved.image_max_tokens
 
@@ -794,7 +921,6 @@ class QwenVLGGUFBase:
             bool(flash_attn),
             bool(offload_kqv),
             ctx_checkpoints_val,
-            bool(enable_thinking),
         )
         if self.llm is not None and self.current_signature == signature:
             ensure_cuda_vram_headroom("QwenVL GGUF", min_free_gb=1.0, min_free_ratio=0.08)
@@ -850,7 +976,7 @@ class QwenVLGGUFBase:
             "n_batch": n_batch_val,
             "n_ubatch": n_ubatch_val,
             "swa_full": True,
-            "verbose": False,
+            "verbose": _env_bool("THINKINGLLM_LLAMA_CPP_VERBOSE_LOAD", False),
             "pool_size": pool_size_val,
             "top_k": top_k_val,
             "n_threads": n_threads_val,
@@ -865,9 +991,10 @@ class QwenVLGGUFBase:
         self.gguf_arch = arch
         is_qwen35 = arch in ("qwen35", "qwen35moe") if arch else "qwen3.5-" in model_name.lower()
         self.supports_qwen_soft_think = arch == "qwen3" if arch else "qwen3-" in model_name.lower()
+        self.uses_qwen_template_thinking = bool(is_qwen35 or arch == "qwen3" or arch == "qwen")
         # Thinking toggle: for Qwen3.5/4 we control enable_thinking via the chat template kwarg.
         # For non-Qwen backends (Gemma, LLaMA) the flag is advisory and may be silently ignored.
-        if is_qwen35 or arch == "qwen3" or arch == "qwen":
+        if self.uses_qwen_template_thinking:
             thinking_enabled = bool(enable_thinking)
             llm_kwargs["chat_template_kwargs"] = {"enable_thinking": thinking_enabled}
             state_label = "enabled" if thinking_enabled else "disabled"
@@ -887,6 +1014,7 @@ class QwenVLGGUFBase:
         )
         llm_kwargs_filtered = _filter_kwargs_for_callable(getattr(Llama, "__init__", Llama), llm_kwargs)
         if has_mmproj and self.chat_handler is not None and "chat_handler" not in llm_kwargs_filtered:
+            load_warnings.append("installed llama_cpp Llama() does not accept chat_handler; images will be ignored")
             print(
                 "[QwenVL] Warning: installed llama_cpp Llama() does not accept chat_handler; images will be ignored. "
                 "Update llama-cpp-python to a multimodal-capable build."
@@ -897,12 +1025,44 @@ class QwenVLGGUFBase:
             if key in llm_kwargs and key not in llm_kwargs_filtered
         ]
         if dropped_perf_kwargs:
+            load_warnings.append(
+                "installed llama_cpp Llama() does not accept performance kwargs: " + ", ".join(dropped_perf_kwargs)
+            )
             print(
                 "[QwenVL] Warning: installed llama_cpp Llama() does not accept performance kwargs: "
                 f"{', '.join(dropped_perf_kwargs)}"
             )
         if device_kind == "cuda" and n_gpu_layers == 0:
+            load_warnings.append("device=cuda selected but n_gpu_layers=0; model will run on CPU")
             print("[QwenVL] Warning: device=cuda selected but n_gpu_layers=0; model will run on CPU.")
+        gpu_offload = None if backend_info is None else backend_info.get("gpu_offload")
+        if device_kind == "cuda" and n_gpu_layers != 0 and gpu_offload is False:
+            load_warnings.append("backend reports no GPU offload support; CUDA request is likely CPU-only")
+            print("[QwenVL] Warning: llama.cpp backend reports no GPU offload support; CUDA request is likely CPU-only.")
+        elif device_kind == "cuda" and n_gpu_layers != 0 and gpu_offload is None:
+            load_warnings.append("backend GPU offload support is unknown; enable THINKINGLLM_LLAMA_CPP_VERBOSE_LOAD=1 to inspect llama.cpp load logs")
+
+        if load_warnings:
+            for warning in load_warnings:
+                print(f"[QwenVL] Backend warning: {warning}")
+
+        accepted_kwargs = sorted(llm_kwargs_filtered.keys())
+        self.last_backend_trace = _format_backend_trace(
+            backend_info,
+            model_path=model_path,
+            device_kind=device_kind,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=n_ctx,
+            n_batch=n_batch_val,
+            n_ubatch=n_ubatch_val,
+            n_threads=n_threads_val,
+            n_threads_batch=n_threads_batch_val,
+            flash_attn=bool(flash_attn),
+            offload_kqv=bool(offload_kqv),
+            accepted_kwargs=accepted_kwargs,
+            dropped_perf_kwargs=dropped_perf_kwargs,
+            warnings=load_warnings,
+        )
 
         with relax_windows_dll_directory_for_long_paths():
             self.llm = Llama(**llm_kwargs_filtered)
@@ -972,7 +1132,8 @@ class QwenVLGGUFBase:
                 stage_started_at = time.monotonic()
                 last_status_at = stage_started_at
                 full_text = ""
-                result = self.llm.create_chat_completion(
+                result = self._create_chat_completion(
+                    enable_thinking=current_enable_thinking,
                     messages=messages,
                     max_tokens=int(max_tokens),
                     temperature=float(temperature),
@@ -1008,7 +1169,8 @@ class QwenVLGGUFBase:
             def _stream_worker():
                 nonlocal worker_error
                 try:
-                    result = self.llm.create_chat_completion(
+                    result = self._create_chat_completion(
+                        enable_thinking=current_enable_thinking,
                         messages=messages,
                         max_tokens=int(max_tokens),
                         temperature=float(temperature),
@@ -1173,6 +1335,7 @@ class QwenVLGGUFBase:
         node_class="QwenVLGGUF",
         stream_to_terminal=False,
         enable_thinking=True,
+        hf_token="",
     ):
         print(f"[QwenVL GGUF DEBUG] Starting run with seed={seed}")
         image_hash = get_image_hash(image)
@@ -1311,8 +1474,10 @@ class QwenVLGGUFBase:
                         offload_kqv=offload_kqv,
                         ctx_checkpoints=ctx_checkpoints,
                         enable_thinking=effective_thinking,
+                        hf_token=hf_token,
                         unique_id=unique_id,
                     )
+                    hf_token = ""
                     print(f"[QwenVL GGUF DEBUG] Model loaded successfully")
                     if images_b64 and self.chat_handler is None:
                         print("[QwenVL] Warning: images provided but this model entry has no mmproj_file; images will be ignored")
@@ -1335,6 +1500,8 @@ class QwenVLGGUFBase:
                         stream_to_terminal=stream_to_terminal,
                         enable_thinking=effective_thinking,
                     )
+                    if self.last_backend_trace:
+                        raw_trace = f"{self.last_backend_trace}\n\n{raw_trace}" if raw_trace else self.last_backend_trace
                     break
                 except Exception as exc:
                     last_exc = exc
@@ -1394,14 +1561,15 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
 
         return {
             "required": {
-                "model_name": (model_keys, {"default": default_model}),
+                "model_name": (model_keys, {"default": default_model, "tooltip": GGUF_TOOLTIPS["model_name"]}),
                 "preset_prompt": (prompts, {"default": default_prompt, "tooltip": "Select 'No preset' to use only the custom prompt or image input."}),
                 "custom_prompt": ("STRING", {"default": "", "multiline": True, "tooltip": "Additional user input that gets combined with the preset template. Leave empty to use only the template."}),
-                "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 8192}),
-                "keep_model_loaded": ("BOOLEAN", {"default": False}),
-                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1}),
-                "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Print every generated token live to the ComfyUI terminal/console"}),
+                "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 8192, "tooltip": GGUF_TOOLTIPS["max_tokens"]}),
+                "keep_model_loaded": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["keep_model_loaded"]}),
+                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": GGUF_TOOLTIPS["seed"]}),
+                "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["stream_tokens_to_terminal"]}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. For non-Qwen GGUF models this is advisory and may not be honored by the backend."}),
+                "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["hf_token"]}),
                             },
             "optional": {
                 "image": ("IMAGE",),
@@ -1432,6 +1600,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
         extra_pnginfo=None,
         stream_tokens_to_terminal=False,
         enable_thinking=True,
+        hf_token="",
     ):
         result = self.run(
             model_name=model_name,
@@ -1464,7 +1633,9 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             node_class="ThinkingLLM_QwenVL_GGUF",
             stream_to_terminal=stream_tokens_to_terminal,
             enable_thinking=enable_thinking,
+            hf_token=hf_token,
         )
+        hf_token = ""
         return (result[0],)
 
 
@@ -1485,33 +1656,34 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
 
         return {
             "required": {
-                "model_name": (model_keys, {"default": default_model}),
-                "device": (device_options, {"default": "auto"}),
+                "model_name": (model_keys, {"default": default_model, "tooltip": GGUF_TOOLTIPS["model_name"]}),
+                "device": (device_options, {"default": "auto", "tooltip": GGUF_TOOLTIPS["device"]}),
                 "preset_prompt": (prompts, {"default": default_prompt, "tooltip": "Select 'No preset' to use only the custom prompt or image input."}),
                 "custom_prompt": ("STRING", {"default": "", "multiline": True, "tooltip": "Additional user input that gets combined with the preset template. Leave empty to use only the template."}),
-                "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 8192}),
-                "temperature": ("FLOAT", {"default": 0.6, "min": 0.0, "max": 2.0}),
-                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0}),
-                "repetition_penalty": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 2.0}),
-                "frame_count": ("INT", {"default": 16, "min": 1, "max": 64}),
-                "ctx": ("INT", {"default": 32768, "min": 1024, "max": 262144, "step": 512}),
-                "n_batch": ("INT", {"default": 512, "min": 64, "max": 32768, "step": 64}),
-                "gpu_layers": ("INT", {"default": -1, "min": -1, "max": 200}),
-                "image_max_tokens": ("INT", {"default": 4096, "min": 256, "max": 1024000, "step": 256}),
-                "top_k": ("INT", {"default": 20, "min": 0, "max": 32768}),
-                "pool_size": ("INT", {"default": 4194304, "min": 1048576, "max": 10485760, "step": 524288}),
-                "keep_model_loaded": ("BOOLEAN", {"default": False}),
-                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1}),
+                "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 8192, "tooltip": GGUF_TOOLTIPS["max_tokens"]}),
+                "temperature": ("FLOAT", {"default": 0.6, "min": 0.0, "max": 2.0, "tooltip": "Sampling randomness. Lower values are more deterministic; higher values are more varied."}),
+                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "tooltip": "Nucleus sampling cutoff. Lower values restrict token choice; 0.9 is a balanced default."}),
+                "repetition_penalty": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 2.0, "tooltip": "Values above 1.0 reduce repeated phrases; 1.0 leaves repetition unmodified."}),
+                "frame_count": ("INT", {"default": 16, "min": 1, "max": 64, "tooltip": GGUF_TOOLTIPS["frame_count"]}),
+                "ctx": ("INT", {"default": 32768, "min": 1024, "max": 262144, "step": 512, "tooltip": GGUF_TOOLTIPS["ctx"]}),
+                "n_batch": ("INT", {"default": 512, "min": 64, "max": 32768, "step": 64, "tooltip": GGUF_TOOLTIPS["n_batch"]}),
+                "gpu_layers": ("INT", {"default": -1, "min": -1, "max": 200, "tooltip": GGUF_TOOLTIPS["gpu_layers"]}),
+                "image_max_tokens": ("INT", {"default": 4096, "min": 256, "max": 1024000, "step": 256, "tooltip": GGUF_TOOLTIPS["image_max_tokens"]}),
+                "top_k": ("INT", {"default": 20, "min": 0, "max": 32768, "tooltip": GGUF_TOOLTIPS["top_k"]}),
+                "pool_size": ("INT", {"default": 4194304, "min": 1048576, "max": 10485760, "step": 524288, "tooltip": GGUF_TOOLTIPS["pool_size"]}),
+                "keep_model_loaded": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["keep_model_loaded"]}),
+                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": GGUF_TOOLTIPS["seed"]}),
                 "legacy_seed_mode": ([False, "fixed", "randomize", "increment", "decrement"], {"default": "fixed", "tooltip": "Legacy workflow compatibility only. This widget is ignored by current ThinkingLLM logic."}),
                 "legacy_unload_after_run": ("BOOLEAN", {"default": False, "tooltip": "Legacy workflow compatibility only. Model unloading is controlled by keep_model_loaded."}),
-                "n_ubatch": ("INT", {"default": 512, "min": 0, "max": 32768, "step": 32, "tooltip": "Physical batch size. Keep at or below n_batch. Lower values can help throughput or memory stability depending on the backend. Legacy workflows may serialize 0, which falls back to the current automatic default."}),
-                "n_threads": ("INT", {"default": 0, "min": 0, "max": 256, "tooltip": "CPU generation threads. Set 0 to let llama.cpp choose."}),
-                "n_threads_batch": ("INT", {"default": 0, "min": 0, "max": 256, "tooltip": "CPU prompt/batch threads. Set 0 to let llama.cpp choose."}),
-                "flash_attn": ("BOOLEAN", {"default": True, "tooltip": "Enable flash attention when the installed llama.cpp backend supports it."}),
-                "offload_kqv": ("BOOLEAN", {"default": True, "tooltip": "Keep K/Q/V and KV-cache related work on GPU when supported."}),
-                "ctx_checkpoints": ("INT", {"default": 0, "min": 0, "max": 32, "tooltip": "Checkpoint count for multimodal context handling. JamePeng docs recommend 0 for single-turn ComfyUI-style multimodal runs."}),
-                "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Print every generated token live to the ComfyUI terminal/console"}),
+                "n_ubatch": ("INT", {"default": 512, "min": 0, "max": 32768, "step": 32, "tooltip": GGUF_TOOLTIPS["n_ubatch"]}),
+                "n_threads": ("INT", {"default": 0, "min": 0, "max": 256, "tooltip": GGUF_TOOLTIPS["n_threads"]}),
+                "n_threads_batch": ("INT", {"default": 0, "min": 0, "max": 256, "tooltip": GGUF_TOOLTIPS["n_threads_batch"]}),
+                "flash_attn": ("BOOLEAN", {"default": True, "tooltip": GGUF_TOOLTIPS["flash_attn"]}),
+                "offload_kqv": ("BOOLEAN", {"default": True, "tooltip": GGUF_TOOLTIPS["offload_kqv"]}),
+                "ctx_checkpoints": ("INT", {"default": 0, "min": 0, "max": 32, "tooltip": GGUF_TOOLTIPS["ctx_checkpoints"]}),
+                "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["stream_tokens_to_terminal"]}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. For non-Qwen GGUF models this is advisory."}),
+                "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["hf_token"]}),
                             },
             "optional": {
                 "image": ("IMAGE",),
@@ -1561,6 +1733,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
         extra_pnginfo=None,
         stream_tokens_to_terminal=False,
         enable_thinking=True,
+        hf_token="",
     ):
         _ = legacy_seed_mode
         _ = legacy_unload_after_run
@@ -1595,7 +1768,9 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             node_class="ThinkingLLM_QwenVL_GGUF_Advanced",
             stream_to_terminal=stream_tokens_to_terminal,
             enable_thinking=enable_thinking,
+            hf_token=hf_token,
         )
+        hf_token = ""
         return result
 
 

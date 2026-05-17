@@ -124,6 +124,18 @@ def _load_prompt_styles() -> dict[str, str]:
 PROMPT_STYLES = _load_prompt_styles()
 PROMPT_STYLES = {CUSTOM_ONLY_STYLE: "", **PROMPT_STYLES}
 
+PROMPT_ENHANCER_TOOLTIPS = {
+    "prompt_text": "Prompt text to enhance. Leave blank to emit the selected preset instruction as the base prompt.",
+    "enhancement_style": "Preset enhancement style. Use Custom Only when you want custom_system_prompt to fully control the instruction.",
+    "custom_system_prompt": "Optional extra instruction. Required when using Custom Only; otherwise it is prepended to the selected style.",
+    "max_tokens": "Maximum new tokens for the enhanced prompt. Increase only when the model truncates useful detail.",
+    "temperature": "Sampling randomness. Lower is more stable; higher is more varied.",
+    "top_p": "Nucleus sampling cutoff. Lower values restrict token choice; 0.9 is a balanced default.",
+    "repetition_penalty": "Values above 1.0 reduce repeated phrases in the enhanced prompt.",
+    "keep_model_loaded": "Keep the HF model in memory after generation so repeated prompt enhancement skips model loading.",
+    "seed": "Sampling seed. Reusing it with identical inputs can reuse the saved prompt result.",
+}
+
 
 class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
     STYLES = PROMPT_STYLES
@@ -154,18 +166,19 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 "attention_mode": (ATTENTION_MODES, {"default": "auto", "tooltip": TOOLTIPS["attention_mode"]}),
                 "use_torch_compile": ("BOOLEAN", {"default": False, "tooltip": TOOLTIPS["use_torch_compile"]}),
                 "device": (["auto", "cuda", "cpu", "mps"], {"default": "auto", "tooltip": TOOLTIPS["device"]}),
-                "prompt_text": ("STRING", {"default": "", "multiline": True, "tooltip": "Prompt text to enhance. Leave blank to just emit the preset instruction."}),
-                "enhancement_style": (styles, {"default": default_style}),
-                "custom_system_prompt": ("STRING", {"default": "", "multiline": True}),
-                "max_tokens": ("INT", {"default": 1024, "min": 32, "max": 16384}),
-                "temperature": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.0}),
-                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0}),
-                "repetition_penalty": ("FLOAT", {"default": 1.1, "min": 0.5, "max": 2.0}),
-                "keep_model_loaded": ("BOOLEAN", {"default": False}),
-                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1}),
+                "prompt_text": ("STRING", {"default": "", "multiline": True, "tooltip": PROMPT_ENHANCER_TOOLTIPS["prompt_text"]}),
+                "enhancement_style": (styles, {"default": default_style, "tooltip": PROMPT_ENHANCER_TOOLTIPS["enhancement_style"]}),
+                "custom_system_prompt": ("STRING", {"default": "", "multiline": True, "tooltip": PROMPT_ENHANCER_TOOLTIPS["custom_system_prompt"]}),
+                "max_tokens": ("INT", {"default": 1024, "min": 32, "max": 16384, "tooltip": PROMPT_ENHANCER_TOOLTIPS["max_tokens"]}),
+                "temperature": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.0, "tooltip": PROMPT_ENHANCER_TOOLTIPS["temperature"]}),
+                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "tooltip": PROMPT_ENHANCER_TOOLTIPS["top_p"]}),
+                "repetition_penalty": ("FLOAT", {"default": 1.1, "min": 0.5, "max": 2.0, "tooltip": PROMPT_ENHANCER_TOOLTIPS["repetition_penalty"]}),
+                "keep_model_loaded": ("BOOLEAN", {"default": False, "tooltip": PROMPT_ENHANCER_TOOLTIPS["keep_model_loaded"]}),
+                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": PROMPT_ENHANCER_TOOLTIPS["seed"]}),
                 "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep the last generated prompt instead of creating a new one"}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Show readable generation progress and thinking-status summaries in the ComfyUI terminal. When enabled, fixed-seed prompt reuse is bypassed so a fresh streamed run can occur."}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. Prompt enhancers still return a cleaned final prompt, so terminal reasoning may be hidden or empty."}),
+                "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": TOOLTIPS["hf_token"]}),
             }
             ,
             "hidden": {
@@ -195,6 +208,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         unique_id=None,
         extra_pnginfo=None,
         enable_thinking=True,
+        hf_token="",
     ):
         node_class = "ThinkingLLM_QwenVL_PromptEnhancer"
         input_signature = build_node_input_signature(
@@ -254,6 +268,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 stream_to_terminal=stream_tokens_to_terminal,
                 unique_id=unique_id,
                 enable_thinking=enable_thinking,
+                hf_token=hf_token,
             )
             raw_trace = f"[HF TEXT GENERATION]\n{enhanced_raw}"
         else:
@@ -274,7 +289,9 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 unique_id=unique_id,
                 extra_pnginfo=extra_pnginfo,
                 enable_thinking=enable_thinking,
+                hf_token=hf_token,
             )
+            hf_token = ""
             key = _make_node_state_key(node_class, unique_id, extra_pnginfo)
             entry = NODE_PROMPT_STATE.get(key, {})
             raw_trace = entry.get("raw_trace", "") if isinstance(entry, dict) else ""
@@ -305,6 +322,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         unique_id=None,
         extra_pnginfo=None,
         enable_thinking=True,
+        hf_token: str | None = None,
     ):
         output = self.run(
             model_name=model_name,
@@ -329,10 +347,11 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             node_class="ThinkingLLM_QwenVL_PromptEnhancer",
             stream_to_terminal=stream_to_terminal,
             enable_thinking=enable_thinking,
+            hf_token=hf_token,
         )
         return output[0]
 
-    def _load_text_model(self, model_name, quantization, device_choice, unique_id=None):
+    def _load_text_model(self, model_name, quantization, device_choice, unique_id=None, hf_token: str | None = None):
         info = HF_TEXT_MODELS.get(model_name, {})
         repo_id = info.get("repo_id")
         if not repo_id:
@@ -344,6 +363,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             require_processor=prefers_processor,
             node_id=unique_id,
             progress_label=f"QwenVL PromptEnhancer HF Download: {model_name}",
+            hf_token=hf_token,
         )
 
         if device_choice == "auto":
@@ -457,9 +477,11 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         stream_to_terminal=False,
         unique_id=None,
         enable_thinking=True,
+        hf_token: str | None = None,
     ):
         """Returns (cleaned_prompt, raw_generated_text) tuple."""
-        self._load_text_model(model_name, quantization, device, unique_id=unique_id)
+        self._load_text_model(model_name, quantization, device, unique_id=unique_id, hf_token=hf_token)
+        hf_token = None
         ensure_cuda_vram_headroom("QwenVL PromptEnhancer HF", min_free_gb=1.0, min_free_ratio=0.08)
 
         if device == "auto":
