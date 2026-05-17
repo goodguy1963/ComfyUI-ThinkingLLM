@@ -648,7 +648,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         enable_thinking=True,
     ):
         """Returns (cleaned_prompt, raw_trace) tuple."""
-        stream_display = TerminalStreamDisplay("QwenVL GGUF", suppress_planning=True, compact=False) if stream_to_terminal else None
+        stream_display = TerminalStreamDisplay("QwenVL GGUF", suppress_planning=True, compact=True) if stream_to_terminal else None
         supports_soft_think = getattr(self, "supports_qwen_soft_think", False)
         if supports_soft_think:
             directive = "/think" if enable_thinking else "/no_think"

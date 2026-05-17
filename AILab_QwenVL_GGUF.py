@@ -967,7 +967,7 @@ class QwenVLGGUFBase:
 
             start = time.perf_counter()
             if stream_to_terminal:
-                stream_display = TerminalStreamDisplay("QwenVL GGUF", suppress_planning=True, compact=False)
+                stream_display = TerminalStreamDisplay("QwenVL GGUF", suppress_planning=True, compact=True)
                 stream_display.start_stage(stage_label)
                 stage_started_at = time.monotonic()
                 last_status_at = stage_started_at
@@ -1203,6 +1203,21 @@ class QwenVLGGUFBase:
             top_p=top_p,
             repetition_penalty=repetition_penalty,
         )
+        if not stream_to_terminal:
+            saved = get_node_saved_prompt_with_seed(
+                node_class,
+                unique_id,
+                extra_pnginfo,
+                seed=int(seed),
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                input_signature=input_signature,
+            )
+            if saved:
+                print(f"[QwenVL GGUF] Fixed seed {seed} matched — using per-node prompt: {saved[:50]}...")
+                return (saved, "")
         print(f"[QwenVL GGUF] Generating new prompt")
 
         prompt_template = "" if preset_prompt == "🚫 No preset (image-only)" else SYSTEM_PROMPTS.get(preset_prompt, preset_prompt)
@@ -1360,7 +1375,7 @@ class QwenVLGGUFBase:
             set_node_saved_prompt(node_class, unique_id, extra_pnginfo, text, raw_trace=raw_trace, seed=int(seed), max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
             print(f"[QwenVL GGUF] Saved per-node prompt: {text[:50]}...")
 
-            return (text,)
+            return (text, raw_trace)
         finally:
             if not keep_model_loaded:
                 self.clear()
@@ -1398,8 +1413,8 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("RESPONSE", "RAW_TRACE")
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("RESPONSE",)
     FUNCTION = "process"
     CATEGORY = "ThinkingLLM"
 
@@ -1450,11 +1465,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             stream_to_terminal=stream_tokens_to_terminal,
             enable_thinking=enable_thinking,
         )
-        # Read back raw_trace from just-saved per-node state
-        key = _make_node_state_key("ThinkingLLM_QwenVL_GGUF", unique_id, extra_pnginfo)
-        entry = NODE_PROMPT_STATE.get(key, {})
-        raw_trace = entry.get("raw_trace", "") if isinstance(entry, dict) else ""
-        return (result[0], raw_trace)
+        return (result[0],)
 
 
 class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
@@ -1585,11 +1596,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             stream_to_terminal=stream_tokens_to_terminal,
             enable_thinking=enable_thinking,
         )
-        # Read back raw_trace from just-saved per-node state
-        key = _make_node_state_key("ThinkingLLM_QwenVL_GGUF_Advanced", unique_id, extra_pnginfo)
-        entry = NODE_PROMPT_STATE.get(key, {})
-        raw_trace = entry.get("raw_trace", "") if isinstance(entry, dict) else ""
-        return (result[0], raw_trace)
+        return result
 
 
 NODE_CLASS_MAPPINGS = {
