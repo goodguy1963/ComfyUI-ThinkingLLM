@@ -1,5 +1,16 @@
 # ComfyUI-QwenVL Update Log
 
+## v1.0.9 (Local Fork) — May 2026
+
+### New Features
+- **Live Terminal Token Streaming**: Both Prompt Enhancer nodes (HF and GGUF) now have a `stream_tokens_to_terminal` toggle. When enabled, readable generation progress and thinking-status summaries are shown in the ComfyUI terminal in real time.
+- **RAW_TRACE Second Output**: Both Prompt Enhancer nodes now return a second string output (`RAW_TRACE`) containing the unprocessed model output, reasoning trace, and retry history — useful for prompt debugging and model analysis.
+- **Per-Node Prompt State with JSON Persistence**: `keep_last_prompt` is now backed by durable per-node state (survives idle, module reload, and ComfyUI restart). Fixed-seed prompts are automatically reused between runs. Each node instance stores its own prompt independently via workflow fingerprinting.
+- **Local Fork Lock**: `.no_auto_update` sentinel prevents ComfyUI Manager from overwriting this local fork with upstream updates.
+
+### Installer
+- Linux CUDA 12.8 auto-install matrix expanded to cover Python cp310–cp314 via JamePeng prebuilt wheels.
+
 ## Version 1.0.6 (2026/05/16) — Windows GGUF Backend Import Fix
 
 ### 1.0.6 Changes
