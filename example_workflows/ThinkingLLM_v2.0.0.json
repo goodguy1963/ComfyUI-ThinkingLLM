@@ -6,7 +6,7 @@
   "nodes": [
     {
       "id": 17,
-      "type": "AILab_QwenVL_GGUF_Advanced",
+      "type": "ThinkingLLM_QwenVL_GGUF_Advanced",
       "pos": [
         1090.7435866951005,
         541.3632089660127
@@ -40,7 +40,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "AILab_QwenVL_GGUF_Advanced",
+        "Node name for S&R": "ThinkingLLM_QwenVL_GGUF_Advanced",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
@@ -72,7 +72,7 @@
     },
     {
       "id": 21,
-      "type": "AILab_QwenVL_Advanced",
+      "type": "ThinkingLLM_QwenVL_Advanced",
       "pos": [
         1090.7435866951005,
         1103.0165621245635
@@ -106,7 +106,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "AILab_QwenVL_Advanced",
+        "Node name for S&R": "ThinkingLLM_QwenVL_Advanced",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
@@ -136,7 +136,7 @@
     },
     {
       "id": 20,
-      "type": "AILab_QwenVL",
+      "type": "ThinkingLLM_QwenVL",
       "pos": [
         728.3779414208888,
         1103.0165621245635
@@ -170,7 +170,7 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "AILab_QwenVL",
+        "Node name for S&R": "ThinkingLLM_QwenVL",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
@@ -193,7 +193,7 @@
     },
     {
       "id": 23,
-      "type": "AILab_QwenVL_GGUF_PromptEnhancer",
+      "type": "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
       "pos": [
         1453.109231969312,
         541.3632089660127
@@ -218,7 +218,7 @@
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {}
         },
-        "Node name for S&R": "AILab_QwenVL_GGUF_PromptEnhancer"
+        "Node name for S&R": "ThinkingLLM_QwenVL_GGUF_PromptEnhancer"
       },
       "widgets_values": [
         "Qwen3-4B-Q4_K_M.gguf",
@@ -239,7 +239,7 @@
     },
     {
       "id": 24,
-      "type": "AILab_QwenVL_PromptEnhancer",
+      "type": "ThinkingLLM_QwenVL_PromptEnhancer",
       "pos": [
         1453.109231969312,
         1103.0165621245635
@@ -264,7 +264,7 @@
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {}
         },
-        "Node name for S&R": "AILab_QwenVL_PromptEnhancer"
+        "Node name for S&R": "ThinkingLLM_QwenVL_PromptEnhancer"
       },
       "widgets_values": [
         "Qwen3-0.6B",
@@ -288,7 +288,7 @@
     },
     {
       "id": 25,
-      "type": "AILab_QwenVL_GGUF",
+      "type": "ThinkingLLM_QwenVL_GGUF",
       "pos": [
         728.3779414208888,
         541.3632089660127
@@ -326,7 +326,7 @@
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {}
         },
-        "Node name for S&R": "AILab_QwenVL_GGUF"
+        "Node name for S&R": "ThinkingLLM_QwenVL_GGUF"
       },
       "widgets_values": [
         "Qwen3-VL-4B-Thinking-Q4_K_M (bartowski)",
