@@ -317,6 +317,18 @@ class TestBufferedStreamingIntegration(unittest.TestCase):
         self.assertNotIn("Prompt enhancer compact terminal progress is active", source)
         self.assertIn("_maybe_emit_prompt_background_heartbeat", source)
 
+    def test_gguf_prompt_enhancer_caps_context_and_safe_constructs_llama(self):
+        source = read_source("AILab_QwenVL_GGUF_PromptEnhancer.py")
+        self.assertIn("_PROMPT_ENHANCER_MAX_CONTEXT_LENGTH = 32768", source)
+        self.assertIn("_resolve_prompt_enhancer_context_length", source)
+        self.assertIn("construct_llama_safely(Llama, kwargs", source)
+
+    def test_gguf_nodes_guard_failed_llama_construction(self):
+        source = read_source("AILab_QwenVL_GGUF.py")
+        self.assertIn("def construct_llama_safely", source)
+        self.assertIn("_thinkingllm_llama_init_complete", source)
+        self.assertIn("construct_llama_safely(Llama, llm_kwargs_filtered", source)
+
 
 class TestPromptEnhancerMetadata(unittest.TestCase):
     def test_hf_prompt_enhancer_metadata_matches_runtime(self):

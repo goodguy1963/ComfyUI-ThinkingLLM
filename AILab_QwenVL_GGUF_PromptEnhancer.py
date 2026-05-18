@@ -54,7 +54,7 @@ from AILab_QwenVL import (
     _make_node_state_key,
     _build_workflow_fingerprint,
 )
-from AILab_QwenVL_GGUF import read_gguf_architecture, register_active_gguf_loader, release_other_gguf_loaders
+from AILab_QwenVL_GGUF import construct_llama_safely, read_gguf_architecture, register_active_gguf_loader, release_other_gguf_loaders
 
 
 GGUF_PROMPT_TOOLTIPS = {
@@ -115,6 +115,28 @@ _EMPTY_THINK_RE = re.compile(r"<think[^>]*>\s*</think>", flags=re.IGNORECASE | r
 _STREAM_HEARTBEAT_INTERVAL_SECONDS = 3.0
 _PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS = 3
 _STREAM_POLL_INTERVAL_SECONDS = 0.25
+_PROMPT_ENHANCER_MIN_CONTEXT_LENGTH = 4096
+_PROMPT_ENHANCER_MAX_CONTEXT_LENGTH = 32768
+
+
+def _resolve_prompt_enhancer_context_length(config_context_length, prompt_tokens, max_tokens) -> int:
+    try:
+        configured = int(config_context_length)
+    except Exception:
+        configured = _PROMPT_ENHANCER_MAX_CONTEXT_LENGTH
+    if configured <= 0:
+        configured = _PROMPT_ENHANCER_MAX_CONTEXT_LENGTH
+    try:
+        prompt_budget = max(int(prompt_tokens), 0)
+    except Exception:
+        prompt_budget = 0
+    try:
+        generation_budget = max(int(max_tokens), 0)
+    except Exception:
+        generation_budget = 0
+    requested = max(_PROMPT_ENHANCER_MIN_CONTEXT_LENGTH, prompt_budget + generation_budget + 1024)
+    cap = min(configured, _PROMPT_ENHANCER_MAX_CONTEXT_LENGTH)
+    return max(1024, min(cap, requested))
 
 
 def _looks_like_prompt_planning(text: str) -> bool:
@@ -587,13 +609,23 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         if not resolved.exists():
             raise FileNotFoundError(f"[QwenVL] GGUF model not found after download: {resolved} (tried: {', '.join(attempted)})")
 
-    def _load_model(self, model_name, device, enable_thinking=True, unique_id=None, hf_token: str | None = None):
+    def _load_model(self, model_name, device, enable_thinking=True, unique_id=None, hf_token: str | None = None, context_length_override: int | None = None):
         Llama = self._load_backend()
         resolved = self._resolve_model_path(model_name)
         self._maybe_download_model(model_name, resolved, unique_id=unique_id, hf_token=hf_token)
         hf_token = None
         model_cfg = self.gguf_models["models"].get(model_name, {})
-        context_length = model_cfg.get("context_length", 32768)
+        raw_context_length = model_cfg.get("context_length", 32768)
+        context_length = int(context_length_override or raw_context_length or 32768)
+        try:
+            raw_context_int = int(raw_context_length)
+        except Exception:
+            raw_context_int = context_length
+        if context_length < raw_context_int:
+            print(
+                f"[QwenVL PromptEnhancer GGUF] Using context length {context_length} "
+                f"instead of catalog {raw_context_int} to reduce KV-cache VRAM."
+            )
         signature = (resolved, context_length, device, bool(enable_thinking))
         if self.llm is not None and self.current_signature == signature:
             ensure_cuda_vram_headroom("QwenVL PromptEnhancer GGUF", min_free_gb=1.0, min_free_ratio=0.08)
@@ -655,7 +687,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             else:
                 print(f"[QwenVL] Non-Qwen architecture (arch={arch}): Thinking ON (advisory — backend may ignore).")
 
-        self.llm = Llama(**kwargs)
+        self.llm = construct_llama_safely(Llama, kwargs, "QwenVL PromptEnhancer GGUF")
         self.current_signature = signature
 
     def _invoke_llama(
@@ -927,16 +959,24 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         model_cfg = self.gguf_models["models"].get(model_name, {})
         context_window = model_cfg.get("context_length", 32768)
         estimated_prompt_tokens = estimate_qwen_text_tokens(system_prompt, merged_prompt)
+        effective_context_window = _resolve_prompt_enhancer_context_length(context_window, estimated_prompt_tokens, max_tokens)
         effective_thinking = resolve_qwen_thinking_mode(
             enable_thinking,
             max_tokens,
             label="QwenVL PromptEnhancer GGUF",
             prompt_tokens=estimated_prompt_tokens,
-            context_window=context_window,
+            context_window=effective_context_window,
         )
         if stream_tokens_to_terminal:
             print("[QwenVL GGUF] Prompt enhancer terminal stream shows readable progress only; reasoning text may be hidden or stripped from the final prompt.")
-        self._load_model(model_name, device, enable_thinking=effective_thinking, unique_id=unique_id, hf_token=hf_token)
+        self._load_model(
+            model_name,
+            device,
+            enable_thinking=effective_thinking,
+            unique_id=unique_id,
+            hf_token=hf_token,
+            context_length_override=effective_context_window,
+        )
         hf_token = ""
         enhanced, raw_trace = self._invoke_llama(
             system_prompt=system_prompt,

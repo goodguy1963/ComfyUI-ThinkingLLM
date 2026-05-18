@@ -226,6 +226,42 @@ def release_other_gguf_loaders(current_loader: object, next_model_label: str) ->
             print(f"[QwenVL] Warning: failed to release another GGUF node before loading {next_model_label}: {exc}")
 
 
+def construct_llama_safely(Llama, kwargs: dict, label: str):
+    original_del = getattr(Llama, "__del__", None)
+    patched_del = False
+
+    def guarded_del(instance):
+        if not getattr(instance, "_thinkingllm_llama_init_complete", False):
+            return
+        if callable(original_del):
+            try:
+                original_del(instance)
+            except BaseException as exc:
+                print(f"[{label}] Warning: llama.cpp cleanup failed: {exc}")
+
+    try:
+        if callable(original_del):
+            setattr(Llama, "__del__", guarded_del)
+            patched_del = True
+        llm = Llama(**kwargs)
+        try:
+            setattr(llm, "_thinkingllm_llama_init_complete", True)
+        except Exception:
+            pass
+        return llm
+    except Exception as exc:
+        raise RuntimeError(
+            f"[{label}] llama.cpp failed to create a context for this GGUF model. "
+            "Free VRAM, reduce context length, select a smaller quant, or disable GPU offload."
+        ) from exc
+    finally:
+        if patched_del:
+            try:
+                setattr(Llama, "__del__", original_del)
+            except Exception:
+                pass
+
+
 def _load_prompt_config():
     preset_prompts = ["🚫 No preset (image-only)", "🖼️ Detailed Description"]
     system_prompts: dict[str, str] = {}
@@ -1065,7 +1101,7 @@ class QwenVLGGUFBase:
         )
 
         with relax_windows_dll_directory_for_long_paths():
-            self.llm = Llama(**llm_kwargs_filtered)
+            self.llm = construct_llama_safely(Llama, llm_kwargs_filtered, "QwenVL GGUF")
         self.current_signature = signature
 
     def _invoke(
