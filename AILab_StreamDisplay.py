@@ -31,6 +31,66 @@ def reset_thinking_stream_display():
     THINKING_STREAM_DISPLAY = None
 
 
+# ── Shared chunk normalizer for OpenAI-style streamed responses ────────────
+
+def _get_stream_field(container, key: str, default=None):
+    if isinstance(container, dict):
+        return container.get(key, default)
+    return getattr(container, key, default)
+
+
+def _stream_value_to_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        return "".join(_stream_value_to_text(part) for part in value)
+    if isinstance(value, dict):
+        for key in ("text", "content", "reasoning_content", "reasoning", "thinking"):
+            text = _stream_value_to_text(value.get(key))
+            if text:
+                return text
+        return ""
+    return str(value)
+
+
+def _first_stream_text(containers, keys: tuple[str, ...]) -> str:
+    for container in containers:
+        if container is None:
+            continue
+        for key in keys:
+            text = _stream_value_to_text(_get_stream_field(container, key, None))
+            if text:
+                return text
+    return ""
+
+
+def extract_stream_token(chunk) -> dict[str, str]:
+    """Return a dict with 'reasoning' and 'content' keys from an OpenAI-style
+    streaming delta chunk.
+
+    Populates both fields from any supported field name so callers get reasoning
+    and answer text regardless of backend (llama.cpp, vLLM, HF, etc.).
+    Empty values are returned as empty strings.
+    """
+    choices = _get_stream_field(chunk, "choices", []) or []
+    choice = choices[0] if isinstance(choices, (list, tuple)) and choices else {}
+    delta = _get_stream_field(choice, "delta", {}) or {}
+    message = _get_stream_field(choice, "message", {}) or {}
+
+    containers = (delta, message, choice, chunk)
+    content = _first_stream_text(containers, ("content", "text", "output_text"))
+    reasoning = _first_stream_text(
+        containers,
+        ("reasoning_content", "thinking", "reasoning", "reasoning_text"),
+    )
+
+    return {"reasoning": reasoning, "content": content}
+
+
 class TerminalStreamDisplay:
     """Buffered terminal display for streamed model output.
 
@@ -72,6 +132,7 @@ class TerminalStreamDisplay:
         self._stage_updates = 0
         self._last_compact_emit_at = 0.0
         self._last_compact_tail = ""
+        self._compact_active = False
 
     def start_stage(self, stage_name: str):
         self.end_stage()
@@ -112,7 +173,10 @@ class TerminalStreamDisplay:
         return re.sub(r"[ \t]+", " ", raw.replace("\r", "").replace("\n", " ")).strip()
 
     def end_stage(self):
-        self.flush(force=True)
+        if self._compact_active:
+            self.end_compact()
+        else:
+            self.flush(force=True)
         if not self._stage_name:
             return
         elapsed = 0.0
@@ -202,6 +266,7 @@ class TerminalStreamDisplay:
         """
         if not text:
             return
+        self._compact_active = True
         self._stage_chars += len(text)
         self._buffer += text
         if len(self._buffer) > self.TAIL_LENGTH * 2:
@@ -227,4 +292,6 @@ class TerminalStreamDisplay:
             self._stage_updates += 1
         self._last_compact_tail = ""
         self._last_compact_emit_at = 0.0
+        self._compact_active = False
+        self._buffer = ""
         self._write_rolling_line(self.label, tail or "", final=True)

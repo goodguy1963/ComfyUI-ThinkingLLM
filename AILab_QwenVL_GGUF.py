@@ -27,7 +27,7 @@ import numpy as np
 import torch
 from huggingface_hub import snapshot_download
 from PIL import Image
-from AILab_StreamDisplay import TerminalStreamDisplay
+from AILab_StreamDisplay import TerminalStreamDisplay, extract_stream_token
 from AILab_LlamaCppInstaller import (
     ensure_llama_cpp_backend,
     format_llama_cpp_backend_info,
@@ -1181,15 +1181,18 @@ class QwenVLGGUFBase:
                 )
                 for chunk in result:
                     throw_exception_if_processing_interrupted()
-                    token = (
-                        chunk.get("choices", [{}])[0]
-                        .get("delta", {})
-                        .get("content", "")
-                    )
-                    if token:
-                        full_text += token
-                        stream_display.push(token)
+                    token = extract_stream_token(chunk)
+                    reasoning_token = token.get("reasoning", "")
+                    content_token = token.get("content", "")
+                    display_token = reasoning_token + content_token
+                    if reasoning_token:
+                        full_text += reasoning_token
+                    if content_token:
+                        full_text += content_token
+                    if display_token:
+                        stream_display.push_compact(display_token)
                         last_status_at = _maybe_emit_answer_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_text)
+                stream_display.end_compact()
                 stream_display.end_stage()
                 raw_full = full_text.strip()
                 cleaned = clean_model_output(raw_full, OutputCleanConfig(mode="text"))
@@ -1236,13 +1239,13 @@ class QwenVLGGUFBase:
                         continue
                     if chunk is None:
                         break
-                    token = (
-                        chunk.get("choices", [{}])[0]
-                        .get("delta", {})
-                        .get("content", "")
-                    )
-                    if token:
-                        full_text_acc += token
+                    token = extract_stream_token(chunk)
+                    reasoning_token = token.get("reasoning", "")
+                    content_token = token.get("content", "")
+                    if reasoning_token:
+                        full_text_acc += reasoning_token
+                    if content_token:
+                        full_text_acc += content_token
             finally:
                 abort_event.set()
                 worker.join(timeout=5.0)
@@ -1422,7 +1425,7 @@ class QwenVLGGUFBase:
         prompt_template = "" if preset_prompt == "🚫 No preset (image-only)" else SYSTEM_PROMPTS.get(preset_prompt, preset_prompt)
 
         # Generate cache key with all inputs including seed
-        cache_key = get_cache_key(model_name, preset_prompt, custom_prompt, image_hash, video_hash, int(seed), max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty)
+        cache_key = get_cache_key(model_name, preset_prompt, custom_prompt, image_hash, video_hash, int(seed), max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking)
 
         # TEMPORARILY DISABLED CACHE FOR DEBUGGING
         # Check cache first (only for random mode)

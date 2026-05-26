@@ -451,7 +451,7 @@ def apply_qwen_soft_thinking_directive(prompt_text, enable_thinking, supports_so
     lines.append("/think" if enable_thinking else "/no_think")
     return "\n".join(lines).strip()
 
-def get_cache_key(model_name, preset_prompt, custom_prompt, image_hash=None, video_hash=None, seed=None, max_tokens=None, temperature=None, top_p=None, repetition_penalty=None):
+def get_cache_key(model_name, preset_prompt, custom_prompt, image_hash=None, video_hash=None, seed=None, max_tokens=None, temperature=None, top_p=None, repetition_penalty=None, enable_thinking=None):
     """Generate cache key from inputs including all generation parameters.
 
     All generation-parameter fields are optional so existing callers that omit them
@@ -468,6 +468,7 @@ def get_cache_key(model_name, preset_prompt, custom_prompt, image_hash=None, vid
         "temperature": temperature if temperature is not None else None,
         "top_p": top_p if top_p is not None else None,
         "repetition_penalty": repetition_penalty if repetition_penalty is not None else None,
+        "enable_thinking": bool(enable_thinking) if enable_thinking is not None else None,
     }
     # Create deterministic hash
     key_str = json.dumps(key_data, sort_keys=True)
@@ -1722,9 +1723,10 @@ class QwenVLBase:
                     if token_str:
                         throw_exception_if_processing_interrupted()
                         full_streamed += token_str
-                        stream_display.push(token_str)
+                        stream_display.push_compact(token_str)
                         last_status_at = _maybe_emit_hf_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_streamed)
                 thread.join()
+                stream_display.end_compact()
                 stream_display.end_stage()
                 if not full_streamed.strip():
                     raise RuntimeError("[QwenVL] HF streaming returned empty response")
@@ -1821,7 +1823,7 @@ class QwenVLBase:
         prompt_template = "" if preset_prompt == NO_PRESET_PROMPT else SYSTEM_PROMPTS.get(preset_prompt, preset_prompt)
         
         # Generate cache key with all inputs including seed
-        cache_key = get_cache_key(model_name, preset_prompt, custom_prompt, image_hash, video_hash, seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty)
+        cache_key = get_cache_key(model_name, preset_prompt, custom_prompt, image_hash, video_hash, seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking)
         
         # Check cache first (only for random mode)
         if cache_key in PROMPT_CACHE:

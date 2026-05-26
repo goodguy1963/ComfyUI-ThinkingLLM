@@ -107,7 +107,7 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             folder_names_and_paths={},
             get_folder_paths=lambda *args, **kwargs: [],
         ),
-        "AILab_StreamDisplay": build_stub_module("AILab_StreamDisplay", TerminalStreamDisplay=terminal_stream_display),
+        "AILab_StreamDisplay": build_stub_module("AILab_StreamDisplay", TerminalStreamDisplay=terminal_stream_display, extract_stream_token=lambda chunk: {"reasoning": "", "content": (chunk.get("choices") or [{}])[0].get("delta", {}).get("content", "")}),
         "AILab_LlamaCppInstaller": build_stub_module(
             "AILab_LlamaCppInstaller",
             ensure_llama_cpp_backend=lambda *args, **kwargs: object(),
@@ -279,7 +279,7 @@ class TestTerminalDisplayHelper(unittest.TestCase):
         method_names = {
             node.name for node in helper_class.body if isinstance(node, ast.FunctionDef)
         }
-        for method in ["start_stage", "push", "flush", "end_stage"]:
+        for method in ["start_stage", "push", "flush", "end_stage", "push_compact", "end_compact"]:
             self.assertIn(method, method_names)
 
 
@@ -304,12 +304,8 @@ class TestBufferedStreamingIntegration(unittest.TestCase):
                 self.assertIn(expectations["label"], source)
                 if expectations["stage"]:
                     self.assertIn(expectations["stage"], source)
-                # Accept either the old buffered API or compact rolling-tail API
-                self.assertTrue(
-                    ".start_stage(" in source or ".push_compact(" in source,
-                    f"No streaming API usage found in {filename}: "
-                    "expected .start_stage() or .push_compact()"
-                )
+                self.assertIn(".push_compact(", source, f"{filename} should use compact streaming display")
+                self.assertIn(".end_compact(", source, f"{filename} should finish compact streaming cleanly")
 
     def test_gguf_prompt_enhancer_has_no_off_toggle_text_stream_fallback(self):
         source = read_source("AILab_QwenVL_GGUF_PromptEnhancer.py")
@@ -328,6 +324,56 @@ class TestBufferedStreamingIntegration(unittest.TestCase):
         self.assertIn("def construct_llama_safely", source)
         self.assertIn("_thinkingllm_llama_init_complete", source)
         self.assertIn("construct_llama_safely(Llama, llm_kwargs_filtered", source)
+
+    def test_gguf_streaming_files_use_shared_extractor(self):
+        for filename in ("AILab_QwenVL_GGUF.py", "AILab_QwenVL_GGUF_PromptEnhancer.py"):
+            source = read_source(filename)
+            with self.subTest(filename=filename):
+                self.assertIn("extract_stream_token", source, f"{filename} should use shared chunk extraction")
+                self.assertIn("display_token = reasoning_token + content_token", source)
+                self.assertNotIn("display_token = reasoning_token or content_token", source)
+                self.assertNotIn("stream_display.push(display_token)", source)
+
+    def test_stream_token_extractor_handles_reasoning_content(self):
+        from AILab_StreamDisplay import extract_stream_token
+        # Reasoning chunk
+        chunk = {"choices": [{"delta": {"reasoning_content": "Let me think...", "content": ""}}]}
+        self.assertEqual(extract_stream_token(chunk), {"reasoning": "Let me think...", "content": ""})
+        # Content-only chunk
+        chunk2 = {"choices": [{"delta": {"reasoning_content": "", "content": "The answer is 42."}}]}
+        self.assertEqual(extract_stream_token(chunk2), {"reasoning": "", "content": "The answer is 42."})
+        # Mixed chunk
+        chunk3 = {"choices": [{"delta": {"reasoning_content": "Hmm...", "content": "OK"}}]}
+        self.assertEqual(extract_stream_token(chunk3), {"reasoning": "Hmm...", "content": "OK"})
+        # Empty chunk
+        self.assertEqual(extract_stream_token({}), {"reasoning": "", "content": ""})
+
+        # llama.cpp/OpenAI-compatible variants seen across releases
+        top_level_reasoning = {"reasoning_content": "thinking..."}
+        self.assertEqual(extract_stream_token(top_level_reasoning), {"reasoning": "thinking...", "content": ""})
+
+        message_chunk = {"choices": [{"message": {"content": "final answer"}}]}
+        self.assertEqual(extract_stream_token(message_chunk), {"reasoning": "", "content": "final answer"})
+
+        object_chunk = types.SimpleNamespace(
+            choices=[types.SimpleNamespace(delta=types.SimpleNamespace(reasoning_content="why", content=" then"))]
+        )
+        self.assertEqual(extract_stream_token(object_chunk), {"reasoning": "why", "content": " then"})
+
+    def test_compact_stream_display_does_not_flush_unstyled_tail(self):
+        from AILab_StreamDisplay import TerminalStreamDisplay
+        import io
+
+        display = TerminalStreamDisplay("UnitTest", flush_interval=999, min_chunk_chars=999, compact=True)
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            display.start_stage("STREAMING")
+            display.push_compact("partial compact token output")
+            display.end_stage()
+        output = stream.getvalue()
+        self.assertIn("[UnitTest] partial compact token output", output)
+        self.assertEqual(output.count("partial compact token output"), 1)
+        self.assertIn("[UnitTest] STREAMING complete", output)
 
 
 class TestPromptEnhancerMetadata(unittest.TestCase):

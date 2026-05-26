@@ -35,7 +35,7 @@ from comfy.model_management import throw_exception_if_processing_interrupted
 # Import cache functions from main module
 import sys
 sys.path.append(str(Path(__file__).parent))
-from AILab_StreamDisplay import TerminalStreamDisplay
+from AILab_StreamDisplay import TerminalStreamDisplay, extract_stream_token
 from AILab_QwenVL import (
     PROMPT_CACHE,
     apply_qwen_soft_thinking_directive,
@@ -792,16 +792,17 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                     if kind == "chunk":
                         throw_exception_if_processing_interrupted()
                         chunk = payload if isinstance(payload, dict) else {}
-                        token = (
-                            chunk.get("choices", [{}])[0]
-                            .get("delta", {})
-                            .get("content", "")
-                        )
-                        if token:
-                            full_text += token
-                            if stream_display is not None:
-                                stream_display.push(token)
-                                last_status_at = _maybe_emit_prompt_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_text)
+                        token = extract_stream_token(chunk)
+                        reasoning_token = token.get("reasoning", "")
+                        content_token = token.get("content", "")
+                        display_token = reasoning_token + content_token
+                        if reasoning_token:
+                            full_text += reasoning_token
+                        if content_token:
+                            full_text += content_token
+                        if display_token and stream_display is not None:
+                            stream_display.push_compact(display_token)
+                            last_status_at = _maybe_emit_prompt_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_text)
                         continue
 
                     if kind == "done":
@@ -818,6 +819,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                     _, _, clear_abort_callback = abort_callback_refs
                     clear_abort_callback()
                 if stream_display is not None:
+                    stream_display.end_compact()
                     stream_display.end_stage()
             if not full_text.strip():
                 raise RuntimeError("[QwenVL] llama_cpp streaming returned empty response")
@@ -932,7 +934,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 f"english_output={bool(english_output)}",
             ) if part
         )
-        cache_key = get_cache_key(model_name, preset_system_prompt, cache_prompt, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty)
+        cache_key = get_cache_key(model_name, preset_system_prompt, cache_prompt, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking)
 
         # Check cache first (only for random mode)
         if cache_key in PROMPT_CACHE and not stream_tokens_to_terminal:

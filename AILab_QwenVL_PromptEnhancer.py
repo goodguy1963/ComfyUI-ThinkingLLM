@@ -555,7 +555,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 from transformers import TextIteratorStreamer
                 from threading import Thread
                 stage_label = "INITIAL GENERATION"
-                stream_display = TerminalStreamDisplay("QwenVL PromptEnhancer HF", suppress_planning=True, compact=False)
+                stream_display = TerminalStreamDisplay("QwenVL PromptEnhancer HF", suppress_planning=True, compact=True)
                 streamer = TextIteratorStreamer(self.text_tokenizer, skip_prompt=True, skip_special_tokens=True)
                 gen_kwargs["streamer"] = streamer
                 # Launch generation in a thread so we can iterate the streamer
@@ -571,9 +571,10 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                     if token_str:
                         throw_exception_if_processing_interrupted()
                         full_streamed += token_str
-                        stream_display.push(token_str)
+                        stream_display.push_compact(token_str)
                         last_status_at = _maybe_emit_hf_prompt_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_streamed)
                 thread.join()
+                stream_display.end_compact()
                 stream_display.end_stage()
                 if not full_streamed.strip():
                     raise RuntimeError("[QwenVL] HF streaming returned empty response")
