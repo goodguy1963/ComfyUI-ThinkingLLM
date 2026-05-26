@@ -1,4 +1,5 @@
 import re
+import shutil
 import sys
 import time
 
@@ -91,14 +92,81 @@ def extract_stream_token(chunk) -> dict[str, str]:
     return {"reasoning": reasoning, "content": content}
 
 
+class StreamDegenerationError(RuntimeError):
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class StreamDegenerationGuard:
+    def __init__(self, repeated_word_limit: int = 8, repeated_ngram_limit: int = 8):
+        self.repeated_word_limit = max(4, int(repeated_word_limit))
+        self.repeated_ngram_limit = max(3, int(repeated_ngram_limit))
+        self._text = ""
+        self._words: list[str] = []
+
+    def push(self, text: str):
+        if not text:
+            return
+        self._text = (self._text + text)[-4096:]
+        words = [w.casefold() for w in re.findall(r"[A-Za-z][A-Za-z'\-]{2,}", self._text)]
+        if not words:
+            return
+        self._words = words[-256:]
+        reason = self._detect()
+        if reason:
+            raise StreamDegenerationError(reason)
+
+    def _detect(self) -> str:
+        if not self._words:
+            return ""
+        last_word = self._words[-1]
+        if len(last_word) >= 4:
+            run = 0
+            for word in reversed(self._words):
+                if word != last_word:
+                    break
+                run += 1
+            if run >= self.repeated_word_limit:
+                return f"repeated word '{last_word}' {run} times"
+
+        for size in range(2, 6):
+            needed = size * self.repeated_ngram_limit
+            if len(self._words) < needed:
+                continue
+            tail = self._words[-size:]
+            if all(self._words[-offset - size : -offset] == tail for offset in range(size, needed, size)):
+                return f"repeated {size}-word phrase {' '.join(tail)!r}"
+        return ""
+
+
+def strip_degenerate_repetition(text: str, repeated_word_limit: int = 8) -> str:
+    if not text:
+        return ""
+    matches = list(re.finditer(r"[A-Za-z][A-Za-z'\-]{2,}", text))
+    if not matches:
+        return text
+    last = matches[-1].group(0).casefold()
+    if len(last) < 4:
+        return text
+    run_start = len(matches) - 1
+    while run_start >= 0 and matches[run_start].group(0).casefold() == last:
+        run_start -= 1
+    run_count = len(matches) - run_start - 1
+    if run_count < repeated_word_limit:
+        return text
+    cut_at = matches[run_start + 1].start()
+    return text[:cut_at].rstrip(" \t\r\n,.;:!?")
+
+
 class TerminalStreamDisplay:
     """Buffered terminal display for streamed model output.
 
     Keeps the raw output accumulation in the caller, but renders only readable
     chunks to the terminal with stage headers and completion summaries.
 
-    When *compact* is True, token content is shown as a rolling 200-character
-    tail on a single line so older tokens scroll off naturally.
+    When *compact* is True, token content is printed as clean wrapped text
+    without node labels, carriage returns, or tail truncation.
     """
 
     _SENTENCE_BOUNDARY_RE = re.compile(r"[.!?](?:['\")\]]+)?(?:\s+|$)")
@@ -117,6 +185,7 @@ class TerminalStreamDisplay:
         flush_interval: float = 1.0,
         suppress_planning: bool = False,
         compact: bool = True,
+        line_width: int | None = None,
     ):
         self.label = label
         self.flush_chars = max(32, int(flush_chars))
@@ -133,6 +202,10 @@ class TerminalStreamDisplay:
         self._last_compact_emit_at = 0.0
         self._last_compact_tail = ""
         self._compact_active = False
+        self._stream_pending_text = ""
+        self._stream_col = 0
+        self._stream_need_space = False
+        self._line_width_override = int(line_width) if line_width else None
 
     def start_stage(self, stage_name: str):
         self.end_stage()
@@ -140,6 +213,8 @@ class TerminalStreamDisplay:
         self._stage_started_at = time.monotonic()
         self._stage_chars = 0
         self._stage_updates = 0
+        if self.compact:
+            return
         self._write_line(f"[{self.label}] {stage_name}")
 
     def push(self, text: str):
@@ -178,6 +253,12 @@ class TerminalStreamDisplay:
         else:
             self.flush(force=True)
         if not self._stage_name:
+            return
+        if self.compact:
+            self._stage_name = None
+            self._stage_started_at = None
+            self._stage_chars = 0
+            self._stage_updates = 0
             return
         elapsed = 0.0
         if self._stage_started_at is not None:
@@ -247,51 +328,86 @@ class TerminalStreamDisplay:
         sys.stdout.write(msg)
         sys.stdout.flush()
 
-    def _write_rolling_line(self, label: str, tail: str, final: bool = False):
-        """Emit a carriage-return line showing the last ~200 chars, clearing to EOL.
-        'final' adds a trailing newline so the last frame stays visible."""
-        if not tail:
+    def _stream_line_width(self) -> int:
+        if self._line_width_override:
+            return max(24, self._line_width_override)
+        columns = shutil.get_terminal_size(fallback=(120, 24)).columns
+        return max(40, min(96, columns // 2))
+
+    def _write_wrapped_stream_text(self, text: str):
+        if not text:
             return
-        msg = f"\r[{label}] {tail}\033[K"
-        sys.stdout.write(msg)
-        if final:
-            sys.stdout.write("\n")
+        width = self._stream_line_width()
+        for part in re.findall(r"\S+|\s+", text.replace("\r", "")):
+            if not part:
+                continue
+            if part.isspace():
+                newline_count = part.count("\n")
+                if newline_count:
+                    sys.stdout.write("\n" * newline_count)
+                    self._stream_col = 0
+                    self._stream_need_space = False
+                elif self._stream_col > 0:
+                    self._stream_need_space = True
+                continue
+
+            word = part
+            prefix = 1 if self._stream_need_space and self._stream_col > 0 else 0
+            if self._stream_col > 0 and self._stream_col + prefix + len(word) > width:
+                sys.stdout.write("\n")
+                self._stream_col = 0
+                prefix = 0
+            if prefix:
+                sys.stdout.write(" ")
+                self._stream_col += 1
+            sys.stdout.write(word)
+            self._stream_col += len(word)
+            self._stream_need_space = False
         sys.stdout.flush()
 
-    def push_compact(self, text: str):
-        """Append *text* and emit a carriage-return rolling tail every throttle interval.
+    def _drain_stream_pending(self, force: bool = False):
+        if not self._stream_pending_text:
+            return
+        text = self._stream_pending_text
+        if force:
+            emit = text
+            self._stream_pending_text = ""
+        else:
+            match = None
+            for match in re.finditer(r"\s+", text):
+                pass
+            if match is None:
+                if len(text) < self._stream_line_width():
+                    return
+                emit = text
+                self._stream_pending_text = ""
+            else:
+                end = match.end()
+                emit = text[:end]
+                self._stream_pending_text = text[end:]
+        self._write_wrapped_stream_text(emit)
 
-        Uses \\r to redraw a single line so the terminal stays clean without
-        flooding the ComfyUI log buffer.
-        """
+    def push_compact(self, text: str):
+        """Append *text* as clean wrapped terminal output without node prefixes."""
         if not text:
             return
         self._compact_active = True
         self._stage_chars += len(text)
-        self._buffer += text
-        if len(self._buffer) > self.TAIL_LENGTH * 2:
-            self._buffer = self._buffer[-self.TAIL_LENGTH:]
-        tail = self._compact_tail()
-        now = time.monotonic()
-        should_emit = False
-        if tail and tail != self._last_compact_tail:
-            if self._last_compact_emit_at <= 0.0:
-                should_emit = len(self._buffer) >= self.min_chunk_chars
-            elif (now - self._last_compact_emit_at) >= self.flush_interval:
-                should_emit = True
-        if should_emit:
-            self._stage_updates += 1
-            self._last_compact_tail = tail
-            self._last_compact_emit_at = now
-            self._write_rolling_line(self.label, tail)
+        self._stage_updates += 1
+        self._stream_pending_text += text
+        self._drain_stream_pending(force=False)
 
     def end_compact(self):
         """Finish compact mode with one final newline-terminated snapshot."""
-        tail = self._compact_tail()
-        if tail and tail != self._last_compact_tail:
-            self._stage_updates += 1
+        had_pending = bool(self._stream_pending_text)
+        self._drain_stream_pending(force=True)
+        if (had_pending or self._stream_col > 0) and self._stage_chars:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
         self._last_compact_tail = ""
         self._last_compact_emit_at = 0.0
         self._compact_active = False
         self._buffer = ""
-        self._write_rolling_line(self.label, tail or "", final=True)
+        self._stream_pending_text = ""
+        self._stream_col = 0
+        self._stream_need_space = False

@@ -176,7 +176,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 "keep_model_loaded": ("BOOLEAN", {"default": False, "tooltip": PROMPT_ENHANCER_TOOLTIPS["keep_model_loaded"]}),
                 "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": PROMPT_ENHANCER_TOOLTIPS["seed"]}),
                 "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep the last generated prompt instead of creating a new one"}),
-                "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Show readable generation progress and thinking-status summaries in the ComfyUI terminal. When enabled, fixed-seed prompt reuse is bypassed so a fresh streamed run can occur."}),
+                "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Show clean wrapped generated tokens in the ComfyUI terminal. When enabled, fixed-seed prompt reuse is bypassed so a fresh streamed run can occur."}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. Prompt enhancers still return a cleaned final prompt, so terminal reasoning may be hidden or empty."}),
                 "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": TOOLTIPS["hf_token"]}),
             }
@@ -233,13 +233,14 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             print(f"[QwenVL PromptEnhancer HF] Fixed seed {seed} matched — using per-node prompt: {saved_prompt[:50]}...")
             return (saved_prompt, "")
         if saved_prompt and stream_tokens_to_terminal:
-            print("[QwenVL PromptEnhancer HF] Streaming requested — bypassing fixed-seed prompt reuse for a fresh streamed run")
+            pass
         if keep_last_prompt:
             print(f"[QwenVL PromptEnhancer HF] Keep last prompt enabled but no saved prompt found — returning empty")
             return ("", "")
 
         # Always generate unless keep_last_prompt was requested
-        print(f"[QwenVL PromptEnhancer HF] Generating new prompt")
+        if not stream_tokens_to_terminal:
+            print(f"[QwenVL PromptEnhancer HF] Generating new prompt")
 
         is_custom_only = enhancement_style == CUSTOM_ONLY_STYLE
         style_instruction = "" if is_custom_only else self.STYLES.get(
@@ -561,10 +562,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 # Launch generation in a thread so we can iterate the streamer
                 import threading
                 thread = threading.Thread(target=self.text_model.generate, kwargs={**inputs, **gen_kwargs})
-                print(f"[QwenVL PromptEnhancer HF] STREAMING {stage_label}")
                 stream_display.start_stage(stage_label)
-                stage_started_at = time.monotonic()
-                last_status_at = stage_started_at
                 thread.start()
                 full_streamed = ""
                 for token_str in streamer:
@@ -572,7 +570,6 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                         throw_exception_if_processing_interrupted()
                         full_streamed += token_str
                         stream_display.push_compact(token_str)
-                        last_status_at = _maybe_emit_hf_prompt_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_streamed)
                 thread.join()
                 stream_display.end_compact()
                 stream_display.end_stage()

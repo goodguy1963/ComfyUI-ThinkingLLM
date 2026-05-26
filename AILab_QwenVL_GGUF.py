@@ -27,7 +27,13 @@ import numpy as np
 import torch
 from huggingface_hub import snapshot_download
 from PIL import Image
-from AILab_StreamDisplay import TerminalStreamDisplay, extract_stream_token
+from AILab_StreamDisplay import (
+    StreamDegenerationError,
+    StreamDegenerationGuard,
+    TerminalStreamDisplay,
+    extract_stream_token,
+    strip_degenerate_repetition,
+)
 from AILab_LlamaCppInstaller import (
     ensure_llama_cpp_backend,
     format_llama_cpp_backend_info,
@@ -1117,6 +1123,7 @@ class QwenVLGGUFBase:
         model_name: str = "",
         stream_to_terminal: bool = False,
         enable_thinking: bool = True,
+        top_k: int | None = None,
     ):
         """Returns (cleaned_text, raw_text) tuple."""
         ensure_cuda_vram_headroom("QwenVL GGUF", min_free_gb=1.0, min_free_ratio=0.08)
@@ -1162,12 +1169,19 @@ class QwenVLGGUFBase:
                 ]
 
             start = time.perf_counter()
+            sampler_kwargs = {
+                "top_k": int(top_k) if top_k is not None else 60,
+                "min_p": 0.01,
+                "repeat_last_n": 48,
+                "presence_penalty": max(0.0, min(1.5, float(repetition_penalty) - 1.0 + 1.2)),
+                "frequency_penalty": 0.2,
+            }
             if stream_to_terminal:
                 stream_display = TerminalStreamDisplay("QwenVL GGUF", suppress_planning=True, compact=True)
                 stream_display.start_stage(stage_label)
-                stage_started_at = time.monotonic()
-                last_status_at = stage_started_at
                 full_text = ""
+                degeneration_guard = StreamDegenerationGuard()
+                stopped_for_degenerate_stream = ""
                 result = self._create_chat_completion(
                     enable_thinking=current_enable_thinking,
                     messages=messages,
@@ -1178,6 +1192,7 @@ class QwenVLGGUFBase:
                     seed=int(seed_value),
                     stop=["<|im_end|>", "<|im_start|>"],
                     stream=True,
+                    **sampler_kwargs,
                 )
                 for chunk in result:
                     throw_exception_if_processing_interrupted()
@@ -1190,11 +1205,20 @@ class QwenVLGGUFBase:
                     if content_token:
                         full_text += content_token
                     if display_token:
+                        try:
+                            degeneration_guard.push(display_token)
+                        except StreamDegenerationError as exc:
+                            stopped_for_degenerate_stream = exc.reason
+                            close_result = getattr(result, "close", None)
+                            if callable(close_result):
+                                close_result()
+                            break
                         stream_display.push_compact(display_token)
-                        last_status_at = _maybe_emit_answer_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_text)
                 stream_display.end_compact()
                 stream_display.end_stage()
-                raw_full = full_text.strip()
+                raw_full = strip_degenerate_repetition(full_text).strip()
+                if stopped_for_degenerate_stream:
+                    print(f"[QwenVL GGUF] stopped repeated-token loop: {stopped_for_degenerate_stream}")
                 cleaned = clean_model_output(raw_full, OutputCleanConfig(mode="text"))
                 return cleaned.strip(), raw_full
 
@@ -1204,6 +1228,8 @@ class QwenVLGGUFBase:
             chunk_queue: qmod.Queue = qmod.Queue()
             full_text_acc = ""
             worker_error: Exception | None = None
+            degeneration_guard = StreamDegenerationGuard()
+            stopped_for_degenerate_stream = ""
 
             def _stream_worker():
                 nonlocal worker_error
@@ -1218,6 +1244,7 @@ class QwenVLGGUFBase:
                         seed=int(seed_value),
                         stop=["<|im_end|>", "<|im_start|>"],
                         stream=True,
+                        **sampler_kwargs,
                     )
                     for chunk in result:
                         if abort_event.is_set():
@@ -1246,6 +1273,14 @@ class QwenVLGGUFBase:
                         full_text_acc += reasoning_token
                     if content_token:
                         full_text_acc += content_token
+                    display_token = reasoning_token + content_token
+                    if display_token:
+                        try:
+                            degeneration_guard.push(display_token)
+                        except StreamDegenerationError as exc:
+                            stopped_for_degenerate_stream = exc.reason
+                            abort_event.set()
+                            break
             finally:
                 abort_event.set()
                 worker.join(timeout=5.0)
@@ -1253,7 +1288,9 @@ class QwenVLGGUFBase:
                 raise worker_error
             throw_exception_if_processing_interrupted()
             elapsed = max(time.perf_counter() - start, 1e-6)
-            raw_content = full_text_acc.strip()
+            raw_content = strip_degenerate_repetition(full_text_acc).strip()
+            if stopped_for_degenerate_stream:
+                print(f"[QwenVL GGUF] stopped repeated-token loop: {stopped_for_degenerate_stream}")
             cleaned = clean_model_output(raw_content, OutputCleanConfig(mode="text"))
             return cleaned.strip(), raw_content
 
@@ -1420,7 +1457,8 @@ class QwenVLGGUFBase:
             if saved:
                 print(f"[QwenVL GGUF] Fixed seed {seed} matched — using per-node prompt: {saved[:50]}...")
                 return (saved, "")
-        print(f"[QwenVL GGUF] Generating new prompt")
+        if not stream_to_terminal:
+            print(f"[QwenVL GGUF] Generating new prompt")
 
         prompt_template = "" if preset_prompt == "🚫 No preset (image-only)" else SYSTEM_PROMPTS.get(preset_prompt, preset_prompt)
 
@@ -1538,6 +1576,7 @@ class QwenVLGGUFBase:
                         model_name=model_name,
                         stream_to_terminal=stream_to_terminal,
                         enable_thinking=effective_thinking,
+                        top_k=top_k,
                     )
                     if self.last_backend_trace:
                         raw_trace = f"{self.last_backend_trace}\n\n{raw_trace}" if raw_trace else self.last_backend_trace

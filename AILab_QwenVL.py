@@ -1713,10 +1713,7 @@ class QwenVLBase:
                 streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, skip_special_tokens=True)
                 kwargs["streamer"] = streamer
                 thread = Thread(target=self.model.generate, kwargs={**model_inputs, **kwargs})
-                print(f"[QwenVL HF] STREAMING {stage_label}")
                 stream_display.start_stage(stage_label)
-                stage_started_at = time.monotonic()
-                last_status_at = stage_started_at
                 thread.start()
                 full_streamed = ""
                 for token_str in streamer:
@@ -1724,7 +1721,6 @@ class QwenVLBase:
                         throw_exception_if_processing_interrupted()
                         full_streamed += token_str
                         stream_display.push_compact(token_str)
-                        last_status_at = _maybe_emit_hf_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_streamed)
                 thread.join()
                 stream_display.end_compact()
                 stream_display.end_stage()
@@ -1807,7 +1803,7 @@ class QwenVLBase:
             print(f"[QwenVL] Fixed seed {seed} matched — using per-node prompt: {saved[:50]}...")
             return (saved,)
         if saved and stream_to_terminal:
-            print("[QwenVL] Streaming requested — bypassing fixed-seed prompt reuse for a fresh streamed run")
+            pass
         if keep_last_prompt:
             print(f"[QwenVL] Keep last prompt enabled — looking up per-node state")
             if saved:
@@ -1818,7 +1814,8 @@ class QwenVLBase:
                 return ("",)
         
         # Always generate unless keep_last_prompt was requested
-        print(f"[QwenVL] Generating new prompt")
+        if not stream_to_terminal:
+            print(f"[QwenVL] Generating new prompt")
         
         prompt_template = "" if preset_prompt == NO_PRESET_PROMPT else SYSTEM_PROMPTS.get(preset_prompt, preset_prompt)
         

@@ -35,7 +35,13 @@ from comfy.model_management import throw_exception_if_processing_interrupted
 # Import cache functions from main module
 import sys
 sys.path.append(str(Path(__file__).parent))
-from AILab_StreamDisplay import TerminalStreamDisplay, extract_stream_token
+from AILab_StreamDisplay import (
+    StreamDegenerationError,
+    StreamDegenerationGuard,
+    TerminalStreamDisplay,
+    extract_stream_token,
+    strip_degenerate_repetition,
+)
 from AILab_QwenVL import (
     PROMPT_CACHE,
     apply_qwen_soft_thinking_directive,
@@ -54,7 +60,7 @@ from AILab_QwenVL import (
     _make_node_state_key,
     _build_workflow_fingerprint,
 )
-from AILab_QwenVL_GGUF import construct_llama_safely, read_gguf_architecture, register_active_gguf_loader, release_other_gguf_loaders
+from AILab_QwenVL_GGUF import construct_llama_safely, read_gguf_architecture, register_active_gguf_loader, release_other_gguf_loaders, _filter_kwargs_for_callable
 
 
 GGUF_PROMPT_TOOLTIPS = {
@@ -71,7 +77,7 @@ GGUF_PROMPT_TOOLTIPS = {
     "keep_model_loaded": "Keep the GGUF model in memory after generation so repeated prompt enhancement skips model loading.",
     "seed": "Sampling seed. Reusing it with identical inputs can reuse the saved prompt result.",
     "keep_last_prompt": "Return the saved per-node prompt instead of generating a new one when available.",
-    "stream_tokens_to_terminal": "Show readable generation progress and thinking-status summaries in the ComfyUI terminal. Streaming bypasses fixed-seed reuse for a fresh run.",
+    "stream_tokens_to_terminal": "Show clean wrapped generated tokens in the ComfyUI terminal. Streaming bypasses fixed-seed reuse for a fresh run.",
     "enable_thinking": "Enable model reasoning/thinking when supported. The node still returns the cleaned final prompt, so reasoning may be hidden or empty.",
     "hf_token": "Optional Hugging Face access token for private or gated GGUF downloads. It is passed only to the download call, never logged or cached, and the in-memory copy is dropped after the download attempt. Clear this field before saving or sharing workflows.",
 }
@@ -744,25 +750,35 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             if stream_to_terminal:
                 if stream_display is None:
                     raise RuntimeError("[QwenVL] Stream display was not initialized")
-                print(f"[QwenVL PromptEnhancer GGUF] STREAMING {stage_label}")
                 stream_display.start_stage(stage_label)
             abort_requested = threading.Event()
             abort_callback_refs = _install_llama_abort_callback(llm, abort_requested.is_set)
             result_queue: queue.Queue[tuple[str, dict | BaseException | None]] = queue.Queue()
+            degeneration_guard = StreamDegenerationGuard()
+            stopped_for_degenerate_stream = ""
 
             def _stream_worker():
                 try:
-                    response = llm.create_chat_completion(
-                        messages=messages,
-                        max_tokens=max_tokens,
-                        temperature=temp,
-                        top_p=top_p,
-                        repeat_penalty=repetition_penalty,
-                        seed=seed_val,
-                        stop=["<|im_end|>", "<|im_start|>"],
-                        stream=True,
-                    )
+                    completion_kwargs = {
+                        "messages": messages,
+                        "max_tokens": max_tokens,
+                        "temperature": temp,
+                        "top_p": top_p,
+                        "top_k": 60,
+                        "min_p": 0.01,
+                        "repeat_penalty": repetition_penalty,
+                        "repeat_last_n": 48,
+                        "presence_penalty": max(0.0, min(1.5, float(repetition_penalty) - 1.0 + 1.2)),
+                        "frequency_penalty": 0.2,
+                        "seed": seed_val,
+                        "stop": ["<|im_end|>", "<|im_start|>"],
+                        "stream": True,
+                    }
+                    completion_kwargs = _filter_kwargs_for_callable(getattr(llm, "create_chat_completion"), completion_kwargs)
+                    response = llm.create_chat_completion(**completion_kwargs)
                     for chunk in response:
+                        if abort_requested.is_set():
+                            return
                         result_queue.put(("chunk", chunk))
                     result_queue.put(("done", None))
                 except BaseException as exc:
@@ -780,13 +796,11 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                         except Exception:
                             abort_requested.set()
                             raise
-                        if full_text:
-                            if stream_display is not None:
-                                last_status_at = _maybe_emit_prompt_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_text)
-                            else:
+                        if stream_display is None:
+                            if full_text:
                                 last_status_at = _maybe_emit_prompt_background_heartbeat(stage_label, stage_started_at, last_status_at, full_text)
-                        else:
-                            last_status_at = _maybe_emit_prompt_waiting_heartbeat(stage_label, stage_started_at, last_status_at)
+                            else:
+                                last_status_at = _maybe_emit_prompt_waiting_heartbeat(stage_label, stage_started_at, last_status_at)
                         continue
 
                     if kind == "chunk":
@@ -801,8 +815,13 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                         if content_token:
                             full_text += content_token
                         if display_token and stream_display is not None:
+                            try:
+                                degeneration_guard.push(display_token)
+                            except StreamDegenerationError as exc:
+                                stopped_for_degenerate_stream = exc.reason
+                                abort_requested.set()
+                                break
                             stream_display.push_compact(display_token)
-                            last_status_at = _maybe_emit_prompt_stream_heartbeat(stage_label, stage_started_at, last_status_at, full_text)
                         continue
 
                     if kind == "done":
@@ -823,7 +842,9 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                     stream_display.end_stage()
             if not full_text.strip():
                 raise RuntimeError("[QwenVL] llama_cpp streaming returned empty response")
-            return full_text.strip()
+            if stopped_for_degenerate_stream:
+                print(f"[QwenVL GGUF] stopped repeated-token loop: {stopped_for_degenerate_stream}")
+            return strip_degenerate_repetition(full_text).strip()
 
         raw = _call(system_prompt, user_prompt, float(temperature), int(seed), initial_stage_label)
         cleaned = clean_model_output(raw, OutputCleanConfig(mode="prompt"))
@@ -918,13 +939,14 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             print(f"[QwenVL PromptEnhancer GGUF] Fixed seed {seed} matched — using per-node prompt: {saved_prompt[:50]}...")
             return (saved_prompt, "")
         if saved_prompt and stream_tokens_to_terminal:
-            print("[QwenVL PromptEnhancer GGUF] Streaming requested — bypassing fixed-seed prompt reuse for a fresh streamed run")
+            pass
         if keep_last_prompt:
             print(f"[QwenVL PromptEnhancer GGUF] Keep last prompt enabled but no saved prompt found — returning empty")
             return ("", "")
 
         # Always generate unless keep_last_prompt was requested
-        print(f"[QwenVL PromptEnhancer GGUF] Generating new prompt")
+        if not stream_tokens_to_terminal:
+            print(f"[QwenVL PromptEnhancer GGUF] Generating new prompt")
 
         # Generate cache key with all inputs including seed
         cache_prompt = "\n\n".join(
@@ -945,7 +967,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         if stream_tokens_to_terminal and cache_key in PROMPT_CACHE:
             cached_text = PROMPT_CACHE[cache_key].get("text", "")
             if cached_text:
-                print("[QwenVL PromptEnhancer GGUF] Streaming requested — bypassing prompt cache for a fresh streamed run")
+                pass
 
         is_custom_only = preset_system_prompt == CUSTOM_ONLY_STYLE
         style_entry = {} if is_custom_only else self.styles.get(preset_system_prompt, {})

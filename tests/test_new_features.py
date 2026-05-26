@@ -79,6 +79,7 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
     comfy_package = build_stub_module("comfy", model_management=comfy_model_management)
     output_clean_config = type("OutputCleanConfig", (), {"__init__": lambda self, *args, **kwargs: None})
     terminal_stream_display = type("TerminalStreamDisplay", (), {})
+    stream_degeneration_error = type("StreamDegenerationError", (RuntimeError,), {})
     qwen_base = type("QwenVLBase", (), {"__init__": lambda self, *args, **kwargs: None})
     return {
         "numpy": build_stub_module("numpy", ndarray=object),
@@ -107,7 +108,14 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             folder_names_and_paths={},
             get_folder_paths=lambda *args, **kwargs: [],
         ),
-        "AILab_StreamDisplay": build_stub_module("AILab_StreamDisplay", TerminalStreamDisplay=terminal_stream_display, extract_stream_token=lambda chunk: {"reasoning": "", "content": (chunk.get("choices") or [{}])[0].get("delta", {}).get("content", "")}),
+        "AILab_StreamDisplay": build_stub_module(
+            "AILab_StreamDisplay",
+            StreamDegenerationError=stream_degeneration_error,
+            StreamDegenerationGuard=type("StreamDegenerationGuard", (), {"__init__": lambda self, *args, **kwargs: None, "push": lambda self, text: None}),
+            TerminalStreamDisplay=terminal_stream_display,
+            extract_stream_token=lambda chunk: {"reasoning": "", "content": (chunk.get("choices") or [{}])[0].get("delta", {}).get("content", "")},
+            strip_degenerate_repetition=lambda text, *args, **kwargs: text,
+        ),
         "AILab_LlamaCppInstaller": build_stub_module(
             "AILab_LlamaCppInstaller",
             ensure_llama_cpp_backend=lambda *args, **kwargs: object(),
@@ -364,16 +372,45 @@ class TestBufferedStreamingIntegration(unittest.TestCase):
         from AILab_StreamDisplay import TerminalStreamDisplay
         import io
 
-        display = TerminalStreamDisplay("UnitTest", flush_interval=999, min_chunk_chars=999, compact=True)
+        display = TerminalStreamDisplay("UnitTest", flush_interval=999, min_chunk_chars=999, compact=True, line_width=24)
         stream = io.StringIO()
         with contextlib.redirect_stdout(stream):
             display.start_stage("STREAMING")
-            display.push_compact("partial compact token output")
+            display.push_compact("partial compact token output with visible words")
             display.end_stage()
         output = stream.getvalue()
-        self.assertIn("[UnitTest] partial compact token output", output)
-        self.assertEqual(output.count("partial compact token output"), 1)
-        self.assertIn("[UnitTest] STREAMING complete", output)
+        self.assertNotIn("[UnitTest]", output)
+        self.assertNotIn("\r", output)
+        self.assertNotIn("…", output)
+        self.assertIn("partial compact token", output)
+        self.assertIn("output with visible", output)
+        self.assertIn("words", output)
+
+    def test_stream_degeneracy_guard_catches_repeated_word_loop(self):
+        from AILab_StreamDisplay import StreamDegenerationError, StreamDegenerationGuard, strip_degenerate_repetition
+
+        guard = StreamDegenerationGuard(repeated_word_limit=5)
+        with self.assertRaises(StreamDegenerationError):
+            guard.push("mightiest, mightiest, mightiest, mightiest, mightiest, ")
+        self.assertEqual(
+            strip_degenerate_repetition(
+                "A strong start, mightiest, mightiest, mightiest, mightiest, mightiest",
+                repeated_word_limit=5,
+            ),
+            "A strong start",
+        )
+
+    def test_visible_streaming_has_no_reasoning_heartbeat_pollution(self):
+        for filename in STREAMING_FILES:
+            source = read_source(filename)
+            with self.subTest(filename=filename):
+                if "GGUF" in filename or filename in {"AILab_QwenVL.py", "AILab_QwenVL_PromptEnhancer.py"}:
+                    stream_pushes = [line for line in source.splitlines() if "push_compact" in line]
+                    self.assertTrue(stream_pushes)
+                self.assertNotIn("last_status_at = _maybe_emit_answer_stream_heartbeat", source)
+                self.assertNotIn("last_status_at = _maybe_emit_hf_stream_heartbeat", source)
+                self.assertNotIn("last_status_at = _maybe_emit_hf_prompt_stream_heartbeat", source)
+                self.assertNotIn("last_status_at = _maybe_emit_prompt_stream_heartbeat", source)
 
 
 class TestPromptEnhancerMetadata(unittest.TestCase):
