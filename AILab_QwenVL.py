@@ -411,6 +411,7 @@ def resolve_qwen_thinking_mode(
     min_reasoning_tokens=QWEN_MIN_REASONING_BUDGET_TOKENS,
     answer_reserve_tokens=QWEN_FINAL_ANSWER_RESERVE_TOKENS,
     context_overhead_tokens=QWEN_CONTEXT_OVERHEAD_TOKENS,
+    quiet=False,
 ):
     """Enable thinking only when requested and enough generation budget remains."""
     if not bool(requested_enable):
@@ -433,11 +434,12 @@ def resolve_qwen_thinking_mode(
             )
         else:
             budget_note = f"max_tokens={requested_output}, available_output={available_output}"
-        print(
-            f"[{label}] Thinking requested but {budget_note} is below the required {minimum_required} tokens "
-            f"({int(min_reasoning_tokens)} reasoning + {int(answer_reserve_tokens)} answer reserve); "
-            "forcing non-thinking mode to preserve answer space."
-        )
+        if not quiet:
+            print(
+                f"[{label}] Thinking requested but {budget_note} is below the required {minimum_required} tokens "
+                f"({int(min_reasoning_tokens)} reasoning + {int(answer_reserve_tokens)} answer reserve); "
+                "forcing non-thinking mode to preserve answer space."
+            )
         return False
     return True
 
@@ -1668,6 +1670,7 @@ class QwenVLBase:
             label="QwenVL HF",
             prompt_tokens=prompt_tokens,
             context_window=context_window,
+            quiet=stream_to_terminal,
         )
         if effective_thinking != requested_thinking:
             _, processed = _build_processed(effective_thinking)

@@ -1130,7 +1130,8 @@ class QwenVLGGUFBase:
         supports_soft_think = getattr(self, "supports_qwen_soft_think", False)
         if supports_soft_think:
             directive = "/think" if enable_thinking else "/no_think"
-            print(f"[QwenVL] Qwen3 GGUF detected: Thinking {'enabled' if enable_thinking else 'disabled'} via chat template and {directive}.")
+            if not stream_to_terminal:
+                print(f"[QwenVL] Qwen3 GGUF detected: Thinking {'enabled' if enable_thinking else 'disabled'} via chat template and {directive}.")
         if self.llm is not None and hasattr(self.llm, "reset"):
             try:
                 self.llm.reset()
@@ -1533,6 +1534,7 @@ class QwenVLGGUFBase:
                         label="QwenVL GGUF",
                         prompt_tokens=estimated_prompt_tokens,
                         context_window=context_window,
+                        quiet=stream_to_terminal,
                     )
                     print(f"[QwenVL GGUF DEBUG] Loading model...")
                     self._load_model(

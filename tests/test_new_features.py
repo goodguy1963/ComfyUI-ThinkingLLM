@@ -411,6 +411,7 @@ class TestBufferedStreamingIntegration(unittest.TestCase):
                 self.assertNotIn("last_status_at = _maybe_emit_hf_stream_heartbeat", source)
                 self.assertNotIn("last_status_at = _maybe_emit_hf_prompt_stream_heartbeat", source)
                 self.assertNotIn("last_status_at = _maybe_emit_prompt_stream_heartbeat", source)
+                self.assertNotIn("terminal stream shows readable progress", source)
 
 
 class TestPromptEnhancerMetadata(unittest.TestCase):

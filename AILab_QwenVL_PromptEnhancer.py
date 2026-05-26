@@ -301,7 +301,8 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
 
         # Persist per-node for future keep_last_prompt=True
         set_node_saved_prompt(node_class, unique_id, extra_pnginfo, final, raw_trace=raw_trace, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
-        print(f"[QwenVL PromptEnhancer HF] Saved per-node prompt: {final[:50]}...")
+        if not stream_tokens_to_terminal:
+            print(f"[QwenVL PromptEnhancer HF] Saved per-node prompt: {final[:50]}...")
 
         return (final, raw_trace)
 
@@ -522,19 +523,19 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             label="QwenVL PromptEnhancer HF",
             prompt_tokens=prompt_tokens,
             context_window=context_window,
+            quiet=stream_to_terminal,
         )
         if effective_thinking != requested_thinking:
             _, inputs = _build_inputs(effective_thinking)
 
-        if stream_to_terminal:
-            print("[QwenVL HF] Prompt enhancer terminal stream shows readable progress only; reasoning text may be hidden or stripped from the final prompt.")
-
         if is_qwen35 or supports_soft_think:
             if supports_soft_think:
                 directive = "/think" if effective_thinking else "/no_think"
-                print(f"[QwenVL] Qwen3 HF prompt enhancer: Thinking {'enabled' if effective_thinking else 'disabled'} via chat template and {directive}.")
+                if not stream_to_terminal:
+                    print(f"[QwenVL] Qwen3 HF prompt enhancer: Thinking {'enabled' if effective_thinking else 'disabled'} via chat template and {directive}.")
         else:
-            print(f"[QwenVL] Non-Qwen model in HF text path: thinking toggle is advisory (model may ignore).")
+            if not stream_to_terminal:
+                print(f"[QwenVL] Non-Qwen model in HF text path: thinking toggle is advisory (model may ignore).")
         gen_kwargs = {
             "max_new_tokens": max_tokens,
             "repetition_penalty": repetition_penalty,
@@ -577,7 +578,6 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                     raise RuntimeError("[QwenVL] HF streaming returned empty response")
                 raw_text = full_streamed.strip()
                 result = clean_model_output(raw_text, OutputCleanConfig(mode="prompt")) or raw_text
-                print(f"[QwenVL HF] Thinking status: {_describe_prompt_enhancer_thinking(requested_thinking, effective_thinking, raw_text)}")
                 if not keep_model_loaded:
                     self.text_model = None
                     self.text_processor = None
@@ -599,9 +599,6 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         generated_tokens = outputs[0][input_length:]
         raw_text = self.text_tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
         result = clean_model_output(raw_text, OutputCleanConfig(mode="prompt")) or raw_text
-
-        if stream_to_terminal:
-            print(f"[QwenVL HF] Thinking status: {_describe_prompt_enhancer_thinking(requested_thinking, effective_thinking, raw_text)}")
 
         if not keep_model_loaded:
             self.text_model = None

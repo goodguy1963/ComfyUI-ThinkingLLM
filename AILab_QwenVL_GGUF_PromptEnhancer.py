@@ -489,8 +489,9 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             },
         }
 
-    def clear(self):
-        print(f"[QwenVL PromptEnhancer DEBUG] Starting VRAM cleanup...")
+    def clear(self, quiet: bool = False):
+        if not quiet:
+            print(f"[QwenVL PromptEnhancer DEBUG] Starting VRAM cleanup...")
         
         # Force cleanup of LLM model
         if self.llm is not None:
@@ -503,7 +504,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 # Force garbage collection of the model
                 del self.llm
             except Exception as e:
-                print(f"[QwenVL PromptEnhancer DEBUG] Error closing LLM: {e}")
+                if not quiet:
+                    print(f"[QwenVL PromptEnhancer DEBUG] Error closing LLM: {e}")
             finally:
                 self.llm = None
         
@@ -515,7 +517,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         
         # Force CUDA cache cleanup multiple times
         if torch.cuda.is_available():
-            print(f"[QwenVL PromptEnhancer DEBUG] Clearing CUDA cache...")
+            if not quiet:
+                print(f"[QwenVL PromptEnhancer DEBUG] Clearing CUDA cache...")
             torch.cuda.empty_cache()
             try:
                 torch.cuda.ipc_collect()
@@ -525,7 +528,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             # Additional cleanup
             torch.cuda.empty_cache()
         
-        print(f"[QwenVL PromptEnhancer DEBUG] VRAM cleanup completed")
+        if not quiet:
+            print(f"[QwenVL PromptEnhancer DEBUG] VRAM cleanup completed")
 
     def _resolve_model_path(self, model_name):
         models = self.gguf_models.get("models") or {}
@@ -615,7 +619,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         if not resolved.exists():
             raise FileNotFoundError(f"[QwenVL] GGUF model not found after download: {resolved} (tried: {', '.join(attempted)})")
 
-    def _load_model(self, model_name, device, enable_thinking=True, unique_id=None, hf_token: str | None = None, context_length_override: int | None = None):
+    def _load_model(self, model_name, device, enable_thinking=True, unique_id=None, hf_token: str | None = None, context_length_override: int | None = None, quiet: bool = False):
         Llama = self._load_backend()
         resolved = self._resolve_model_path(model_name)
         self._maybe_download_model(model_name, resolved, unique_id=unique_id, hf_token=hf_token)
@@ -627,7 +631,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             raw_context_int = int(raw_context_length)
         except Exception:
             raw_context_int = context_length
-        if context_length < raw_context_int:
+        if context_length < raw_context_int and not quiet:
             print(
                 f"[QwenVL PromptEnhancer GGUF] Using context length {context_length} "
                 f"instead of catalog {raw_context_int} to reduce KV-cache VRAM."
@@ -640,8 +644,9 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         release_other_gguf_loaders(self, resolved.name)
         
         # Force aggressive cleanup before loading new model (especially for same model conflicts)
-        print(f"[QwenVL PromptEnhancer DEBUG] Forcing cleanup before model loading...")
-        self.clear()
+        if not quiet:
+            print(f"[QwenVL PromptEnhancer DEBUG] Forcing cleanup before model loading...")
+        self.clear(quiet=quiet)
         
         # Additional wait for CUDA cleanup
         if torch.cuda.is_available():
@@ -650,7 +655,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         resolved.parent.mkdir(parents=True, exist_ok=True)
         if not resolved.exists():
             raise FileNotFoundError(f"[QwenVL] GGUF model not found: {resolved}")
-        print(f"[QwenVL] Loading GGUF model from {resolved}")
+        if not quiet:
+            print(f"[QwenVL] Loading GGUF model from {resolved}")
         if device == "auto":
             device_choice = "cuda" if torch.cuda.is_available() else ("mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu")
         else:
@@ -679,7 +685,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             thinking_state = bool(enable_thinking)
             kwargs["chat_template_kwargs"] = {"enable_thinking": thinking_state}
             state_label = "enabled" if thinking_state else "disabled"
-            print(f"[QwenVL] Qwen architecture detected (arch={arch}): Thinking {state_label} via chat template.")
+            if not quiet:
+                print(f"[QwenVL] Qwen architecture detected (arch={arch}): Thinking {state_label} via chat template.")
         else:
             thinking_state = bool(enable_thinking)
             if not thinking_state:
@@ -714,7 +721,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         supports_soft_think = getattr(self, "supports_qwen_soft_think", False)
         if supports_soft_think:
             directive = "/think" if enable_thinking else "/no_think"
-            print(f"[QwenVL] Qwen3 GGUF prompt enhancer: Thinking {'enabled' if enable_thinking else 'disabled'} via chat template and {directive}.")
+            if not stream_to_terminal:
+                print(f"[QwenVL] Qwen3 GGUF prompt enhancer: Thinking {'enabled' if enable_thinking else 'disabled'} via chat template and {directive}.")
 
         def _call(
             system: str,
@@ -990,9 +998,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             label="QwenVL PromptEnhancer GGUF",
             prompt_tokens=estimated_prompt_tokens,
             context_window=effective_context_window,
+            quiet=stream_tokens_to_terminal,
         )
-        if stream_tokens_to_terminal:
-            print("[QwenVL GGUF] Prompt enhancer terminal stream shows readable progress only; reasoning text may be hidden or stripped from the final prompt.")
         self._load_model(
             model_name,
             device,
@@ -1000,6 +1007,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             unique_id=unique_id,
             hf_token=hf_token,
             context_length_override=effective_context_window,
+            quiet=stream_tokens_to_terminal,
         )
         hf_token = ""
         enhanced, raw_trace = self._invoke_llama(
@@ -1014,11 +1022,6 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             initial_stage_label="INITIAL GENERATION",
             enable_thinking=effective_thinking,
         )
-        if stream_tokens_to_terminal:
-            print(
-                f"[QwenVL GGUF] Thinking status: "
-                f"{_describe_prompt_enhancer_thinking(bool(enable_thinking), effective_thinking, raw_trace, retried='[FINALIZATION ATTEMPT ' in raw_trace)}"
-            )
         full_raw_trace = raw_trace
         if english_output:
             translated, trans_trace = self._invoke_llama(
@@ -1054,18 +1057,21 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         }
         save_prompt_cache()
 
-        print(f"[QwenVL PromptEnhancer GGUF] Cached new prompt for seed {seed}: {cache_key[:8]}...")
+        if not stream_tokens_to_terminal:
+            print(f"[QwenVL PromptEnhancer GGUF] Cached new prompt for seed {seed}: {cache_key[:8]}...")
 
         try:
             # Persist per-node for future keep_last_prompt=True
             set_node_saved_prompt(node_class, unique_id, extra_pnginfo, final, raw_trace=full_raw_trace, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
-            print(f"[QwenVL PromptEnhancer GGUF] Saved per-node prompt: {final[:50]}...")
+            if not stream_tokens_to_terminal:
+                print(f"[QwenVL PromptEnhancer GGUF] Saved per-node prompt: {final[:50]}...")
 
             return (final, full_raw_trace)
         finally:
             if not keep_model_loaded:
-                self.clear()
-                print(f"[QwenVL PromptEnhancer GGUF] keep_model_loaded=False — cleaning up model...")
+                self.clear(quiet=stream_tokens_to_terminal)
+                if not stream_tokens_to_terminal:
+                    print(f"[QwenVL PromptEnhancer GGUF] keep_model_loaded=False — cleaning up model...")
 
     @staticmethod
     def _is_english(text):
