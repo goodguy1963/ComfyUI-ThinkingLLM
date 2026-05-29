@@ -272,6 +272,38 @@ def iter_workflow_types(path: Path) -> list[str]:
     ]
 
 
+def load_model_recommendations() -> dict:
+    return json.loads((PKG / "web" / "model_recommendations.json").read_text(encoding="utf-8"))
+
+
+def matches_recommendation_rule(model_name: str, rules: list[dict]) -> bool:
+    lowered = model_name.lower()
+    ordered = sorted(rules, key=lambda rule: rule.get("priority", 0), reverse=True)
+    for rule in ordered:
+        include = [token.lower() for token in rule.get("match_any", [])]
+        exclude = [token.lower() for token in rule.get("exclude_any", [])]
+        if any(token in lowered for token in include) and not any(token in lowered for token in exclude):
+            return True
+    return False
+
+
+def iter_catalog_display_names() -> list[str]:
+    names: list[str] = []
+    hf_payload = json.loads((PKG / "hf_models.json").read_text(encoding="utf-8"))
+    for section in ("hf_vl_models", "hf_text_models"):
+        names.extend(list((hf_payload.get(section) or {}).keys()))
+
+    gguf_payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
+    for section in ("Qwen_model", "qwenVL_model"):
+        entries = gguf_payload.get(section) or {}
+        for repo_key, repo in entries.items():
+            if not isinstance(repo, dict):
+                continue
+            for model_file in repo.get("model_files") or []:
+                names.append(str(Path(model_file).name))
+    return names
+
+
 class TestTerminalDisplayHelper(unittest.TestCase):
     def test_helper_file_exists(self):
         self.assertTrue((PKG / "AILab_StreamDisplay.py").exists())
@@ -318,8 +350,44 @@ class TestBufferedStreamingIntegration(unittest.TestCase):
     def test_gguf_prompt_enhancer_has_no_off_toggle_text_stream_fallback(self):
         source = read_source("AILab_QwenVL_GGUF_PromptEnhancer.py")
         self.assertNotIn("_maybe_emit_prompt_compact_progress", source)
+
+
+class TestModelRecommendations(unittest.TestCase):
+    def test_recommendation_rules_have_sources(self):
+        payload = load_model_recommendations()
+        rules = payload.get("rules") or []
+        self.assertTrue(rules, "model_recommendations.json should define at least one rule")
+        for rule in rules:
+            with self.subTest(rule=rule.get("id")):
+                self.assertTrue(rule.get("sources"), "each recommendation rule should record its research source")
+
+    def test_recommendations_cover_all_catalog_models(self):
+        payload = load_model_recommendations()
+        rules = payload.get("rules") or []
+        uncovered = [name for name in iter_catalog_display_names() if not matches_recommendation_rule(name, rules)]
+        self.assertEqual([], uncovered)
+
+    def test_qwen36_hauhau_exists_in_text_and_vision_catalogs(self):
+        payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
+        text_catalog = payload.get("Qwen_model") or {}
+        vision_catalog = payload.get("qwenVL_model") or {}
+
+        text_key = next((key for key in text_catalog if "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive" in key), None)
+        vision_key = next((key for key in vision_catalog if "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive" in key), None)
+
+        self.assertIsNotNone(text_key)
+        self.assertIsNotNone(vision_key)
+        self.assertIn("mmproj-Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-f16.gguf", vision_catalog[vision_key]["mmproj_file"])
+        self.assertGreaterEqual(len(text_catalog[text_key].get("model_files") or []), 11)
+        self.assertGreaterEqual(len(vision_catalog[vision_key].get("model_files") or []), 11)
+
+    def test_appearance_js_loads_recommendation_widget(self):
+        source = read_source("web/js/appearance.js")
+        self.assertIn("model_recommendations.json", source)
+        self.assertIn("ComfyWidgets", source)
+        self.assertIn("recommended_settings", source)
         self.assertNotIn("Prompt enhancer compact terminal progress is active", source)
-        self.assertIn("_maybe_emit_prompt_background_heartbeat", source)
+        self.assertIn("queueRecommendationRefresh", source)
 
     def test_gguf_prompt_enhancer_caps_context_and_safe_constructs_llama(self):
         source = read_source("AILab_QwenVL_GGUF_PromptEnhancer.py")

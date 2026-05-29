@@ -64,7 +64,10 @@ try:
         sageattn_qk_int8_pv_fp8_cuda_sm90,
     )
     SAGE_ATTENTION_AVAILABLE = True
-except ImportError:
+except Exception:
+    sageattn_qk_int8_pv_fp16_cuda = None
+    sageattn_qk_int8_pv_fp8_cuda = None
+    sageattn_qk_int8_pv_fp8_cuda_sm90 = None
     SAGE_ATTENTION_AVAILABLE = False
 
 # Global cache for generated prompts

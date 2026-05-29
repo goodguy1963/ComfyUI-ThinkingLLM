@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "qwen36_hauhau_multimodal",
+      "priority": 100,
+      "match_any": [
+        "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive"
+      ],
+      "family_label": "Qwen3.6 35B A3B HauhauCS aggressive",
+      "sources": [
+        "HauhauCS model card",
+        "Qwen3.5 official model card"
+      ],
+      "support_notes": {
+        "hf": "Not in the HF lineup here. Use the GGUF nodes for this model.",
+        "gguf": "Hard toggle via enable_thinking. Pair the vision node with the matching mmproj file.",
+        "soft_switch": "No official /think or /no_think soft switch for this family."
+      },
+      "thinking_on": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "max_tokens": 32768,
+        "ctx_min": 131072
+      },
+      "thinking_off": {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
+        "max_tokens": 32768,
+        "ctx_min": 131072
+      },
+      "notes": [
+        "Provider says keep at least 128K context to preserve thinking quality.",
+        "Q4_K_P is the best quality-size starting point; move to Q6_K_P or Q8_K_P when VRAM allows.",
+        "IQ quants are fallback options when you cannot fit Q4_K_M or Q4_K_P."
+      ]
+    },
+    {
+      "id": "qwen35_family",
+      "priority": 80,
+      "match_any": [
+        "Qwen3.5",
+        "qwen3.5"
+      ],
+      "family_label": "Qwen3.5 family",
+      "sources": [
+        "Qwen3.5 official model card"
+      ],
+      "support_notes": {
+        "hf": "Hard toggle via enable_thinking when the backend honors the chat template.",
+        "gguf": "Hard toggle via enable_thinking in the Qwen chat template.",
+        "soft_switch": "No official /think or /no_think soft switch for Qwen3.5."
+      },
+      "thinking_on": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "max_tokens": 32768,
+        "ctx_min": 131072
+      },
+      "thinking_off": {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
+        "max_tokens": 32768,
+        "ctx_min": 131072
+      },
+      "notes": [
+        "For precise coding, Qwen recommends temperature 0.6 with thinking still enabled.",
+        "For hard non-thinking reasoning tasks, Qwen recommends top_p 1.0 and top_k 40 when the backend exposes them.",
+        "Provider says keep at least 128K context to preserve thinking capability and use 32K+ output budget when possible."
+      ]
+    },
+    {
+      "id": "qwen3_family",
+      "priority": 70,
+      "match_any": [
+        "Qwen3VL-",
+        "qwen3vl-",
+        "Qwen3-VL",
+        "Qwen3-",
+        "qwen3-"
+      ],
+      "exclude_any": [
+        "Qwen3.5",
+        "qwen3.5",
+        "Qwen3.6",
+        "qwen3.6"
+      ],
+      "family_label": "Qwen3 family",
+      "sources": [
+        "Qwen3 official model card",
+        "Qwen Transformers docs"
+      ],
+      "support_notes": {
+        "hf": "Hard toggle via enable_thinking, with /think and /no_think available as soft switches.",
+        "gguf": "Hard toggle via enable_thinking. /think and /no_think are available only on Qwen3 chat-template builds.",
+        "soft_switch": "Qwen3 officially supports /think and /no_think when thinking is enabled."
+      },
+      "thinking_on": {
+        "temperature": 0.6,
+        "top_p": 0.95,
+        "top_k": 20,
+        "max_tokens": 32768,
+        "ctx_min": 32768
+      },
+      "thinking_off": {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
+        "max_tokens": 32768,
+        "ctx_min": 32768
+      },
+      "notes": [
+        "Qwen warns against greedy decoding for thinking mode because it can repeat or degrade quality.",
+        "Provider recommends 32K output budget for most tasks and only enabling YaRN when you really need longer than the native 32K context.",
+        "For harder reasoning benchmarks, Qwen suggests stretching output budget beyond 32K if your backend allows it."
+      ]
+    },
+    {
+      "id": "gemma4_large_family",
+      "priority": 60,
+      "match_any": [
+        "Gemma-4-26B",
+        "gemma-4-26B",
+        "Gemma-4-31B",
+        "gemma-4-31B"
+      ],
+      "family_label": "Gemma 4 large family",
+      "sources": [
+        "Gemma 4 official model card"
+      ],
+      "support_notes": {
+        "hf": "Gemma 4 supports configurable thinking, but current repo behavior can vary by backend.",
+        "gguf": "Use the settings manually and verify behavior in RAW_TRACE because GGUF support varies by backend.",
+        "soft_switch": "Gemma uses chat-template thinking controls instead of /think or /no_think."
+      },
+      "thinking_on": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 64,
+        "max_tokens": 1024,
+        "ctx_min": 262144
+      },
+      "thinking_off": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 64,
+        "max_tokens": 1024,
+        "ctx_min": 262144
+      },
+      "notes": [
+        "Gemma 4 uses one standardized sampler for both thinking and non-thinking modes.",
+        "Official context target is 256K on 26B A4B and 31B variants.",
+        "If the backend does not expose top_k, keep temperature and top_p at the official defaults."
+      ]
+    },
+    {
+      "id": "gemma4_small_family",
+      "priority": 50,
+      "match_any": [
+        "Gemma-4-E2B",
+        "gemma-4-E2B",
+        "Gemma-4-E4B",
+        "gemma-4-E4B"
+      ],
+      "family_label": "Gemma 4 small family",
+      "sources": [
+        "Gemma 4 official model card"
+      ],
+      "support_notes": {
+        "hf": "Gemma 4 supports configurable thinking, but current repo behavior can vary by backend.",
+        "gguf": "Use the settings manually and verify behavior in RAW_TRACE because GGUF support varies by backend.",
+        "soft_switch": "Gemma uses chat-template thinking controls instead of /think or /no_think."
+      },
+      "thinking_on": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 64,
+        "max_tokens": 1024,
+        "ctx_min": 131072
+      },
+      "thinking_off": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 64,
+        "max_tokens": 1024,
+        "ctx_min": 131072
+      },
+      "notes": [
+        "Gemma 4 uses one standardized sampler for both thinking and non-thinking modes.",
+        "Official context target is 128K on E2B and E4B variants.",
+        "Gemma recommends higher visual token budgets only for OCR or fine detail tasks; lower budgets are faster for captioning or video summaries."
+      ]
+    }
+  ]
+}
