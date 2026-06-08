@@ -901,6 +901,13 @@ if not HF_ALL_MODELS:
     load_model_configs()
 
 
+def _default_model_from_config(models: dict[str, dict], fallback: str) -> str:
+    for name, info in models.items():
+        if isinstance(info, dict) and info.get("default"):
+            return name
+    return next(iter(models.keys()), fallback)
+
+
 def read_hf_model_type(model_dir: str) -> str | None:
     """Read model_type from a HuggingFace model's config.json."""
     try:
@@ -1895,7 +1902,7 @@ class ThinkingLLM_QwenVL(QwenVLBase):
     @classmethod
     def INPUT_TYPES(cls):
         models = list(HF_VL_MODELS.keys())
-        default_model = models[0] if models else "Qwen3-VL-4B-Instruct"
+        default_model = _default_model_from_config(HF_VL_MODELS, "Qwen3-VL-4B-Instruct")
         prompts = PRESET_PROMPTS or [NO_PRESET_PROMPT, "Describe this image in detail."]
         preferred_prompt = "🖼️ Detailed Description"
         default_prompt = preferred_prompt if preferred_prompt in prompts else prompts[0]
@@ -1943,7 +1950,7 @@ class ThinkingLLM_QwenVL_Advanced(QwenVLBase):
     @classmethod
     def INPUT_TYPES(cls):
         models = list(HF_VL_MODELS.keys())
-        default_model = models[0] if models else "Qwen3-VL-4B-Instruct"
+        default_model = _default_model_from_config(HF_VL_MODELS, "Qwen3-VL-4B-Instruct")
         prompts = PRESET_PROMPTS or [NO_PRESET_PROMPT, "Describe this image in detail."]
         preferred_prompt = "🖼️ Detailed Description"
         default_prompt = preferred_prompt if preferred_prompt in prompts else prompts[0]

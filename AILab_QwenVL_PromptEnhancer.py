@@ -30,6 +30,7 @@ from AILab_QwenVL import (
     HF_VL_MODELS,
     NODE_PROMPT_STATE,
     PROMPT_CACHE,
+    _default_model_from_config,
     _make_node_state_key,
     apply_qwen_soft_thinking_directive,
     build_node_input_signature,
@@ -155,7 +156,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
     @classmethod
     def INPUT_TYPES(cls):
         models = list(HF_ALL_MODELS.keys())
-        default_model = models[0] if models else "Qwen3-VL-4B-Instruct"
+        default_model = _default_model_from_config(HF_ALL_MODELS, "Qwen3-VL-4B-Instruct")
         styles = list(cls.STYLES.keys())
         preferred_style = "📝 Enhance"
         default_style = preferred_style if preferred_style in styles else (styles[0] if styles else "📝 Enhance")

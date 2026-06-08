@@ -251,6 +251,24 @@
                 "context_length": 262144
             }
         },
+        "Gemma-4-12B-it-GGUF [Q4:7.5GB|Q5:9GB|Q6:11GB|Q8:13GB|BF16:24GB|VRAM:~12GB]": {
+            "author": "unsloth",
+            "repo_name": "gemma-4-12b-it-GGUF",
+            "repo_id": "unsloth/gemma-4-12b-it-GGUF",
+            "model_files": [
+                "gemma-4-12b-it-Q4_K_M.gguf",
+                "gemma-4-12b-it-Q4_K_S.gguf",
+                "gemma-4-12b-it-Q5_K_M.gguf",
+                "gemma-4-12b-it-Q5_K_S.gguf",
+                "gemma-4-12b-it-Q6_K.gguf",
+                "gemma-4-12b-it-Q8_0.gguf",
+                "gemma-4-12b-it-BF16.gguf",
+                "gemma-4-12b-it-UD-Q4_K_XL.gguf"
+            ],
+            "defaults": {
+                "context_length": 262144
+            }
+        },
         "Gemma-4-31B-it-GGUF [Q4:20GB|Q8:32GB|VRAM:~22GB]": {
             "author": "unsloth",
             "repo_name": "gemma-4-31B-it-GGUF",
@@ -438,6 +456,30 @@
                 "n_batch": 512,
                 "gpu_layers": -1,
                 "top_k": 20,
+                "pool_size": 4194304
+            }
+        },
+        "Gemma-4-12B-it-GGUF [Q4:7.5GB|Q5:9GB|Q6:11GB|Q8:13GB|BF16:24GB|VRAM:~12GB]": {
+            "author": "unsloth",
+            "repo_name": "gemma-4-12b-it-GGUF",
+            "repo_id": "unsloth/gemma-4-12b-it-GGUF",
+            "mmproj_file": "mmproj-F16.gguf",
+            "model_files": [
+                "gemma-4-12b-it-Q4_K_M.gguf",
+                "gemma-4-12b-it-Q4_K_S.gguf",
+                "gemma-4-12b-it-Q5_K_M.gguf",
+                "gemma-4-12b-it-Q5_K_S.gguf",
+                "gemma-4-12b-it-Q6_K.gguf",
+                "gemma-4-12b-it-Q8_0.gguf",
+                "gemma-4-12b-it-BF16.gguf",
+                "gemma-4-12b-it-UD-Q4_K_XL.gguf"
+            ],
+            "defaults": {
+                "context_length": 262144,
+                "image_max_tokens": 4096,
+                "n_batch": 512,
+                "gpu_layers": -1,
+                "top_k": 64,
                 "pool_size": 4194304
             }
         },

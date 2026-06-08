@@ -15,7 +15,17 @@ const NODE_COLORS = {
     "AILab_QwenVL_GGUF": "QwenVLGGUF",
     "AILab_QwenVL_GGUF_Advanced": "QwenVLGGUF",
     "AILab_QwenVL_GGUF_PromptEnhancer": "Enhancer",
+    "ThinkingLLM_QwenVL": "QwenVL",
+    "ThinkingLLM_QwenVL_Advanced": "QwenVL",
+    "ThinkingLLM_QwenVL_PromptEnhancer": "Enhancer",
+    "ThinkingLLM_QwenVL_GGUF": "QwenVLGGUF",
+    "ThinkingLLM_QwenVL_GGUF_Advanced": "QwenVLGGUF",
+    "ThinkingLLM_Gemma4_Audio_GGUF": "QwenVLGGUF",
+    "ThinkingLLM_Whisper_ASR": "QwenVLGGUF",
+    "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": "Enhancer",
     "AILab_QwenVL_PromptLibrary": "Tools",
+    "VRAMCleanup": "Tools",
+    "StorySplitNode": "Tools",
 };
 
 const THINKINGLLM_NODE_NAMES = new Set([
@@ -30,7 +40,18 @@ const THINKINGLLM_NODE_NAMES = new Set([
     "ThinkingLLM_QwenVL_PromptEnhancer",
     "ThinkingLLM_QwenVL_GGUF",
     "ThinkingLLM_QwenVL_GGUF_Advanced",
+    "ThinkingLLM_Gemma4_Audio_GGUF",
+    "ThinkingLLM_Whisper_ASR",
     "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+]);
+
+const AUDIO_CAPABLE_NODE_NAMES = new Set([
+    "ThinkingLLM_Gemma4_Audio_GGUF",
+    "ThinkingLLM_Whisper_ASR",
+    "AILab_QwenVL_GGUF",
+    "AILab_QwenVL_GGUF_Advanced",
+    "ThinkingLLM_QwenVL_GGUF",
+    "ThinkingLLM_QwenVL_GGUF_Advanced",
 ]);
 
 const GGUF_ADVANCED_INTERNAL_WIDGETS = new Set([
@@ -48,6 +69,7 @@ const RECOMMENDATIONS_URL = new URL("../model_recommendations.json", import.meta
 const RECOMMENDATION_WIDGET_NAME = "recommended_settings";
 const RECOMMENDATION_PLACEHOLDER = "Select a model to see provider/community recommended settings. This note never changes your saved widget values.";
 const RECOMMENDATION_FIELDS = ["temperature", "top_p", "top_k", "max_tokens", "ctx_min", "n_batch", "image_max_tokens"];
+const AUDIO_UNSUPPORTED_MESSAGE = "No curated audio support for the selected model. Use Gemma 4 Audio for audio understanding or Whisper ASR for transcription.";
 
 let recommendationsPromise = null;
 
@@ -132,6 +154,8 @@ function recommendationScope(node) {
         "AILab_QwenVL_GGUF_Advanced",
         "ThinkingLLM_QwenVL_GGUF",
         "ThinkingLLM_QwenVL_GGUF_Advanced",
+        "ThinkingLLM_Gemma4_Audio_GGUF",
+        "ThinkingLLM_Whisper_ASR",
         "AILab_QwenVL_GGUF_PromptEnhancer",
         "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
     ].includes(node.comfyClass)) {
@@ -160,6 +184,11 @@ function matchRecommendationRule(modelName, rules) {
 
 function hasWidget(node, widgetName) {
     return Boolean(findWidget(node, widgetName));
+}
+
+function hasAudioInput(node) {
+    return AUDIO_CAPABLE_NODE_NAMES.has(node.comfyClass)
+        || Boolean(node.inputs?.some((input) => input?.name === "audio"));
 }
 
 function formatSetting(fieldName, value) {
@@ -198,6 +227,17 @@ function buildModeSummary(node, settings) {
 }
 
 function buildRecommendationText(node, rules) {
+    if (node.comfyClass === "ThinkingLLM_Whisper_ASR") {
+        const modelSize = String(findWidget(node, "model_size")?.value || "small").trim() || "small";
+        return [
+            "Whisper ASR transcription",
+            `Model: ${modelSize}`,
+            "Audio: Use for speech-to-text from AUDIO or audio_file_path. M4A/MP3/WAV/FLAC are decoded with FFmpeg.",
+            "Settings: small + CPU/int8 is the reliable Windows default; large-v3 is higher quality; vad_filter skips silence.",
+            "Dependency: faster-whisper must be installed in the active ComfyUI Python.",
+        ].join("\n");
+    }
+
     const modelName = String(findWidget(node, "model_name")?.value || "").trim();
     if (!modelName || modelName.startsWith("(no ")) {
         return RECOMMENDATION_PLACEHOLDER;
@@ -226,6 +266,12 @@ function buildRecommendationText(node, rules) {
     const supportNote = rule.support_notes?.[scope];
     if (supportNote) {
         lines.push(`Toggle: ${supportNote}`);
+    }
+    const audioNote = rule.support_notes?.audio;
+    if (audioNote && hasAudioInput(node)) {
+        lines.push(`Audio: ${audioNote}`);
+    } else if (hasAudioInput(node)) {
+        lines.push(`Audio: ${AUDIO_UNSUPPORTED_MESSAGE}`);
     }
     lines.push(`Thinking ON: ${(thinkingEnabled ? activeSummary : alternateSummary).join(" | ") || "use the provider defaults"}`);
     lines.push(`Thinking OFF: ${(thinkingEnabled ? alternateSummary : activeSummary).join(" | ") || "use the provider defaults"}`);

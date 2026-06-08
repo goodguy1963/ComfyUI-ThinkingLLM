@@ -32,9 +32,9 @@
         "ctx_min": 131072
       },
       "notes": [
-        "Provider says keep at least 128K context to preserve thinking quality.",
+        "For creative prompt generation, use the general-task sampler: thinking ON for richer scene planning, thinking OFF for shorter direct rewrites.",
         "Q4_K_P is the best quality-size starting point; move to Q6_K_P or Q8_K_P when VRAM allows.",
-        "IQ quants are fallback options when you cannot fit Q4_K_M or Q4_K_P."
+        "Keep a large context when expanding long image/video prompt sequences so character and scene continuity are not lost."
       ]
     },
     {
@@ -68,9 +68,9 @@
         "ctx_min": 131072
       },
       "notes": [
-        "For precise coding, Qwen recommends temperature 0.6 with thinking still enabled.",
-        "For hard non-thinking reasoning tasks, Qwen recommends top_p 1.0 and top_k 40 when the backend exposes them.",
-        "Provider says keep at least 128K context to preserve thinking capability and use 32K+ output budget when possible."
+        "For creative prompt generation, Qwen's general-task settings are the right fit: thinking ON for richer planning, non-thinking for concise prompt rewrites.",
+        "Use the larger output budget for multi-shot scene descriptions, storyboard continuity, or detailed style transfer prompts.",
+        "If generations loop or over-elaborate, prefer a shorter custom prompt and lower max_tokens before changing the sampler."
       ]
     },
     {
@@ -114,9 +114,49 @@
         "ctx_min": 32768
       },
       "notes": [
-        "Qwen warns against greedy decoding for thinking mode because it can repeat or degrade quality.",
+        "For creative prompt drafting, use thinking ON when you want structured scene planning and thinking OFF when you want a fast final prompt.",
         "Provider recommends 32K output budget for most tasks and only enabling YaRN when you really need longer than the native 32K context.",
-        "For harder reasoning benchmarks, Qwen suggests stretching output budget beyond 32K if your backend allows it."
+        "Avoid greedy sampling for creative generation; the recommended sampler gives more varied but still coherent prompt language."
+      ]
+    },
+    {
+      "id": "gemma4_12b_unified",
+      "priority": 65,
+      "match_any": [
+        "Gemma-4-12B",
+        "gemma-4-12b"
+      ],
+      "family_label": "Gemma 4 12B Unified",
+      "sources": [
+        "Google Gemma 4 model overview",
+        "Unsloth Gemma 4 12B GGUF model card"
+      ],
+      "support_notes": {
+        "hf": "Gemma 4 12B is a unified multimodal model. HF support depends on current Transformers processor support for image/audio/video inputs.",
+        "gguf": "Use Gemma4ChatHandler in a recent multimodal llama-cpp-python build. Pair the model with mmproj-F16.gguf.",
+        "audio": "Audio input is intended for Gemma 4 E2B, E4B, and 12B only. Use a recent Gemma4ChatHandler build; 16 kHz mono WAV-style audio is safest.",
+        "soft_switch": "Gemma uses configurable thinking controls instead of Qwen-style /think or /no_think soft switches."
+      },
+      "thinking_on": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 64,
+        "max_tokens": 1024,
+        "ctx_min": 262144,
+        "image_max_tokens": 4096
+      },
+      "thinking_off": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 64,
+        "max_tokens": 1024,
+        "ctx_min": 262144,
+        "image_max_tokens": 4096
+      },
+      "notes": [
+        "For creative prompt generation, Gemma 4's default temperature/top_p is intentionally open enough for varied visual language.",
+        "For audio analysis, 16 kHz mono WAV is the safest input shape.",
+        "Prefer Q4_K_M or UD-Q4_K_XL first; move up to Q6/Q8/BF16 when VRAM allows."
       ]
     },
     {
@@ -152,7 +192,7 @@
         "ctx_min": 262144
       },
       "notes": [
-        "Gemma 4 uses one standardized sampler for both thinking and non-thinking modes.",
+        "For creative prompt generation, keep Gemma 4 near its official sampler defaults before tuning style or length.",
         "Official context target is 256K on 26B A4B and 31B variants.",
         "If the backend does not expose top_k, keep temperature and top_p at the official defaults."
       ]
@@ -190,7 +230,7 @@
         "ctx_min": 131072
       },
       "notes": [
-        "Gemma 4 uses one standardized sampler for both thinking and non-thinking modes.",
+        "For creative prompt generation, keep Gemma 4 near its official sampler defaults before tuning style or length.",
         "Official context target is 128K on E2B and E4B variants.",
         "Gemma recommends higher visual token budgets only for OCR or fine detail tasks; lower budgets are faster for captioning or video summaries."
       ]

@@ -2,7 +2,7 @@
     "hf_vl_models": {
         "Qwen3.5-4B-heretic-v2 [DL: 7.5GB, VRAM: 9.0GB]": {
             "repo_id": "tvall43/Qwen3.5-4B-heretic-v2",
-            "default": true,
+            "default": false,
             "quantized": false,
             "vram_requirement": {
                 "full": 9.0
@@ -140,6 +140,16 @@
                 "full": 48.0,
                 "8bit": 28.0,
                 "4bit": 16.0
+            }
+        },
+        "Gemma-4-12B [DL: 24GB, VRAM: 24.0GB]": {
+            "repo_id": "google/gemma-4-12B",
+            "default": false,
+            "quantized": false,
+            "vram_requirement": {
+                "full": 24.0,
+                "8bit": 13.0,
+                "4bit": 8.0
             }
         },
         "Gemma-4-E4B-Uncensored [DL: 16GB, VRAM: 7.0GB]": {
@@ -292,6 +302,16 @@
                 "full": 48.0,
                 "8bit": 28.0,
                 "4bit": 16.0
+            }
+        },
+        "Gemma-4-12B [DL: 24GB, VRAM: 24.0GB]": {
+            "repo_id": "google/gemma-4-12B",
+            "default": false,
+            "quantized": false,
+            "vram_requirement": {
+                "full": 24.0,
+                "8bit": 13.0,
+                "4bit": 8.0
             }
         },
         "Gemma-4-E4B-Uncensored [DL: 16GB, VRAM: 7.0GB]": {

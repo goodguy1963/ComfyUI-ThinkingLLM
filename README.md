@@ -1,6 +1,6 @@
 # ComfyUI-ThinkingLLM
 
-**ThinkingLLM** is a local-LLM custom-node pack for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that wraps Qwen3.5, Qwen3, and Qwen2.5-VL models behind a cleaner node interface with thinking-mode control, live token streaming, and a raw trace output for debugging.
+**ThinkingLLM** is a local-LLM custom-node pack for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that wraps Qwen3.5, Qwen3, Qwen-VL, Gemma 4, and Whisper ASR behind a cleaner node interface with thinking-mode control, audio/vision workflows, live token streaming, and a raw trace output for debugging.
 
 📺 **[Watch the demo](https://youtu.be/K1JsvnzujOw)** for a better viewing experience.
 
@@ -12,6 +12,15 @@
 > 🎥 Prefer a narrated version? **[Watch the demo on YouTube](https://youtu.be/K1JsvnzujOw)**
 
 ## What ThinkingLLM adds
+
+### Model guidance box
+
+ThinkingLLM nodes add a read-only `recommended_settings` info box.
+
+- It explains the selected model family and recommended generation settings.
+- It does not change your saved widget values.
+- For GGUF audio-capable nodes, it tells you whether the selected model actually supports audio.
+- In Advanced GGUF nodes, if you connect or expose audio for a model without known audio support, the box warns you instead of silently implying that audio will work.
 
 ### The Thinking Toggle
 
@@ -40,6 +49,15 @@ Each node returns a second string output named `RAW_TRACE`.
 
 That makes it possible to inspect what the model thought about the prompt while still keeping the primary output clean.
 
+### Audio support
+
+Audio is available through dedicated nodes so the model list stays honest:
+
+- `ThinkingLLM Gemma 4 Audio (GGUF)` for Gemma 4 audio-capable models.
+- `ThinkingLLM Whisper ASR` for reliable speech-to-text transcription through `faster-whisper`.
+
+The Advanced GGUF node also exposes optional `audio`, but this is for power users. Use the info box before assuming a model can hear audio. Normal Qwen/Qwen-VL models are not audio models.
+
 ## Nodes
 
 ### Transformers / HF nodes
@@ -58,15 +76,17 @@ HF tokenizer note: some Gemma and Qwen variants need `sentencepiece` or `tiktoke
 
 - `ThinkingLLM (GGUF)`
 - `ThinkingLLM (GGUF Advanced)`
+- `ThinkingLLM Gemma 4 Audio (GGUF)`
 - `ThinkingLLM Prompt Enhancer (GGUF)`
 
-The GGUF path requires a vision-capable `llama-cpp-python` build. The normal PyPI package is not enough for Qwen vision handlers. On Linux, ThinkingLLM now auto-checks this at first GGUF use and attempts an automatic install of a matching JamePeng backend. Use the setup notes in [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md) if you need to override the wheel/package source.
+The GGUF path requires a multimodal-capable `llama-cpp-python` build. The normal PyPI package may not include the chat handlers needed for Qwen vision, Gemma 4, or MTMD audio. On Linux, ThinkingLLM auto-checks this at first GGUF use and attempts an automatic install of a matching JamePeng backend. Use the setup notes in [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md) if you need to override the wheel/package source.
 
 ## Workflow tips
 
 - **Pre-process input images** — use a resize or scale node before ThinkingLLM so large images don't blow up the context window.
 - **Display the output** — connect RESPONSE or ENHANCED_OUTPUT to a **Show Text** or **Show Anything** node to see the generated text in the UI.
 - **Inspect reasoning** — connect the RAW_TRACE output to a second Show Text node to see what the model was thinking.
+- **Use the dedicated audio nodes first** — Gemma 4 Audio is for audio understanding; Whisper ASR is for transcription. The Advanced GGUF audio input is intentionally more flexible, but the info box will warn you when the selected model has no curated audio support.
 
 ## Supported models
 
@@ -94,17 +114,36 @@ ThinkingLLM supports these model families out of the box, with pre-configured en
 ### Gemma 4 — Vision-language (HF)
 - Gemma-4-E2B-it / Uncensored
 - Gemma-4-E4B-it / Uncensored
+- Gemma-4-12B
 - Gemma-4-26B-A4B-it / Heretic
 - Gemma-4-31B-it
 
 ### Gemma 4 — Vision-language (GGUF)
 - Gemma-4-E2B / E4B (Q4 K M through BF16, uncensored)
+- Gemma-4-12B-it (Q4/Q5/Q6/Q8/BF16/UD-Q4)
 - Gemma-4-26B-A4B-it (Q4 K M through BF16)
 - Gemma-4-31B-it (Q4 K M through BF16)
+
+### Gemma 4 — Audio (GGUF)
+- Gemma-4-E2B / E4B when present in the GGUF multimodal catalog
+- Gemma-4-12B-it via `unsloth/gemma-4-12b-it-GGUF`
+
+Use `ThinkingLLM Gemma 4 Audio (GGUF)` for the clean audio-only interface. Gemma 4 audio currently depends on a recent multimodal `llama-cpp-python`/`Gemma4ChatHandler` build, so check `RAW_TRACE` if audio behaves unexpectedly.
+
+### Whisper — ASR
+- tiny
+- base
+- small
+- medium
+- large-v3
+- distil-large-v3
+
+Use `ThinkingLLM Whisper ASR` for transcription. It accepts a connected ComfyUI `AUDIO` input or an `audio_file_path` pointing to M4A, MP3, WAV, FLAC, or any FFmpeg-readable audio file. The node uses `faster-whisper`; first use may download the selected Whisper model into the Hugging Face cache. The default is `small` on CPU with `int8`, which is slower than CUDA but reliable on Windows; switch to CUDA once the local CTranslate2 CUDA runtime is confirmed working.
 
 ### Gemma 4 — Text-only (HF)
 - Gemma-4-E2B-it / Uncensored
 - Gemma-4-E4B-it / Uncensored
+- Gemma-4-12B
 - Gemma-4-26B-A4B-it / Heretic
 - Gemma-4-31B-it
 
@@ -141,6 +180,8 @@ For local GGUF models, keep the matching mmproj file beside the model file.
 - HF is the recommended default path and is the simplest cross-platform option.
 - GGUF on Windows needs a matching `win_amd64` vision-capable wheel.
 - GGUF on Linux now auto-installs a matching backend on first use when possible. Override with `THINKINGLLM_LLAMA_CPP_LINUX_WHEEL_URL` or `THINKINGLLM_LLAMA_CPP_LINUX_SPEC` when your server needs a different build.
+- GGUF audio needs an audio-capable multimodal backend. `Gemma4ChatHandler` is used for Gemma 4.
+- Whisper ASR needs `faster-whisper` and FFmpeg. The node returns an install hint if `faster-whisper` is missing.
 - Flash Attention support is best on Linux. The nodes fall back when it is unavailable.
 - The thinking toggle works best with Qwen3.5 and Qwen3 style models. Other architectures may ignore the steering.
 

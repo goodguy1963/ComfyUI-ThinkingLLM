@@ -8,16 +8,21 @@ plain shell without ML dependencies.
 """
 
 import ast
+import base64
 import contextlib
 import importlib.util
 import inspect
+import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import types
 import unittest
+import wave
 from pathlib import Path
 from unittest import mock
 
@@ -150,6 +155,14 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             PROMPT_CACHE={},
             _make_node_state_key=lambda *args, **kwargs: "node-key",
             _build_workflow_fingerprint=lambda *args, **kwargs: "workflow-fingerprint",
+            _default_model_from_config=lambda models, fallback: next(
+                (
+                    name
+                    for name, info in models.items()
+                    if isinstance(info, dict) and info.get("default")
+                ),
+                next(iter(models.keys()), fallback),
+            ),
             apply_qwen_soft_thinking_directive=lambda *args, **kwargs: None,
             build_node_input_signature=lambda *args, **kwargs: {},
             download_hf_file_to_path=lambda *args, **kwargs: None,
@@ -361,6 +374,18 @@ class TestModelRecommendations(unittest.TestCase):
             with self.subTest(rule=rule.get("id")):
                 self.assertTrue(rule.get("sources"), "each recommendation rule should record its research source")
 
+    def test_recommendation_notes_are_creative_work_focused(self):
+        payload = load_model_recommendations()
+        banned_terms = ("coding", "programming", "benchmark", "webdev", "math competition")
+        for rule in payload.get("rules") or []:
+            for note in rule.get("notes") or []:
+                lowered = note.lower()
+                with self.subTest(rule=rule.get("id"), note=note):
+                    self.assertFalse(
+                        any(term in lowered for term in banned_terms),
+                        "recommendation notes should focus on creative prompt generation rather than coding/benchmarking",
+                    )
+
     def test_recommendations_cover_all_catalog_models(self):
         payload = load_model_recommendations()
         rules = payload.get("rules") or []
@@ -381,13 +406,89 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertGreaterEqual(len(text_catalog[text_key].get("model_files") or []), 11)
         self.assertGreaterEqual(len(vision_catalog[vision_key].get("model_files") or []), 11)
 
+    def test_gemma4_12b_is_available_for_hf_and_gguf_vision_and_text(self):
+        hf_payload = json.loads((PKG / "hf_models.json").read_text(encoding="utf-8"))
+        gguf_payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(any("Gemma-4-12B" in key for key in hf_payload.get("hf_vl_models", {})))
+        self.assertTrue(any("Gemma-4-12B" in key for key in hf_payload.get("hf_text_models", {})))
+
+        gguf_text = gguf_payload.get("Qwen_model") or {}
+        gguf_vision = gguf_payload.get("qwenVL_model") or {}
+        text_key = next((key for key in gguf_text if "Gemma-4-12B" in key), None)
+        vision_key = next((key for key in gguf_vision if "Gemma-4-12B" in key), None)
+
+        self.assertIsNotNone(text_key)
+        self.assertIsNotNone(vision_key)
+        self.assertIn("mmproj-F16.gguf", gguf_vision[vision_key]["mmproj_file"])
+        self.assertGreaterEqual(len(gguf_text[text_key].get("model_files") or []), 8)
+        self.assertGreaterEqual(len(gguf_vision[vision_key].get("model_files") or []), 8)
+
+    def test_qwen3_asr_gguf_catalog_is_removed(self):
+        gguf_payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
+        vision_catalog = gguf_payload.get("qwenVL_model") or {}
+        asr_entries = {key: value for key, value in vision_catalog.items() if "Qwen3-ASR" in key}
+
+        self.assertEqual({}, asr_entries)
+
+    def test_legacy_gguf_model_file_entries_expand_to_runnable_models(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_legacy_gguf_model_files_expand_test",
+            )
+
+        models = module.GGUF_VL_CATALOG.get("models") or {}
+        self.assertIn("gemma-4-12b-it-Q4_K_M.gguf [~7.5GB]", models)
+        resolved = module._resolve_model_entry("gemma-4-12b-it-Q4_K_M.gguf [~7.5GB]")
+
+        self.assertEqual(resolved.model_filename, "gemma-4-12b-it-Q4_K_M.gguf")
+        self.assertEqual(resolved.mmproj_filename, "mmproj-F16.gguf")
+
+    def test_hf_default_flag_controls_default_model(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            package = load_thinkingllm_loader_subset(["AILab_QwenVL.py"])
+        required = package.NODE_CLASS_MAPPINGS["ThinkingLLM_QwenVL"].INPUT_TYPES()["required"]
+        _, meta = required["model_name"]
+        self.assertEqual(meta["default"], "Qwen3-VL-4B-Instruct-Abliterated [DL: 7.5GB, VRAM: 6.0GB]")
+
     def test_appearance_js_loads_recommendation_widget(self):
         source = read_source("web/js/appearance.js")
         self.assertIn("model_recommendations.json", source)
         self.assertIn("ComfyWidgets", source)
         self.assertIn("recommended_settings", source)
+        self.assertIn("support_notes?.audio", source)
+        self.assertIn("AUDIO_UNSUPPORTED_MESSAGE", source)
+        self.assertIn("else if (hasAudioInput(node))", source)
+        self.assertIn("ThinkingLLM_Gemma4_Audio_GGUF", source)
+        self.assertIn("ThinkingLLM_Whisper_ASR", source)
+        self.assertIn("Whisper ASR transcription", source)
         self.assertNotIn("Prompt enhancer compact terminal progress is active", source)
         self.assertIn("queueRecommendationRefresh", source)
+
+    def test_appearance_js_styles_all_visible_plugin_nodes(self):
+        source = read_source("web/js/appearance.js")
+        expected_node_names = [
+            "AILab_QwenVL",
+            "AILab_QwenVL_Advanced",
+            "AILab_QwenVL_PromptEnhancer",
+            "AILab_QwenVL_GGUF",
+            "AILab_QwenVL_GGUF_Advanced",
+            "AILab_QwenVL_GGUF_PromptEnhancer",
+            "ThinkingLLM_QwenVL",
+            "ThinkingLLM_QwenVL_Advanced",
+            "ThinkingLLM_QwenVL_PromptEnhancer",
+            "ThinkingLLM_QwenVL_GGUF",
+            "ThinkingLLM_QwenVL_GGUF_Advanced",
+            "ThinkingLLM_Gemma4_Audio_GGUF",
+            "ThinkingLLM_Whisper_ASR",
+            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+            "VRAMCleanup",
+            "StorySplitNode",
+        ]
+        for node_name in expected_node_names:
+            with self.subTest(node_name=node_name):
+                self.assertIn(f'"{node_name}"', source)
 
     def test_gguf_prompt_enhancer_caps_context_and_safe_constructs_llama(self):
         source = read_source("AILab_QwenVL_GGUF_PromptEnhancer.py")
@@ -699,6 +800,7 @@ class TestLoaderModuleRegistration(unittest.TestCase):
         package = load_thinkingllm_loader_subset(
             [
                 "AILab_QwenVL_GGUF.py",
+                "AILab_WhisperASR.py",
                 "AILab_QwenVL_PromptEnhancer.py",
                 "AILab_QwenVL_GGUF_PromptEnhancer.py",
             ]
@@ -707,11 +809,14 @@ class TestLoaderModuleRegistration(unittest.TestCase):
         for node_name in [
             "ThinkingLLM_QwenVL_GGUF",
             "ThinkingLLM_QwenVL_GGUF_Advanced",
+            "ThinkingLLM_Gemma4_Audio_GGUF",
+            "ThinkingLLM_Whisper_ASR",
             "ThinkingLLM_QwenVL_PromptEnhancer",
             "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
         ]:
             with self.subTest(node_name=node_name):
                 self.assertIn(node_name, package.NODE_CLASS_MAPPINGS)
+        self.assertNotIn("ThinkingLLM_Qwen3_ASR_GGUF", package.NODE_CLASS_MAPPINGS)
 
 
 class TestLegacyNodeNameCompatibility(unittest.TestCase):
@@ -850,6 +955,265 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
         self.assertIn("n_ubatch_val = int(n_ubatch) if n_ubatch is not None else 0", source)
         self.assertIn("if n_ubatch_val <= 0:", source)
         self.assertIn("n_ubatch_val = min(n_batch_val, 512)", source)
+
+    def test_gguf_vision_nodes_accept_optional_audio_without_legacy_order_change(self):
+        node_cls = self._load_gguf_advanced_class()
+        input_types = node_cls.INPUT_TYPES()
+
+        self.assertEqual(input_types["optional"]["audio"], ("AUDIO",))
+
+        simple_cls = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py"]).NODE_CLASS_MAPPINGS["ThinkingLLM_QwenVL_GGUF"]
+        self.assertEqual(simple_cls.INPUT_TYPES()["optional"]["audio"], ("AUDIO",))
+
+    def test_gguf_vision_advanced_allows_larger_reasoning_output_budget(self):
+        node_cls = self._load_gguf_advanced_class()
+        max_tokens_type, max_tokens_meta = node_cls.INPUT_TYPES()["required"]["max_tokens"]
+
+        self.assertEqual(max_tokens_type, "INT")
+        self.assertGreaterEqual(max_tokens_meta["max"], 32768)
+
+    def test_simple_gguf_node_exposes_raw_trace(self):
+        node_cls = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py"]).NODE_CLASS_MAPPINGS["ThinkingLLM_QwenVL_GGUF"]
+
+        self.assertEqual(node_cls.RETURN_TYPES, ("STRING", "STRING"))
+        self.assertEqual(node_cls.RETURN_NAMES, ("RESPONSE", "RAW_TRACE"))
+
+    def test_gemma4_audio_node_is_audio_only_and_model_filtered(self):
+        node_cls = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py"]).NODE_CLASS_MAPPINGS["ThinkingLLM_Gemma4_Audio_GGUF"]
+        input_types = node_cls.INPUT_TYPES()
+
+        optional = input_types["optional"]
+        self.assertEqual(optional["audio"], ("AUDIO",))
+        self.assertIn("audio_file_path", optional)
+        self.assertNotIn("image", optional)
+        self.assertNotIn("video", optional)
+
+        model_keys, model_meta = input_types["required"]["model_name"]
+        self.assertTrue(model_keys, "audio node should expose at least one Gemma 4 audio model")
+        self.assertTrue(all("gemma-4" in key.lower() for key in model_keys))
+        self.assertTrue(all("26b" not in key.lower() and "31b" not in key.lower() for key in model_keys))
+        self.assertIn("gemma-4-12b", model_meta["default"].lower())
+        self.assertIn("Audio", input_types["required"]["custom_prompt"][1]["default"])
+
+    def test_qwen3_asr_node_is_not_registered(self):
+        package = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py", "AILab_WhisperASR.py"])
+
+        self.assertNotIn("ThinkingLLM_Qwen3_ASR_GGUF", package.NODE_CLASS_MAPPINGS)
+
+    def test_whisper_asr_node_is_audio_only(self):
+        node_cls = load_thinkingllm_loader_subset(["AILab_WhisperASR.py"]).NODE_CLASS_MAPPINGS["ThinkingLLM_Whisper_ASR"]
+        input_types = node_cls.INPUT_TYPES()
+
+        self.assertEqual(input_types["optional"]["audio"], ("AUDIO",))
+        self.assertIn("audio_file_path", input_types["optional"])
+        model_keys, model_meta = input_types["required"]["model_size"]
+        self.assertIn("base", model_keys)
+        self.assertIn("large-v3", model_keys)
+        self.assertEqual(model_meta["default"], "small")
+        self.assertEqual(input_types["required"]["device"][1]["default"], "cpu")
+        self.assertEqual(input_types["required"]["compute_type"][1]["default"], "int8")
+        self.assertNotIn("image", input_types["optional"])
+        self.assertNotIn("video", input_types["optional"])
+
+    def test_whisper_asr_returns_install_message_when_backend_missing(self):
+        node_cls = load_thinkingllm_loader_subset(["AILab_WhisperASR.py"]).NODE_CLASS_MAPPINGS["ThinkingLLM_Whisper_ASR"]
+        with mock.patch.dict(sys.modules, {"faster_whisper": None}, clear=False):
+            transcript, segments_json, raw_trace = node_cls().process(
+                model_size="base",
+                language="auto",
+                task="transcribe",
+                device="auto",
+                compute_type="auto",
+                beam_size=5,
+                vad_filter=True,
+                audio_file_path="dummy.wav",
+            )
+
+        self.assertIn("faster-whisper is not installed", transcript)
+        self.assertEqual(segments_json, "[]")
+        self.assertIn("pip install faster-whisper", raw_trace)
+
+    def test_whisper_asr_transcribes_with_mock_backend(self):
+        module = load_module_from_file(
+            "AILab_WhisperASR.py",
+            "thinkingllm_whisper_mock_backend_test",
+        )
+
+        class FakeSegment:
+            def __init__(self, start, end, text):
+                self.start = start
+                self.end = end
+                self.text = text
+
+        fake_info = types.SimpleNamespace(language="de", language_probability=0.99, duration=1.0)
+        captured = {}
+
+        class FakeWhisperModel:
+            def __init__(self, model_size, device, compute_type):
+                captured["init"] = (model_size, device, compute_type)
+
+            def transcribe(self, path, language, task, beam_size, vad_filter):
+                captured["transcribe"] = (Path(path).suffix, language, task, beam_size, vad_filter)
+                return [FakeSegment(0.0, 1.0, " Hallo Welt. ")], fake_info
+
+        fake_backend = build_stub_module("faster_whisper", WhisperModel=FakeWhisperModel)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "input.wav"
+            with wave.open(str(source), "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(16000)
+                wav.writeframes(b"\0\0" * 1600)
+
+            with mock.patch.dict(sys.modules, {"faster_whisper": fake_backend}, clear=False):
+                transcript, segments_json, raw_trace = module.ThinkingLLM_Whisper_ASR().process(
+                    model_size="base",
+                    language="de",
+                    task="transcribe",
+                    device="cpu",
+                    compute_type="int8",
+                    beam_size=3,
+                    vad_filter=True,
+                    audio_file_path=str(source),
+                )
+
+        self.assertEqual(transcript, "Hallo Welt.")
+        self.assertEqual(json.loads(segments_json)[0]["text"], "Hallo Welt.")
+        self.assertEqual(captured["init"], ("base", "cpu", "int8"))
+        self.assertEqual(captured["transcribe"], (".wav", "de", "transcribe", 3, True))
+        self.assertIn("language=de", raw_trace)
+
+    def test_audio_to_wav_base64_resamples_to_16khz_mono(self):
+        import numpy as real_numpy
+
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_audio_resample_test",
+            )
+        module.np = real_numpy
+
+        waveform = real_numpy.stack([
+            real_numpy.linspace(-0.5, 0.5, 800, dtype=real_numpy.float32),
+            real_numpy.linspace(0.5, -0.5, 800, dtype=real_numpy.float32),
+        ])
+
+        encoded = module._audio_to_wav_base64({"waveform": waveform, "sample_rate": 8000})
+
+        self.assertEqual(len(encoded), 1)
+        with wave.open(io.BytesIO(base64.b64decode(encoded[0])), "rb") as wav:
+            self.assertEqual(wav.getframerate(), 16000)
+            self.assertEqual(wav.getnchannels(), 1)
+            self.assertEqual(wav.getsampwidth(), 2)
+            self.assertEqual(wav.getnframes(), 1600)
+
+    def test_audio_to_wav_base64_rejects_invalid_audio_metadata(self):
+        import numpy as real_numpy
+
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_audio_validation_test",
+            )
+        module.np = real_numpy
+
+        self.assertEqual(module._audio_to_wav_base64({"waveform": real_numpy.zeros((1, 10)), "sample_rate": 0}), [])
+        self.assertEqual(module._audio_to_wav_base64({"sample_rate": 16000}), [])
+
+    def test_audio_file_path_to_wav_base64_decodes_m4a_with_ffmpeg(self):
+        if shutil.which("ffmpeg") is None:
+            self.skipTest("ffmpeg is required for audio file path decoding")
+
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_audio_file_path_test",
+            )
+
+        with tempfile.TemporaryDirectory(prefix="thinkingllm audio ") as temp_dir:
+            m4a_path = Path(temp_dir) / "sample voice memo.m4a"
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:duration=0.25",
+                    "-c:a",
+                    "aac",
+                    str(m4a_path),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            encoded = module._audio_file_path_to_wav_base64(str(m4a_path))
+
+        self.assertEqual(len(encoded), 1)
+        with wave.open(io.BytesIO(base64.b64decode(encoded[0])), "rb") as wav:
+            self.assertEqual(wav.getframerate(), 16000)
+            self.assertEqual(wav.getnchannels(), 1)
+            self.assertEqual(wav.getsampwidth(), 2)
+            self.assertGreater(wav.getnframes(), 3000)
+            self.assertLess(wav.getnframes(), 5000)
+
+    def test_audio_nodes_skip_saved_prompt_cache(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_audio_nodes_skip_saved_prompt_cache_test",
+            )
+
+        class DummyLoader(module.QwenVLGGUFBase):
+            def _load_model(self, *args, **kwargs):
+                self.chat_handler = object()
+                self.last_backend_trace = ""
+
+            def _encode_media(self, image, video, frame_count):
+                return []
+
+            def _invoke(self, *args, **kwargs):
+                return "real transcript", "raw transcript"
+
+        with mock.patch.object(
+            module,
+            "get_node_saved_prompt_with_seed",
+            side_effect=AssertionError("audio nodes must not reuse saved prompts"),
+        ), mock.patch.object(
+            module,
+            "set_node_saved_prompt",
+            side_effect=AssertionError("audio nodes must not store saved prompts"),
+        ), mock.patch.object(
+            module,
+            "_audio_inputs_to_wav_base64",
+            return_value=(["BASE64WAV"], []),
+        ), mock.patch.object(
+            module,
+            "_resolve_model_entry",
+            return_value=types.SimpleNamespace(context_length=4096),
+        ):
+            text, raw_trace = DummyLoader().run(
+                model_name="Gemma-4-12B-it-Q4_K_M.gguf [~7.5GB]",
+                preset_prompt="🚫 No preset (image-only)",
+                custom_prompt="Analyze the audio.",
+                image=None,
+                video=None,
+                frame_count=1,
+                max_tokens=64,
+                temperature=0.0,
+                top_p=1.0,
+                repetition_penalty=1.0,
+                seed=1,
+                keep_model_loaded=False,
+                device="auto",
+                node_class="ThinkingLLM_Gemma4_Audio_GGUF",
+            )
+
+        self.assertEqual(text, "real transcript")
+        self.assertEqual(raw_trace, "raw transcript")
 
 
 class TestLlamaCppInstaller(unittest.TestCase):
@@ -1143,6 +1507,40 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
 
         self.assertEqual(loader.llm.chat_template_kwargs["enable_thinking"], False)
         self.assertEqual(captured_kwargs[0]["chat_template_kwargs"], {"enable_thinking": False})
+
+    def test_create_chat_completion_retries_without_unexpected_kwarg(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gguf_unexpected_kwarg_retry_test",
+            )
+
+        captured_kwargs = []
+
+        class DummyLlama:
+            def create_chat_completion(self, **kwargs):
+                captured_kwargs.append(dict(kwargs))
+                if "repeat_last_n" in kwargs:
+                    raise TypeError("Llama.create_chat_completion() got an unexpected keyword argument 'repeat_last_n'")
+                return {"choices": [{"message": {"content": "ok"}}]}
+
+        loader = module.QwenVLGGUFBase()
+        loader.llm = DummyLlama()
+        loader.uses_qwen_template_thinking = False
+
+        result = loader._create_chat_completion(
+            enable_thinking=False,
+            messages=[],
+            max_tokens=1,
+            temperature=0.0,
+            top_p=1.0,
+            stream=True,
+            repeat_last_n=48,
+        )
+
+        self.assertEqual(result["choices"][0]["message"]["content"], "ok")
+        self.assertIn("repeat_last_n", captured_kwargs[0])
+        self.assertNotIn("repeat_last_n", captured_kwargs[1])
 
 
 class _GlobalCheck(ast.NodeVisitor):

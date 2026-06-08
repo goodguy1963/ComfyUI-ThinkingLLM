@@ -13,6 +13,7 @@ bitsandbytes
 accelerate
 sentencepiece
 tiktoken
+faster-whisper
 
 # For running GGUF models with vision support
 # The [server] extra installs necessary components for multimodal models

@@ -16,10 +16,14 @@ import io
 import inspect
 import json
 import os
+import re
+import shutil
 import struct
+import subprocess
 import sys
 import time
 import weakref
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -350,6 +354,10 @@ def _model_name_to_filename_candidates(model_name: str) -> set[str]:
     return candidates
 
 
+def _is_removed_qwen3_asr_filename(filename: str) -> bool:
+    return "qwen3-asr" in str(filename or "").lower()
+
+
 def _scan_local_gguf_models(base_dir: Path, existing_filenames: set[str]) -> dict[str, dict]:
     """Scan the GGUF base directory for locally available .gguf files not already in the JSON catalog."""
     local_models: dict[str, dict] = {}
@@ -375,6 +383,8 @@ def _scan_local_gguf_models(base_dir: Path, existing_filenames: set[str]) -> dic
         mmproj_path = mmproj_files[0] if mmproj_files else None
 
         for model_file in model_files:
+            if _is_removed_qwen3_asr_filename(model_file.name):
+                continue
             # Skip if this filename is already in the JSON catalog
             if model_file.name in existing_filenames:
                 continue
@@ -427,6 +437,7 @@ def _load_gguf_vl_catalog():
 
         defaults = repo.get("defaults") or {}
         mmproj_file = repo.get("mmproj_file")
+        mmproj_files = repo.get("mmproj_files") or {}
         model_files = repo.get("model_files") or []
 
         quant_sizes = _parse_repo_quant_sizes(repo_key)
@@ -446,13 +457,40 @@ def _load_gguf_vl_catalog():
                 "repo_id": repo_id,
                 "alt_repo_ids": alt_repo_ids,
                 "filename": model_file,
-                "mmproj_filename": mmproj_file,
+                "mmproj_filename": mmproj_files.get(model_file) or mmproj_file,
             }
 
     legacy_models = data.get("models") or {}
     for name, entry in legacy_models.items():
         if isinstance(entry, dict):
-            flattened[name] = entry
+            model_files = entry.get("model_files") or []
+            if model_files and not entry.get("filename"):
+                defaults = entry.get("defaults") or {}
+                mmproj_file = entry.get("mmproj_file")
+                mmproj_files = entry.get("mmproj_files") or {}
+                author = entry.get("author") or entry.get("publisher")
+                repo_name = entry.get("repo_name") or entry.get("repo_name_override") or name
+                repo_id = entry.get("repo_id")
+                alt_repo_ids = entry.get("alt_repo_ids") or []
+                quant_sizes = _parse_repo_quant_sizes(name)
+                for model_file in model_files:
+                    display = Path(model_file).name
+                    q = _quant_from_filename(model_file)
+                    if q and q in quant_sizes:
+                        display = f"{display} [~{quant_sizes[q]}]"
+                    if display in flattened:
+                        display = f"{display} ({name})"
+                    flattened[display] = {
+                        **defaults,
+                        "author": author,
+                        "repo_dirname": repo_name,
+                        "repo_id": repo_id,
+                        "alt_repo_ids": alt_repo_ids,
+                        "filename": model_file,
+                        "mmproj_filename": mmproj_files.get(model_file) or mmproj_file,
+                    }
+            else:
+                flattened[name] = entry
 
     # Scan filesystem for locally available models not in JSON config
     # Collect all directories to scan: the configured base_dir + any extra LLM paths from ComfyUI
@@ -483,6 +521,8 @@ GGUF_VL_CATALOG = _load_gguf_vl_catalog()
 
 GGUF_TOOLTIPS = {
     "model_name": "GGUF vision model from gguf_models.json or auto-detected local files. First run downloads the selected GGUF and mmproj files when they are not already on disk.",
+    "audio_model_name": "Gemma 4 audio-capable GGUF model. Only Gemma 4 E2B, E4B, and 12B are listed; 26B/31B variants are image/text-only for this purpose.",
+    "audio_file_path": "Optional local audio file path. M4A, MP3, WAV, FLAC, and other FFmpeg-readable files are decoded to 16 kHz mono WAV before inference.",
     "device": "auto prefers CUDA when PyTorch sees an NVIDIA GPU. If RAW_TRACE says GPU offload is no or unknown, verify your llama-cpp-python CUDA wheel before blaming the model.",
     "max_tokens": "Maximum new tokens to generate. Larger values give more room for reasoning but increase runtime and memory use.",
     "keep_model_loaded": "Keep the GGUF model in RAM/VRAM after the run so repeated prompts skip model loading. Disable if you need memory back for other nodes.",
@@ -504,6 +544,32 @@ GGUF_TOOLTIPS = {
     "hf_token": "Optional Hugging Face access token for private or gated GGUF/mmproj downloads. It is passed only to the download call, never logged or cached, and the in-memory copy is dropped after the download attempt. Clear this field before saving or sharing workflows.",
 }
 
+GEMMA4_AUDIO_DEFAULT_PROMPT = (
+    "Audio analysis: transcribe the speech in the original language, then summarize the important points. "
+    "If there is no clear speech, describe the audible scene and relevant sounds."
+)
+
+GGUF_AUDIO_TARGET_SAMPLE_RATE = 16000
+
+
+def _is_gemma4_audio_model_name(model_name: str) -> bool:
+    lowered = str(model_name or "").lower()
+    if "gemma-4" not in lowered and "gemma4" not in lowered:
+        return False
+    if "26b" in lowered or "31b" in lowered or "a4b" in lowered:
+        return False
+    return any(token in lowered for token in ("12b", "e2b", "e4b"))
+
+
+def _gguf_audio_model_keys() -> list[str]:
+    all_models = GGUF_VL_CATALOG.get("models") or {}
+    keys = [
+        key
+        for key, entry in all_models.items()
+        if (entry or {}).get("mmproj_filename") and _is_gemma4_audio_model_name(key)
+    ]
+    return sorted(keys)
+
 
 def _filter_kwargs_for_callable(fn, kwargs: dict) -> dict:
     try:
@@ -520,6 +586,239 @@ def _filter_kwargs_for_callable(fn, kwargs: dict) -> dict:
         if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
             allowed.add(p.name)
     return {k: v for k, v in kwargs.items() if k in allowed}
+
+
+def _unexpected_kwarg_names_from_type_error(exc: TypeError) -> list[str]:
+    message = str(exc or "")
+    matches = re.findall(r"unexpected keyword argument(?:\(s\))?\s+'([^']+)'", message)
+    names: list[str] = []
+    for match in matches:
+        for name in str(match).split(","):
+            cleaned = name.strip()
+            if cleaned:
+                names.append(cleaned)
+    return names
+
+
+def _filter_mmproj_handler_kwargs(handler_cls, kwargs: dict) -> dict:
+    filtered = _filter_kwargs_for_callable(getattr(handler_cls, "__init__", handler_cls), kwargs)
+    handler_name = getattr(handler_cls, "__name__", "")
+    if "MTMD" in handler_name:
+        filtered.pop("force_reasoning", None)
+    return filtered
+
+
+def _select_mmproj_handler_class(model_name: str, arch: str | None):
+    """Pick the llama-cpp-python multimodal chat handler for the selected model."""
+    try:
+        from llama_cpp import llama_chat_format
+    except ImportError as exc:
+        raise RuntimeError(
+            "[QwenVL] Missing llama_cpp chat handlers. Install a multimodal-capable llama-cpp-python build. "
+            "See docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md"
+        ) from exc
+
+    name = (model_name or "").lower()
+    architecture = (arch or "").lower()
+    if "gemma-4" in name or "gemma4" in name or architecture == "gemma4":
+        preferred = ("Gemma4ChatHandler",)
+    elif "qwen2.5" in name or "qwen25" in name or architecture in ("qwen2vl", "qwen25vl"):
+        preferred = ("Qwen25VLChatHandler", "Qwen3VLChatHandler")
+    else:
+        preferred = ("Qwen3VLChatHandler", "Qwen25VLChatHandler")
+
+    for handler_name in preferred:
+        handler_cls = getattr(llama_chat_format, handler_name, None)
+        if handler_cls is not None:
+            return handler_cls
+
+    raise RuntimeError(
+        "[QwenVL] Missing multimodal chat handler for this model. "
+        f"Tried: {', '.join(preferred)}. Install/update llama-cpp-python."
+    )
+
+
+def _resample_mono_audio(samples, source_rate: int, target_rate: int = GGUF_AUDIO_TARGET_SAMPLE_RATE):
+    samples = np.asarray(samples, dtype=np.float32).reshape(-1)
+    if samples.size == 0 or source_rate == target_rate:
+        return samples
+    target_length = max(1, int(round(float(samples.size) * float(target_rate) / float(source_rate))))
+    if target_length == samples.size:
+        return samples
+    if samples.size == 1:
+        return np.full((target_length,), float(samples[0]), dtype=np.float32)
+    old_positions = np.linspace(0.0, float(samples.size - 1), num=samples.size, dtype=np.float64)
+    new_positions = np.linspace(0.0, float(samples.size - 1), num=target_length, dtype=np.float64)
+    return np.interp(new_positions, old_positions, samples).astype(np.float32)
+
+
+def _clean_audio_file_path(audio_file_path) -> Path | None:
+    if audio_file_path is None:
+        return None
+    raw_path = str(audio_file_path).strip().strip("\"'")
+    if not raw_path:
+        return None
+    expanded = os.path.expandvars(raw_path)
+    return Path(expanded).expanduser()
+
+
+def _audio_file_path_to_wav_base64(audio_file_path) -> list[str]:
+    path = _clean_audio_file_path(audio_file_path)
+    if path is None:
+        return []
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"audio_file_path does not exist or is not a file: {path}")
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg was not found on PATH; install FFmpeg or connect a decoded ComfyUI AUDIO input")
+
+    result = subprocess.run(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(GGUF_AUDIO_TARGET_SAMPLE_RATE),
+            "-acodec",
+            "pcm_s16le",
+            "-f",
+            "s16le",
+            "pipe:1",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"ffmpeg failed to decode audio_file_path: {stderr or 'unknown ffmpeg error'}")
+    if not result.stdout:
+        raise RuntimeError("ffmpeg decoded no audio samples from audio_file_path")
+
+    if len(result.stdout) % 2 != 0:
+        raise RuntimeError("ffmpeg produced malformed 16-bit PCM audio")
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(GGUF_AUDIO_TARGET_SAMPLE_RATE)
+        wav.writeframes(result.stdout)
+    return [base64.b64encode(buffer.getvalue()).decode("ascii")]
+
+
+def _audio_to_wav_base64(audio) -> list[str]:
+    if audio is None:
+        return []
+    try:
+        if not isinstance(audio, dict):
+            raise ValueError("expected ComfyUI AUDIO dict with waveform/sample_rate")
+        waveform = audio.get("waveform")
+        if waveform is None:
+            raise ValueError("missing waveform")
+        sample_rate = int(audio.get("sample_rate") or 0)
+        if sample_rate <= 0:
+            raise ValueError(f"invalid sample_rate={audio.get('sample_rate')!r}")
+        tensor = waveform.detach().cpu() if hasattr(waveform, "detach") else waveform
+        tensor = tensor.cpu() if hasattr(tensor, "cpu") else tensor
+        array = tensor.numpy() if hasattr(tensor, "numpy") else np.asarray(tensor)
+        array = np.asarray(array, dtype=np.float32)
+        if array.size == 0:
+            raise ValueError("empty waveform")
+        if array.ndim == 3:
+            array = array[0]
+        if array.ndim == 1:
+            array = array[None, :]
+        if array.ndim != 2:
+            raise ValueError(f"unsupported waveform shape={getattr(array, 'shape', None)}")
+        if array.shape[0] > array.shape[-1]:
+            array = array.T
+        if not np.all(np.isfinite(array)):
+            array = np.nan_to_num(array, nan=0.0, posinf=1.0, neginf=-1.0)
+        mono = np.mean(array, axis=0)
+        mono = _resample_mono_audio(mono, sample_rate, GGUF_AUDIO_TARGET_SAMPLE_RATE)
+        pcm = np.clip(mono, -1.0, 1.0)
+        pcm16 = (pcm * 32767.0).astype(np.int16)
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(GGUF_AUDIO_TARGET_SAMPLE_RATE)
+            wav.writeframes(pcm16.tobytes())
+        return [base64.b64encode(buffer.getvalue()).decode("ascii")]
+    except Exception as exc:
+        print(f"[QwenVL] Warning: failed to encode AUDIO input as WAV; audio will be ignored. Cause: {exc}")
+        return []
+
+
+def _audio_inputs_to_wav_base64(audio=None, audio_file_path="") -> tuple[list[str], list[str]]:
+    items: list[str] = []
+    notes: list[str] = []
+    if audio is not None:
+        converted = _audio_to_wav_base64(audio)
+        if converted:
+            items.extend(converted)
+        else:
+            notes.append("Connected ComfyUI AUDIO input could not be converted to 16 kHz WAV.")
+
+    clean_path = _clean_audio_file_path(audio_file_path)
+    if clean_path is not None:
+        try:
+            converted = _audio_file_path_to_wav_base64(str(clean_path))
+            if converted:
+                items.extend(converted)
+                print(f"[QwenVL] Audio file decoded: {clean_path}")
+        except Exception as exc:
+            note = f"audio_file_path failed: {exc}"
+            notes.append(note)
+            print(f"[QwenVL] Warning: {note}")
+
+    return items, notes
+
+
+def _get_audio_hash(audio) -> str | None:
+    if audio is None or not isinstance(audio, dict):
+        return None
+    waveform = audio.get("waveform")
+    sample_rate = audio.get("sample_rate")
+    if waveform is None:
+        return None
+    try:
+        shape = tuple(getattr(waveform, "shape", ()))
+        tensor = waveform.detach().cpu() if hasattr(waveform, "detach") else waveform
+        array = tensor.numpy() if hasattr(tensor, "numpy") else np.asarray(tensor)
+        sample = array.reshape(-1)[:32].tolist()
+        content = json.dumps({"shape": shape, "sample_rate": sample_rate, "sample": sample}, sort_keys=True)
+        return hashlib.md5(content.encode()).hexdigest()[:16]
+    except Exception:
+        return hashlib.md5(f"{sample_rate}|{getattr(waveform, 'shape', '')}".encode()).hexdigest()[:16]
+
+
+def _get_audio_file_hash(audio_file_path) -> str | None:
+    path = _clean_audio_file_path(audio_file_path)
+    if path is None:
+        return None
+    try:
+        stat = path.stat()
+        content = f"{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}"
+        return hashlib.md5(content.encode("utf-8", errors="replace")).hexdigest()[:16]
+    except Exception:
+        return hashlib.md5(str(path).encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def _missing_audio_result(notes: list[str] | None = None) -> tuple[str, str]:
+    message = (
+        "[QwenVL GGUF] No usable audio input. Connect a decoded ComfyUI AUDIO output "
+        "or set audio_file_path to an existing M4A/MP3/WAV/FLAC file."
+    )
+    trace_lines = ["[AUDIO]", message]
+    if notes:
+        trace_lines.extend(str(note) for note in notes if note)
+    return message, "\n".join(trace_lines)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -762,11 +1061,27 @@ class QwenVLGGUFBase:
 
     def _create_chat_completion(self, *, enable_thinking: bool, **kwargs):
         self._sync_live_chat_template_kwargs(enable_thinking)
+        kwargs = dict(kwargs)
         if self._uses_chat_template_thinking():
-            kwargs = dict(kwargs)
             kwargs["chat_template_kwargs"] = {"enable_thinking": bool(enable_thinking)}
-            kwargs = _filter_kwargs_for_callable(getattr(self.llm, "create_chat_completion"), kwargs)
-        return self.llm.create_chat_completion(**kwargs)
+        completion_fn = getattr(self.llm, "create_chat_completion")
+        kwargs = _filter_kwargs_for_callable(completion_fn, kwargs)
+
+        for _ in range(4):
+            try:
+                return completion_fn(**kwargs)
+            except TypeError as exc:
+                unexpected = [name for name in _unexpected_kwarg_names_from_type_error(exc) if name in kwargs]
+                if not unexpected:
+                    raise
+                for name in unexpected:
+                    kwargs.pop(name, None)
+                print(
+                    "[QwenVL GGUF] llama-cpp-python rejected chat completion kwarg(s): "
+                    f"{', '.join(unexpected)}; retrying without them."
+                )
+
+        return completion_fn(**kwargs)
 
     def clear(self):
         print(f"[QwenVL GGUF DEBUG] Starting VRAM cleanup...")
@@ -979,22 +1294,16 @@ class QwenVLGGUFBase:
             torch.cuda.synchronize()
             time.sleep(0.1)  # Brief pause for cleanup to complete
 
+        # Detect architecture from GGUF metadata before selecting a multimodal handler.
+        arch = read_gguf_architecture(model_path)
+        self.gguf_arch = arch
+        is_qwen35 = arch in ("qwen35", "qwen35moe") if arch else "qwen3.5-" in model_name.lower()
+        self.supports_qwen_soft_think = arch == "qwen3" if arch else "qwen3-" in model_name.lower()
+        self.uses_qwen_template_thinking = bool(is_qwen35 or arch == "qwen3" or arch == "qwen")
+
         self.chat_handler = None
         if has_mmproj:
-            handler_cls = None
-            try:
-                from llama_cpp.llama_chat_format import Qwen3VLChatHandler
-
-                handler_cls = Qwen3VLChatHandler
-            except ImportError:
-                try:
-                    from llama_cpp.llama_chat_format import Qwen25VLChatHandler
-
-                    handler_cls = Qwen25VLChatHandler
-                except ImportError:
-                    raise RuntimeError(
-                        "[QwenVL] Missing Qwen VL chat handler in llama_cpp. Install the correct fork/wheel. See docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md"
-                    )
+            handler_cls = _select_mmproj_handler_class(model_name, arch)
 
             mmproj_kwargs = {
                 "clip_model_path": str(mmproj_path),
@@ -1002,7 +1311,7 @@ class QwenVLGGUFBase:
                 "force_reasoning": False,
                 "verbose": False,
             }
-            mmproj_kwargs = _filter_kwargs_for_callable(getattr(handler_cls, "__init__", handler_cls), mmproj_kwargs)
+            mmproj_kwargs = _filter_mmproj_handler_kwargs(handler_cls, mmproj_kwargs)
             if "image_max_tokens" not in mmproj_kwargs:
                 print(
                     "[QwenVL] Warning: installed llama_cpp chat handler does not support image_max_tokens; "
@@ -1028,12 +1337,6 @@ class QwenVLGGUFBase:
             "ctx_checkpoints": ctx_checkpoints_val,
         }
 
-        # Detect architecture from GGUF metadata instead of relying on model name
-        arch = read_gguf_architecture(model_path)
-        self.gguf_arch = arch
-        is_qwen35 = arch in ("qwen35", "qwen35moe") if arch else "qwen3.5-" in model_name.lower()
-        self.supports_qwen_soft_think = arch == "qwen3" if arch else "qwen3-" in model_name.lower()
-        self.uses_qwen_template_thinking = bool(is_qwen35 or arch == "qwen3" or arch == "qwen")
         # Thinking toggle: for Qwen3.5/4 we control enable_thinking via the chat template kwarg.
         # For non-Qwen backends (Gemma, LLaMA) the flag is advisory and may be silently ignored.
         if self.uses_qwen_template_thinking:
@@ -1115,6 +1418,7 @@ class QwenVLGGUFBase:
         system_prompt: str,
         user_prompt: str,
         images_b64: list[str],
+        audio_b64: list[str] | None,
         max_tokens: int,
         temperature: float,
         top_p: float,
@@ -1142,6 +1446,7 @@ class QwenVLGGUFBase:
             system_prompt_text: str,
             user_prompt_text: str,
             images_for_call: list[str],
+            audio_for_call: list[str],
             *,
             stage_label: str,
             seed_value: int,
@@ -1153,12 +1458,18 @@ class QwenVLGGUFBase:
                 current_enable_thinking,
                 supports_soft_switch=supports_soft_think,
             )
-            if images_for_call:
+            if effective_user_prompt is None:
+                effective_user_prompt = user_prompt_text
+            if images_for_call or audio_for_call:
                 content = [{"type": "text", "text": effective_user_prompt}]
                 for img in images_for_call:
                     if not img:
                         continue
                     content.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img}"}})
+                for aud in audio_for_call:
+                    if not aud:
+                        continue
+                    content.append({"type": "input_audio", "input_audio": {"data": aud, "format": "wav"}})
                 messages = [
                     {"role": "system", "content": system_prompt_text},
                     {"role": "user", "content": content},
@@ -1170,6 +1481,7 @@ class QwenVLGGUFBase:
                 ]
 
             start = time.perf_counter()
+            stop_tokens = ["<|im_end|>", "<|im_start|>"]
             sampler_kwargs = {
                 "top_k": int(top_k) if top_k is not None else 60,
                 "min_p": 0.01,
@@ -1191,7 +1503,7 @@ class QwenVLGGUFBase:
                     top_p=float(top_p),
                     repeat_penalty=float(repetition_penalty),
                     seed=int(seed_value),
-                    stop=["<|im_end|>", "<|im_start|>"],
+                    stop=stop_tokens,
                     stream=True,
                     **sampler_kwargs,
                 )
@@ -1221,7 +1533,13 @@ class QwenVLGGUFBase:
                 if stopped_for_degenerate_stream:
                     print(f"[QwenVL GGUF] stopped repeated-token loop: {stopped_for_degenerate_stream}")
                 cleaned = clean_model_output(raw_full, OutputCleanConfig(mode="text"))
-                return cleaned.strip(), raw_full
+                raw_for_trace = raw_full
+                if stopped_for_degenerate_stream:
+                    raw_for_trace = (
+                        f"[stopped repeated-token loop: {stopped_for_degenerate_stream}]\n"
+                        f"{raw_full}"
+                    ).strip()
+                return cleaned.strip(), raw_for_trace
 
             # Thread-based interrupt: always stream, poll interrupt on main thread
             import threading, queue as qmod
@@ -1243,7 +1561,7 @@ class QwenVLGGUFBase:
                         top_p=float(top_p),
                         repeat_penalty=float(repetition_penalty),
                         seed=int(seed_value),
-                        stop=["<|im_end|>", "<|im_start|>"],
+                        stop=stop_tokens,
                         stream=True,
                         **sampler_kwargs,
                     )
@@ -1293,12 +1611,19 @@ class QwenVLGGUFBase:
             if stopped_for_degenerate_stream:
                 print(f"[QwenVL GGUF] stopped repeated-token loop: {stopped_for_degenerate_stream}")
             cleaned = clean_model_output(raw_content, OutputCleanConfig(mode="text"))
-            return cleaned.strip(), raw_content
+            raw_for_trace = raw_content
+            if stopped_for_degenerate_stream:
+                raw_for_trace = (
+                    f"[stopped repeated-token loop: {stopped_for_degenerate_stream}]\n"
+                    f"{raw_content}"
+                ).strip()
+            return cleaned.strip(), raw_for_trace
 
         cleaned_text, raw_text = _run_completion(
             system_prompt,
             user_prompt,
             images_b64,
+            audio_b64 or [],
             stage_label="STREAMING",
             seed_value=seed,
         )
@@ -1328,6 +1653,7 @@ class QwenVLGGUFBase:
             cleaned_retry, raw_retry = _run_completion(
                 retry_system,
                 retry_user,
+                [],
                 [],
                 stage_label=stage_label,
                 seed_value=int(seed) + 999 + attempt_number,
@@ -1395,6 +1721,8 @@ class QwenVLGGUFBase:
         seed,
         keep_model_loaded,
         device,
+        audio=None,
+        audio_file_path="",
         ctx=None,
         n_batch=None,
         n_ubatch=None,
@@ -1417,12 +1745,16 @@ class QwenVLGGUFBase:
         print(f"[QwenVL GGUF DEBUG] Starting run with seed={seed}")
         image_hash = get_image_hash(image)
         video_hash = get_video_hash(video)
+        audio_hash = _get_audio_hash(audio)
+        audio_file_hash = _get_audio_file_hash(audio_file_path)
         input_signature = build_node_input_signature(
             model_name=model_name,
             preset_prompt=preset_prompt,
             custom_prompt=custom_prompt,
             image_hash=image_hash,
             video_hash=video_hash,
+            audio_hash=audio_hash,
+            audio_file_hash=audio_file_hash,
             frame_count=frame_count,
             ctx=ctx,
             n_batch=n_batch,
@@ -1443,7 +1775,15 @@ class QwenVLGGUFBase:
             top_p=top_p,
             repetition_penalty=repetition_penalty,
         )
-        if not stream_to_terminal:
+        requires_audio_input = node_class in {"ThinkingLLM_Gemma4_Audio_GGUF"}
+        skip_prompt_persistence = requires_audio_input
+        audio_b64, audio_notes = _audio_inputs_to_wav_base64(audio=audio, audio_file_path=audio_file_path)
+        if requires_audio_input and not audio_b64:
+            return _missing_audio_result(audio_notes)
+        if audio_b64:
+            print(f"[QwenVL GGUF DEBUG] Audio processed: {len(audio_b64)} audio item(s)")
+
+        if not stream_to_terminal and not skip_prompt_persistence:
             saved = get_node_saved_prompt_with_seed(
                 node_class,
                 unique_id,
@@ -1527,7 +1867,7 @@ class QwenVLGGUFBase:
                     estimated_prompt_tokens = estimate_qwen_text_tokens(
                         "You are a helpful vision-language assistant.",
                         prompt,
-                    ) + len(images_b64) * max(1024, int(attempt_image_max_tokens or 1024))
+                    ) + len(images_b64) * max(1024, int(attempt_image_max_tokens or 1024)) + len(audio_b64) * 2048
                     effective_thinking = resolve_qwen_thinking_mode(
                         enable_thinking,
                         max_tokens,
@@ -1558,8 +1898,8 @@ class QwenVLGGUFBase:
                     )
                     hf_token = ""
                     print(f"[QwenVL GGUF DEBUG] Model loaded successfully")
-                    if images_b64 and self.chat_handler is None:
-                        print("[QwenVL] Warning: images provided but this model entry has no mmproj_file; images will be ignored")
+                    if (images_b64 or audio_b64) and self.chat_handler is None:
+                        print("[QwenVL] Warning: media provided but this model entry has no multimodal handler; media will be ignored")
                     print(f"[QwenVL GGUF DEBUG] Starting generation...")
                     text, raw_trace = self._invoke(
                         system_prompt=(
@@ -1570,6 +1910,7 @@ class QwenVLGGUFBase:
                         ),
                         user_prompt=prompt,
                         images_b64=images_b64 if self.chat_handler is not None else [],
+                        audio_b64=audio_b64 if self.chat_handler is not None else [],
                         max_tokens=max_tokens,
                         temperature=temperature,
                         top_p=top_p,
@@ -1602,25 +1943,31 @@ class QwenVLGGUFBase:
             print(f"[QwenVL GGUF DEBUG] Generation completed. Text length: {len(text) if text else 0}")
             print(f"[QwenVL GGUF DEBUG] Generated text: {text[:100] if text else 'EMPTY'}...")
 
-            # Cache the generated text
-            PROMPT_CACHE[cache_key] = {
-                "text": text,
-                "timestamp": None,  # GGUF doesn't have CUDA events
-                "model": model_name,
-                "preset": preset_prompt,
-                "seed": int(seed),
-                "image_hash": image_hash,
-                "video_hash": video_hash
-            }
-            save_prompt_cache()  # Save cache to file
+            if not skip_prompt_persistence:
+                # Cache the generated text
+                PROMPT_CACHE[cache_key] = {
+                    "text": text,
+                    "timestamp": None,  # GGUF doesn't have CUDA events
+                    "model": model_name,
+                    "preset": preset_prompt,
+                    "seed": int(seed),
+                    "image_hash": image_hash,
+                    "video_hash": video_hash
+                }
+                save_prompt_cache()  # Save cache to file
 
-            print(f"[QwenVL GGUF] Cached new prompt for seed {seed}: {cache_key[:8]}...")
+                print(f"[QwenVL GGUF] Cached new prompt for seed {seed}: {cache_key[:8]}...")
+            else:
+                print("[QwenVL GGUF] Audio node result was not stored in the prompt cache")
 
             print(f"[QwenVL GGUF DEBUG] Returning tuple with text...")
 
-            # Save the generated prompt for future per-node keep-last-prompt
-            set_node_saved_prompt(node_class, unique_id, extra_pnginfo, text, raw_trace=raw_trace, seed=int(seed), max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
-            print(f"[QwenVL GGUF] Saved per-node prompt: {text[:50]}...")
+            if not skip_prompt_persistence:
+                # Save the generated prompt for future per-node keep-last-prompt
+                set_node_saved_prompt(node_class, unique_id, extra_pnginfo, text, raw_trace=raw_trace, seed=int(seed), max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
+                print(f"[QwenVL GGUF] Saved per-node prompt: {text[:50]}...")
+            else:
+                print("[QwenVL GGUF] Audio node result was not stored as a saved prompt")
 
             return (text, raw_trace)
         finally:
@@ -1644,7 +1991,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
                 "model_name": (model_keys, {"default": default_model, "tooltip": GGUF_TOOLTIPS["model_name"]}),
                 "preset_prompt": (prompts, {"default": default_prompt, "tooltip": "Select 'No preset' to use only the custom prompt or image input."}),
                 "custom_prompt": ("STRING", {"default": "", "multiline": True, "tooltip": "Additional user input that gets combined with the preset template. Leave empty to use only the template."}),
-                "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 8192, "tooltip": GGUF_TOOLTIPS["max_tokens"]}),
+                "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 32768, "tooltip": GGUF_TOOLTIPS["max_tokens"]}),
                 "keep_model_loaded": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["keep_model_loaded"]}),
                 "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": GGUF_TOOLTIPS["seed"]}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["stream_tokens_to_terminal"]}),
@@ -1654,6 +2001,8 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             "optional": {
                 "image": ("IMAGE",),
                 "video": ("IMAGE",),
+                "audio": ("AUDIO",),
+                "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["audio_file_path"]}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -1661,8 +2010,8 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             },
         }
 
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("RESPONSE",)
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("RESPONSE", "RAW_TRACE")
     FUNCTION = "process"
     CATEGORY = "ThinkingLLM"
 
@@ -1676,6 +2025,8 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
         seed,
         image=None,
         video=None,
+        audio=None,
+        audio_file_path="",
         unique_id=None,
         extra_pnginfo=None,
         stream_tokens_to_terminal=False,
@@ -1689,6 +2040,8 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             image=image,
             video=video,
             frame_count=16,
+            audio=audio,
+            audio_file_path=audio_file_path,
             max_tokens=max_tokens,
             temperature=0.6,
             top_p=0.9,
@@ -1716,7 +2069,93 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             hf_token=hf_token,
         )
         hf_token = ""
-        return (result[0],)
+        return result
+
+
+class ThinkingLLM_Gemma4_Audio_GGUF(QwenVLGGUFBase):
+    @classmethod
+    def INPUT_TYPES(cls):
+        model_keys = _gguf_audio_model_keys() or ["(no Gemma 4 audio GGUF models found)"]
+        default_model = next((key for key in model_keys if "gemma-4-12b" in key.lower()), model_keys[0])
+
+        return {
+            "required": {
+                "model_name": (model_keys, {"default": default_model, "tooltip": GGUF_TOOLTIPS["audio_model_name"]}),
+                "custom_prompt": ("STRING", {"default": GEMMA4_AUDIO_DEFAULT_PROMPT, "multiline": True, "tooltip": "Audio instruction sent with the AUDIO input. Gemma 4 audio works best with short 16 kHz mono WAV-style input; Comfy AUDIO is converted to WAV before inference."}),
+                "max_tokens": ("INT", {"default": 2048, "min": 64, "max": 32768, "tooltip": GGUF_TOOLTIPS["max_tokens"]}),
+                "keep_model_loaded": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["keep_model_loaded"]}),
+                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": GGUF_TOOLTIPS["seed"]}),
+                "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["stream_tokens_to_terminal"]}),
+                "enable_thinking": ("BOOLEAN", {"default": False, "tooltip": "Gemma 4 can reason, but audio transcription and short analysis are usually clearer with thinking disabled."}),
+                "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["hf_token"]}),
+            },
+            "optional": {
+                "audio": ("AUDIO",),
+                "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["audio_file_path"]}),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("RESPONSE", "RAW_TRACE")
+    FUNCTION = "process"
+    CATEGORY = "ThinkingLLM"
+
+    def process(
+        self,
+        model_name,
+        custom_prompt,
+        max_tokens,
+        keep_model_loaded,
+        seed,
+        stream_tokens_to_terminal=False,
+        enable_thinking=False,
+        hf_token="",
+        audio=None,
+        audio_file_path="",
+        unique_id=None,
+        extra_pnginfo=None,
+    ):
+        result = self.run(
+            model_name=model_name,
+            preset_prompt="🚫 No preset (image-only)",
+            custom_prompt=custom_prompt,
+            image=None,
+            video=None,
+            frame_count=1,
+            audio=audio,
+            audio_file_path=audio_file_path,
+            max_tokens=max_tokens,
+            temperature=1.0,
+            top_p=0.95,
+            repetition_penalty=1.0,
+            seed=seed,
+            keep_model_loaded=keep_model_loaded,
+            device="auto",
+            ctx=None,
+            n_batch=None,
+            n_ubatch=None,
+            gpu_layers=None,
+            image_max_tokens=None,
+            top_k=None,
+            pool_size=None,
+            n_threads=None,
+            n_threads_batch=None,
+            flash_attn=True,
+            offload_kqv=True,
+            ctx_checkpoints=0,
+            unique_id=unique_id,
+            extra_pnginfo=extra_pnginfo,
+            node_class="ThinkingLLM_Gemma4_Audio_GGUF",
+            stream_to_terminal=stream_tokens_to_terminal,
+            enable_thinking=enable_thinking,
+            hf_token=hf_token,
+        )
+        hf_token = ""
+        return result
 
 
 class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
@@ -1740,7 +2179,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
                 "device": (device_options, {"default": "auto", "tooltip": GGUF_TOOLTIPS["device"]}),
                 "preset_prompt": (prompts, {"default": default_prompt, "tooltip": "Select 'No preset' to use only the custom prompt or image input."}),
                 "custom_prompt": ("STRING", {"default": "", "multiline": True, "tooltip": "Additional user input that gets combined with the preset template. Leave empty to use only the template."}),
-                "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 8192, "tooltip": GGUF_TOOLTIPS["max_tokens"]}),
+                "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 32768, "tooltip": GGUF_TOOLTIPS["max_tokens"]}),
                 "temperature": ("FLOAT", {"default": 0.6, "min": 0.0, "max": 2.0, "tooltip": "Sampling randomness. Lower values are more deterministic; higher values are more varied."}),
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "tooltip": "Nucleus sampling cutoff. Lower values restrict token choice; 0.9 is a balanced default."}),
                 "repetition_penalty": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 2.0, "tooltip": "Values above 1.0 reduce repeated phrases; 1.0 leaves repetition unmodified."}),
@@ -1768,6 +2207,8 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             "optional": {
                 "image": ("IMAGE",),
                 "video": ("IMAGE",),
+                "audio": ("AUDIO",),
+                "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["audio_file_path"]}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -1809,6 +2250,8 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
         ctx_checkpoints,
         image=None,
         video=None,
+        audio=None,
+        audio_file_path="",
         unique_id=None,
         extra_pnginfo=None,
         stream_tokens_to_terminal=False,
@@ -1824,6 +2267,8 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             image=image,
             video=video,
             frame_count=frame_count,
+            audio=audio,
+            audio_file_path=audio_file_path,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -1857,6 +2302,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
 NODE_CLASS_MAPPINGS = {
     "ThinkingLLM_QwenVL_GGUF": ThinkingLLM_QwenVL_GGUF,
     "ThinkingLLM_QwenVL_GGUF_Advanced": ThinkingLLM_QwenVL_GGUF_Advanced,
+    "ThinkingLLM_Gemma4_Audio_GGUF": ThinkingLLM_Gemma4_Audio_GGUF,
     "AILab_QwenVL_GGUF": ThinkingLLM_QwenVL_GGUF,
     "AILab_QwenVL_GGUF_Advanced": ThinkingLLM_QwenVL_GGUF_Advanced,
 }
@@ -1864,6 +2310,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "ThinkingLLM_QwenVL_GGUF": "ThinkingLLM (GGUF)",
     "ThinkingLLM_QwenVL_GGUF_Advanced": "ThinkingLLM Advanced (GGUF)",
+    "ThinkingLLM_Gemma4_Audio_GGUF": "ThinkingLLM Gemma 4 Audio (GGUF)",
     "AILab_QwenVL_GGUF": "ThinkingLLM (GGUF)",
     "AILab_QwenVL_GGUF_Advanced": "ThinkingLLM Advanced (GGUF)",
 }

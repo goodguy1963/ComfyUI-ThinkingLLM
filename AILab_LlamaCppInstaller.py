@@ -45,7 +45,7 @@ KNOWN_LINUX_WHEEL_SPECS = {
         "llama_cpp_python-0.3.34+cu130.basic-cp312-cp312-linux_x86_64.whl"
     ),
 }
-VISION_HANDLER_NAMES = ("Qwen3VLChatHandler", "Qwen25VLChatHandler")
+VISION_HANDLER_NAMES = ("Qwen3VLChatHandler", "Qwen25VLChatHandler", "Gemma4ChatHandler", "MTMDChatHandler")
 _LAST_BACKEND_INFO: dict | None = None
 _PRINTED_BACKEND_LINES: set[str] = set()
 
