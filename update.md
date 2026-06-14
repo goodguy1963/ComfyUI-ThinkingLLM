@@ -1,5 +1,18 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.6 (2026/06/14) — GGUF Context Reset Hardening
+
+### 2.3.6 Changes
+
+- Moved GGUF llama context reset to run immediately before each internal `create_chat_completion` call.
+- Covers both normal generation and finalization retry calls while preserving `keep_model_loaded=True` model reuse.
+- Added regression coverage that verifies reset happens before completion and before retry/finalization completions.
+
+### 2.3.6 Validation
+
+- Targeted reset regression suite passes.
+- Full local test file still has the known Linux-host failures for Windows DLL-directory tests only.
+
 ## v1.0.9 (Local Fork) — May 2026
 
 ### New Features

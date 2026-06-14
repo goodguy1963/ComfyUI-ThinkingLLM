@@ -1436,12 +1436,6 @@ class QwenVLGGUFBase:
             directive = "/think" if enable_thinking else "/no_think"
             if not stream_to_terminal:
                 print(f"[QwenVL] Qwen3 GGUF detected: Thinking {'enabled' if enable_thinking else 'disabled'} via chat template and {directive}.")
-        if self.llm is not None and hasattr(self.llm, "reset"):
-            try:
-                self.llm.reset()
-            except Exception as exc:
-                print(f"[QwenVL GGUF DEBUG] llama context reset skipped: {exc}")
-
         def _run_completion(
             system_prompt_text: str,
             user_prompt_text: str,
@@ -1458,6 +1452,11 @@ class QwenVLGGUFBase:
                 current_enable_thinking,
                 supports_soft_switch=supports_soft_think,
             )
+            if self.llm is not None and hasattr(self.llm, "reset"):
+                try:
+                    self.llm.reset()
+                except Exception as exc:
+                    print(f"[QwenVL GGUF DEBUG] llama context reset skipped: {exc}")
             if effective_user_prompt is None:
                 effective_user_prompt = user_prompt_text
             if images_for_call or audio_for_call:

@@ -1542,6 +1542,101 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         self.assertIn("repeat_last_n", captured_kwargs[0])
         self.assertNotIn("repeat_last_n", captured_kwargs[1])
 
+    def test_gguf_invoke_resets_before_each_completion_call(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gguf_reset_before_completion_test",
+            )
+
+        class DummyLlama:
+            def __init__(self):
+                self.events = []
+                self.reset_count = 0
+
+            def reset(self):
+                self.events.append("reset")
+                self.reset_count += 1
+
+            def create_chat_completion(self, **kwargs):
+                self.events.append("completion")
+                return iter([
+                    {"choices": [{"delta": {"content": "ok"}}]},
+                ])
+
+        loader = module.QwenVLGGUFBase()
+        loader.llm = DummyLlama()
+
+        text, raw_trace = loader._invoke(
+            system_prompt="system",
+            user_prompt="user",
+            images_b64=[],
+            audio_b64=[],
+            max_tokens=1,
+            temperature=0.0,
+            top_p=1.0,
+            repetition_penalty=1.0,
+            seed=1,
+            stream_to_terminal=False,
+            enable_thinking=False,
+        )
+
+        self.assertEqual(text, "ok")
+        self.assertIn("ok", raw_trace)
+        self.assertEqual(loader.llm.reset_count, 1)
+        self.assertEqual(loader.llm.events, ["reset", "completion"])
+
+    def test_gguf_invoke_resets_before_finalization_retry_completion(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gguf_reset_finalization_test",
+            )
+
+        class DummyLlama:
+            def __init__(self):
+                self.events = []
+                self.calls = 0
+
+            def reset(self):
+                self.events.append(("reset", self.calls))
+
+            def create_chat_completion(self, **kwargs):
+                self.calls += 1
+                self.events.append(("completion", self.calls))
+                if self.calls == 1:
+                    return iter([
+                        {"choices": [{"delta": {"reasoning_content": "hidden reasoning only"}}]},
+                    ])
+                return iter([
+                    {"choices": [{"delta": {"content": "final answer"}}]},
+                ])
+
+        loader = module.QwenVLGGUFBase()
+        loader.llm = DummyLlama()
+
+        text, raw_trace = loader._invoke(
+            system_prompt="system",
+            user_prompt="user",
+            images_b64=[],
+            audio_b64=[],
+            max_tokens=8,
+            temperature=0.0,
+            top_p=1.0,
+            repetition_penalty=1.0,
+            seed=1,
+            stream_to_terminal=False,
+            enable_thinking=True,
+        )
+
+        self.assertEqual(text, "final answer")
+        self.assertIn("[STREAMING]", raw_trace)
+        self.assertIn("[FINALIZATION ATTEMPT 2/3]", raw_trace)
+        self.assertEqual(
+            loader.llm.events,
+            [("reset", 0), ("completion", 1), ("reset", 1), ("completion", 2)],
+        )
+
 
 class _GlobalCheck(ast.NodeVisitor):
     def __init__(self):
