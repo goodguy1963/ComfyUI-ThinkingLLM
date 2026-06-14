@@ -160,6 +160,19 @@ def _missing_audio_result(notes: list[str] | None = None) -> tuple[str, str, str
     return message, "[]", "\n".join(trace_lines)
 
 
+def _is_local_whisper_cache_miss(exc: Exception) -> bool:
+    try:
+        from huggingface_hub.errors import LocalEntryNotFoundError
+
+        if isinstance(exc, LocalEntryNotFoundError):
+            return True
+    except Exception:
+        pass
+
+    message = str(exc or "").lower()
+    return "local_files_only" in message and "cached" in message
+
+
 class ThinkingLLM_Whisper_ASR:
     @classmethod
     def INPUT_TYPES(cls):
@@ -219,7 +232,25 @@ class ThinkingLLM_Whisper_ASR:
 
             resolved_device = _resolve_whisper_device(str(device))
             resolved_compute_type = _resolve_compute_type(resolved_device, str(compute_type))
-            model = WhisperModel(str(model_size), device=resolved_device, compute_type=resolved_compute_type)
+            local_files_only = True
+            try:
+                model = WhisperModel(
+                    str(model_size),
+                    device=resolved_device,
+                    compute_type=resolved_compute_type,
+                    local_files_only=True,
+                )
+            except Exception as exc:
+                if not _is_local_whisper_cache_miss(exc):
+                    raise
+                notes.append("Local Whisper cache miss; downloaded model from Hugging Face once.")
+                local_files_only = False
+                model = WhisperModel(
+                    str(model_size),
+                    device=resolved_device,
+                    compute_type=resolved_compute_type,
+                    local_files_only=False,
+                )
             segments_iter, info = model.transcribe(
                 str(wav_path),
                 language=None if language == "auto" else str(language),
@@ -245,9 +276,10 @@ class ThinkingLLM_Whisper_ASR:
             [
                 "[WHISPER]",
                 f"source={source_label}",
-                f"model_size={model_size}; device={resolved_device}; compute_type={resolved_compute_type}; task={task}; vad_filter={bool(vad_filter)}",
+                f"model_size={model_size}; device={resolved_device}; compute_type={resolved_compute_type}; local_files_only={local_files_only}; task={task}; vad_filter={bool(vad_filter)}",
                 f"language={detected_language}; language_probability={detected_probability}; duration={duration}",
                 f"segments={len(segments)}; transcript_chars={len(transcript)}",
+                *notes,
             ]
         )
         return transcript, segments_json, trace

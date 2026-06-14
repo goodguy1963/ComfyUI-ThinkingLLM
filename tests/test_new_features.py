@@ -1049,7 +1049,7 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
         captured = {}
 
         class FakeWhisperModel:
-            def __init__(self, model_size, device, compute_type):
+            def __init__(self, model_size, device, compute_type, local_files_only=False):
                 captured["init"] = (model_size, device, compute_type)
 
             def transcribe(self, path, language, task, beam_size, vad_filter):
@@ -1082,6 +1082,101 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
         self.assertEqual(captured["init"], ("base", "cpu", "int8"))
         self.assertEqual(captured["transcribe"], (".wav", "de", "transcribe", 3, True))
         self.assertIn("language=de", raw_trace)
+
+    def test_whisper_asr_prefers_cached_model_without_hf_ping(self):
+        module = load_module_from_file(
+            "AILab_WhisperASR.py",
+            "thinkingllm_whisper_cached_model_test",
+        )
+
+        class FakeSegment:
+            start = 0.0
+            end = 1.0
+            text = " cached transcript "
+
+        fake_info = types.SimpleNamespace(language="en", language_probability=0.99, duration=1.0)
+        captured = {}
+
+        class FakeWhisperModel:
+            def __init__(self, model_size, device, compute_type, local_files_only=False):
+                captured["init"] = (model_size, device, compute_type, local_files_only)
+
+            def transcribe(self, path, language, task, beam_size, vad_filter):
+                return [FakeSegment()], fake_info
+
+        fake_backend = build_stub_module("faster_whisper", WhisperModel=FakeWhisperModel)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "input.wav"
+            with wave.open(str(source), "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(16000)
+                wav.writeframes(b"\0\0" * 1600)
+
+            with mock.patch.dict(sys.modules, {"faster_whisper": fake_backend}, clear=False):
+                transcript, _, raw_trace = module.ThinkingLLM_Whisper_ASR().process(
+                    model_size="small",
+                    language="auto",
+                    task="transcribe",
+                    device="cpu",
+                    compute_type="int8",
+                    beam_size=5,
+                    vad_filter=True,
+                    audio_file_path=str(source),
+                )
+
+        self.assertEqual(transcript, "cached transcript")
+        self.assertEqual(captured["init"], ("small", "cpu", "int8", True))
+        self.assertIn("local_files_only=True", raw_trace)
+
+    def test_whisper_asr_downloads_once_when_cache_is_missing(self):
+        module = load_module_from_file(
+            "AILab_WhisperASR.py",
+            "thinkingllm_whisper_cache_miss_test",
+        )
+
+        class FakeSegment:
+            start = 0.0
+            end = 1.0
+            text = " downloaded transcript "
+
+        fake_info = types.SimpleNamespace(language="en", language_probability=0.99, duration=1.0)
+        attempts = []
+
+        class FakeWhisperModel:
+            def __init__(self, model_size, device, compute_type, local_files_only=False):
+                attempts.append(local_files_only)
+                if local_files_only:
+                    raise RuntimeError("local_files_only=True and no cached snapshot was found")
+
+            def transcribe(self, path, language, task, beam_size, vad_filter):
+                return [FakeSegment()], fake_info
+
+        fake_backend = build_stub_module("faster_whisper", WhisperModel=FakeWhisperModel)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "input.wav"
+            with wave.open(str(source), "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(16000)
+                wav.writeframes(b"\0\0" * 1600)
+
+            with mock.patch.dict(sys.modules, {"faster_whisper": fake_backend}, clear=False):
+                transcript, _, raw_trace = module.ThinkingLLM_Whisper_ASR().process(
+                    model_size="small",
+                    language="auto",
+                    task="transcribe",
+                    device="cpu",
+                    compute_type="int8",
+                    beam_size=5,
+                    vad_filter=True,
+                    audio_file_path=str(source),
+                )
+
+        self.assertEqual(transcript, "downloaded transcript")
+        self.assertEqual(attempts, [True, False])
+        self.assertIn("local_files_only=False", raw_trace)
+        self.assertIn("Local Whisper cache miss", raw_trace)
 
     def test_audio_to_wav_base64_resamples_to_16khz_mono(self):
         import numpy as real_numpy
