@@ -66,12 +66,15 @@ const GGUF_ADVANCED_INTERNAL_WIDGETS = new Set([
 ]);
 
 const RECOMMENDATIONS_URL = new URL("../model_recommendations.json", import.meta.url);
+const PRESET_TOOLTIPS_URL = new URL("../preset_tooltips.json", import.meta.url);
 const RECOMMENDATION_WIDGET_NAME = "recommended_settings";
 const RECOMMENDATION_PLACEHOLDER = "Select a model to see provider/community recommended settings. This note never changes your saved widget values.";
 const RECOMMENDATION_FIELDS = ["temperature", "top_p", "top_k", "max_tokens", "ctx_min", "n_batch", "image_max_tokens"];
 const AUDIO_UNSUPPORTED_MESSAGE = "No curated audio support for the selected model. Use Gemma 4 Audio for audio understanding or Whisper ASR for transcription.";
+const PRESET_WIDGET_NAMES = ["preset_prompt", "enhancement_style", "preset_system_prompt"];
 
 let recommendationsPromise = null;
+let presetTooltipsPromise = null;
 
 function loadRecommendations() {
     if (!recommendationsPromise) {
@@ -89,6 +92,23 @@ function loadRecommendations() {
             });
     }
     return recommendationsPromise;
+}
+
+function loadPresetTooltips() {
+    if (!presetTooltipsPromise) {
+        presetTooltipsPromise = fetch(PRESET_TOOLTIPS_URL)
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                return response.json();
+            })
+            .catch((error) => {
+                console.warn("[ThinkingLLM] Failed to load preset tooltips", error);
+                return {};
+            });
+    }
+    return presetTooltipsPromise;
 }
 
 function setNodeColors(node, theme) {
@@ -347,6 +367,65 @@ function queueRecommendationRefresh(node) {
     });
 }
 
+function summarizePresetTooltip(prompt) {
+    const text = String(prompt || "").trim();
+    if (!text) {
+        return "No preset prompt is active. Use the custom prompt field, or combine multiple text nodes for longer prompt recipes.";
+    }
+    return text.length > 1800 ? `${text.slice(0, 1800).trim()}...` : text;
+}
+
+function updatePresetTooltip(widget, promptMap) {
+    if (!widget) {
+        return;
+    }
+    const prompt = promptMap?.[widget.name]?.[widget.value];
+    const tooltip = summarizePresetTooltip(prompt);
+    widget.options = { ...(widget.options || {}), tooltip };
+    widget.tooltip = tooltip;
+    if (widget.inputEl) {
+        widget.inputEl.title = tooltip;
+    }
+}
+
+function hookPresetTooltipPreviews(node) {
+    if (!THINKINGLLM_NODE_NAMES.has(node.comfyClass) || node._thinkingllmPresetTooltipsHooked) {
+        return;
+    }
+    node._thinkingllmPresetTooltipsHooked = true;
+
+    loadPresetTooltips().then((promptMap) => {
+        const refresh = () => {
+            for (const widgetName of PRESET_WIDGET_NAMES) {
+                updatePresetTooltip(findWidget(node, widgetName), promptMap);
+            }
+        };
+
+        for (const widgetName of PRESET_WIDGET_NAMES) {
+            const target = findWidget(node, widgetName);
+            if (!target || target._thinkingllmPresetTooltipCallbackHooked) {
+                continue;
+            }
+            target._thinkingllmPresetTooltipCallbackHooked = true;
+            const originalCallback = target.callback;
+            target.callback = function (...args) {
+                const result = originalCallback?.apply(this, args);
+                refresh();
+                return result;
+            };
+        }
+
+        const originalConfigure = node.onConfigure;
+        node.onConfigure = function (...args) {
+            const result = originalConfigure?.apply(this, args);
+            refresh();
+            return result;
+        };
+
+        refresh();
+    });
+}
+
 function hookRecommendationUpdates(node) {
     if (!THINKINGLLM_NODE_NAMES.has(node.comfyClass) || node._thinkingllmRecommendationHooked) {
         return;
@@ -390,6 +469,7 @@ const ext = {
         }
         hideGgufAdvancedInternals(node);
         hookRecommendationUpdates(node);
+        hookPresetTooltipPreviews(node);
         clearHfTokenAfterExecution(node);
     }
 };

@@ -485,6 +485,31 @@ class TestModelRecommendations(unittest.TestCase):
                 values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0]
                 self.assertTrue(any("LTX 2.3" in value for value in values))
 
+    def test_preset_tooltip_payload_matches_system_prompts(self):
+        system_prompts = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
+        tooltip_payload = json.loads(Path("web/preset_tooltips.json").read_text(encoding="utf-8"))
+
+        expected = {
+            "preset_prompt": system_prompts["qwenvl"],
+            "enhancement_style": {
+                name: entry["system_prompt"]
+                for name, entry in system_prompts["qwen_text"]["styles"].items()
+            },
+            "preset_system_prompt": {
+                name: entry["system_prompt"]
+                for name, entry in system_prompts["qwen_text"]["styles"].items()
+            },
+        }
+        self.assertEqual(tooltip_payload, expected)
+
+    def test_appearance_js_hooks_preset_dropdown_tooltips(self):
+        source = read_source("web/js/appearance.js")
+        self.assertIn("preset_tooltips.json", source)
+        self.assertIn("hookPresetTooltipPreviews(node)", source)
+        for widget_name in ["preset_prompt", "enhancement_style", "preset_system_prompt"]:
+            with self.subTest(widget_name=widget_name):
+                self.assertIn(f'"{widget_name}"', source)
+
     def test_hf_default_flag_controls_default_model(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             package = load_thinkingllm_loader_subset(["AILab_QwenVL.py"])
