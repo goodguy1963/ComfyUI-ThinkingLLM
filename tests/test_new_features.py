@@ -445,6 +445,46 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertEqual(resolved.model_filename, "gemma-4-12b-it-Q4_K_M.gguf")
         self.assertEqual(resolved.mmproj_filename, "mmproj-F16.gguf")
 
+    def test_ltx_presets_are_available_for_vision_and_prompt_enhancers(self):
+        data = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
+
+        self.assertIn("🎦 LTX 2.3 NSFW I2V Scene", data["_preset_prompts"])
+        self.assertIn("🎦 LTX 2.3 NSFW I2V Scene", data["qwenvl"])
+        self.assertIn("📖 LTX 2.3 NSFW T2V Scene", data["qwen_text"]["styles"])
+
+        vision_prompt = data["qwenvl"]["🎦 LTX 2.3 NSFW I2V Scene"]
+        text_prompt = data["qwen_text"]["styles"]["📖 LTX 2.3 NSFW T2V Scene"]["system_prompt"]
+        self.assertIn("LTX 2.3", vision_prompt)
+        self.assertIn("image first", vision_prompt)
+        self.assertIn("LTX 2.3", text_prompt)
+        self.assertIn("Do not change the user input intent", text_prompt)
+        self.assertNotIn("Example:", vision_prompt)
+        self.assertNotIn("Examples:", text_prompt)
+
+    def test_ltx_presets_are_exposed_by_relevant_nodes(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            package = load_thinkingllm_loader_subset(
+                [
+                    "AILab_QwenVL.py",
+                    "AILab_QwenVL_GGUF.py",
+                    "AILab_QwenVL_PromptEnhancer.py",
+                    "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                ]
+            )
+
+        expectations = {
+            "ThinkingLLM_QwenVL": "preset_prompt",
+            "ThinkingLLM_QwenVL_Advanced": "preset_prompt",
+            "ThinkingLLM_QwenVL_GGUF": "preset_prompt",
+            "ThinkingLLM_QwenVL_GGUF_Advanced": "preset_prompt",
+            "ThinkingLLM_QwenVL_PromptEnhancer": "enhancement_style",
+            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": "preset_system_prompt",
+        }
+        for node_name, widget_name in expectations.items():
+            with self.subTest(node_name=node_name):
+                values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0]
+                self.assertTrue(any("LTX 2.3" in value for value in values))
+
     def test_hf_default_flag_controls_default_model(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             package = load_thinkingllm_loader_subset(["AILab_QwenVL.py"])
