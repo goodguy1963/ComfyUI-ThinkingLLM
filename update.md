@@ -1,5 +1,18 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.10 (2026/06/19) — ComfyUI 2.0 Advanced GGUF Layout Fix
+
+### 2.3.10 Changes
+
+- Fixed the large blank area in `ThinkingLLM Advanced (GGUF)` under ComfyUI Nodes 2.0 by no longer hiding real advanced tuning widgets behind a layout hack.
+- Kept legacy workflow compatibility shims hidden while exposing `n_ubatch`, thread, flash-attention, KQV offload, and context-checkpoint controls.
+- Added regression coverage for the ComfyUI 2.0 layout compatibility rule.
+
+### 2.3.10 Validation
+
+- Targeted Advanced GGUF compatibility tests pass.
+- Full local regression test file passes.
+
 ## Version 2.3.6 (2026/06/14) — GGUF Context Reset Hardening
 
 ### 2.3.6 Changes

@@ -791,11 +791,19 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
         self.assertIn("<redacted HF token>", message)
         self.assertIn("access was rejected", message)
 
-    def test_frontend_hides_only_internal_gguf_advanced_tail(self):
+    def test_frontend_hides_only_legacy_gguf_advanced_shims(self):
         source = read_source("web/js/appearance.js")
         for widget_name in [
             "legacy_seed_mode",
             "legacy_unload_after_run",
+        ]:
+            with self.subTest(widget_name=widget_name):
+                self.assertIn(f'"{widget_name}"', source)
+        internal_widgets_block = source[
+            source.index("const GGUF_ADVANCED_INTERNAL_WIDGETS = new Set(["):
+            source.index("]);", source.index("const GGUF_ADVANCED_INTERNAL_WIDGETS = new Set([")):
+        ]
+        for widget_name in [
             "n_ubatch",
             "n_threads",
             "n_threads_batch",
@@ -804,7 +812,7 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
             "ctx_checkpoints",
         ]:
             with self.subTest(widget_name=widget_name):
-                self.assertIn(f'"{widget_name}"', source)
+                self.assertNotIn(f'"{widget_name}"', internal_widgets_block)
         self.assertNotIn('GGUF_ADVANCED_INTERNAL_WIDGETS = new Set([\n    "hf_token"', source)
         self.assertIn("hideStableWidget", source)
         self.assertIn("clearHfTokenAfterExecution", source)

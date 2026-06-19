@@ -57,12 +57,6 @@ const AUDIO_CAPABLE_NODE_NAMES = new Set([
 const GGUF_ADVANCED_INTERNAL_WIDGETS = new Set([
     "legacy_seed_mode",
     "legacy_unload_after_run",
-    "n_ubatch",
-    "n_threads",
-    "n_threads_batch",
-    "flash_attn",
-    "offload_kqv",
-    "ctx_checkpoints",
 ]);
 
 const RECOMMENDATIONS_URL = new URL("../model_recommendations.json", import.meta.url);
@@ -136,7 +130,8 @@ function hideStableWidget(node, widget) {
     widget._thinkingllmOriginalComputeSize = widget.computeSize;
     widget.hidden = true;
     widget.type = `thinkingllm_hidden_${widget.type || "widget"}`;
-    widget.computeSize = () => [0, -4];
+    widget.computeSize = () => [0, 0];
+    widget.draw = () => {};
 }
 
 function hideGgufAdvancedInternals(node) {
