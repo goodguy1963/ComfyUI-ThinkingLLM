@@ -333,6 +333,23 @@ def _resolve_base_dir(base_dir_value: str) -> Path:
     return Path(folder_paths.models_dir) / base_dir
 
 
+def _gguf_search_dirs(base_dir_value: str) -> list[Path]:
+    search_dirs: list[Path] = [_resolve_base_dir(base_dir_value)]
+    try:
+        if "LLM" in folder_paths.folder_names_and_paths:
+            for llm_path in folder_paths.get_folder_paths("LLM"):
+                gguf_dir = Path(llm_path) / "GGUF"
+                if gguf_dir not in search_dirs:
+                    search_dirs.append(gguf_dir)
+
+                llm_dir = Path(llm_path)
+                if llm_dir not in search_dirs:
+                    search_dirs.append(llm_dir)
+    except Exception:
+        pass
+    return search_dirs
+
+
 def _safe_dirname(value: str) -> str:
     value = (value or "").strip()
     if not value:
@@ -495,20 +512,7 @@ def _load_gguf_vl_catalog():
     # Scan filesystem for locally available models not in JSON config
     # Collect all directories to scan: the configured base_dir + any extra LLM paths from ComfyUI
     existing_filenames = {Path(e.get("filename", "")).name for e in flattened.values() if e.get("filename")}
-    scan_dirs: list[Path] = [_resolve_base_dir(base_dir)]
-    try:
-        if "LLM" in folder_paths.folder_names_and_paths:
-            for llm_path in folder_paths.get_folder_paths("LLM"):
-                gguf_dir = Path(llm_path) / "GGUF"
-                if gguf_dir not in scan_dirs:
-                    scan_dirs.append(gguf_dir)
-                # Also scan the LLM path itself (users may put GGUFs directly there)
-                llm_p = Path(llm_path)
-                if llm_p not in scan_dirs:
-                    scan_dirs.append(llm_p)
-    except Exception:
-        pass
-    for scan_dir in scan_dirs:
+    for scan_dir in _gguf_search_dirs(base_dir):
         local_models = _scan_local_gguf_models(scan_dir, existing_filenames)
         flattened.update(local_models)
         # Update existing_filenames so we don't add duplicates across directories
@@ -986,6 +990,14 @@ def _find_existing_local_file(base_dir: Path, filename: str) -> Path | None:
     return None
 
 
+def _find_existing_local_file_in_dirs(search_dirs: list[Path], filename: str) -> Path | None:
+    for search_dir in search_dirs:
+        found = _find_existing_local_file(search_dir, filename)
+        if found is not None:
+            return found
+    return None
+
+
 def _resolve_model_entry(model_name: str) -> GGUFVLResolved:
     all_models = GGUF_VL_CATALOG.get("models") or {}
     entry = all_models.get(model_name) or {}
@@ -1171,7 +1183,9 @@ class QwenVLGGUFBase:
             if mmproj_path is not None and not mmproj_path.exists():
                 raise FileNotFoundError(f"[QwenVL] Local mmproj not found: {mmproj_path}")
         else:
-            base_dir = _resolve_base_dir(GGUF_VL_CATALOG.get("base_dir") or "llm/GGUF")
+            base_dir_value = GGUF_VL_CATALOG.get("base_dir") or "llm/GGUF"
+            search_dirs = _gguf_search_dirs(base_dir_value)
+            base_dir = search_dirs[0]
 
             author_dir = _safe_dirname(resolved.author or "")
             repo_dir = _safe_dirname(resolved.repo_dirname)
@@ -1180,7 +1194,7 @@ class QwenVLGGUFBase:
             model_path = target_dir / Path(resolved.model_filename).name
             mmproj_path = target_dir / Path(resolved.mmproj_filename).name if resolved.mmproj_filename else None
 
-            existing_model = _find_existing_local_file(base_dir, resolved.model_filename)
+            existing_model = _find_existing_local_file_in_dirs(search_dirs, resolved.model_filename)
             if existing_model is not None:
                 model_path.parent.mkdir(parents=True, exist_ok=True)
                 if not model_path.exists():
@@ -1192,7 +1206,7 @@ class QwenVLGGUFBase:
                     model_path = model_path
 
             if mmproj_path is not None:
-                existing_mmproj = _find_existing_local_file(base_dir, resolved.mmproj_filename)
+                existing_mmproj = _find_existing_local_file_in_dirs(search_dirs, resolved.mmproj_filename)
                 if existing_mmproj is not None:
                     mmproj_path.parent.mkdir(parents=True, exist_ok=True)
                     if not mmproj_path.exists():
@@ -1427,6 +1441,7 @@ class QwenVLGGUFBase:
         model_name: str = "",
         stream_to_terminal: bool = False,
         enable_thinking: bool = True,
+        auto_finalization_retry: bool = False,
         top_k: int | None = None,
     ):
         """Returns (cleaned_text, raw_text) tuple."""
@@ -1630,6 +1645,8 @@ class QwenVLGGUFBase:
         best_cleaned = cleaned_text
         if _answer_output_is_usable(best_cleaned):
             return best_cleaned, "\n\n".join(raw_trace_parts)
+        if not auto_finalization_retry:
+            return best_cleaned or "", "\n\n".join(raw_trace_parts)
 
         current_raw = raw_text
         for attempt_number in range(2, _GGUF_MAX_FINALIZATION_ATTEMPTS + 1):
@@ -1739,6 +1756,7 @@ class QwenVLGGUFBase:
         node_class="QwenVLGGUF",
         stream_to_terminal=False,
         enable_thinking=True,
+        auto_finalization_retry=False,
         hf_token="",
     ):
         print(f"[QwenVL GGUF DEBUG] Starting run with seed={seed}")
@@ -1769,6 +1787,7 @@ class QwenVLGGUFBase:
             offload_kqv=bool(offload_kqv),
             ctx_checkpoints=ctx_checkpoints,
             enable_thinking=bool(enable_thinking),
+            auto_finalization_retry=bool(auto_finalization_retry),
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -1918,6 +1937,7 @@ class QwenVLGGUFBase:
                         model_name=model_name,
                         stream_to_terminal=stream_to_terminal,
                         enable_thinking=effective_thinking,
+                        auto_finalization_retry=auto_finalization_retry,
                         top_k=top_k,
                     )
                     if self.last_backend_trace:
@@ -1995,6 +2015,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
                 "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": GGUF_TOOLTIPS["seed"]}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["stream_tokens_to_terminal"]}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. For non-Qwen GGUF models this is advisory and may not be honored by the backend."}),
+                "auto_finalization_retry": ("BOOLEAN", {"default": False, "tooltip": "If enabled, runs an extra LLM completion when the first output is empty or reasoning-only. Disabled by default so one node execution performs one generation pass."}),
                 "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["hf_token"]}),
                             },
             "optional": {
@@ -2030,6 +2051,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
         extra_pnginfo=None,
         stream_tokens_to_terminal=False,
         enable_thinking=True,
+        auto_finalization_retry=False,
         hf_token="",
     ):
         result = self.run(
@@ -2065,6 +2087,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             node_class="ThinkingLLM_QwenVL_GGUF",
             stream_to_terminal=stream_tokens_to_terminal,
             enable_thinking=enable_thinking,
+            auto_finalization_retry=auto_finalization_retry,
             hf_token=hf_token,
         )
         hf_token = ""
@@ -2086,6 +2109,7 @@ class ThinkingLLM_Gemma4_Audio_GGUF(QwenVLGGUFBase):
                 "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": GGUF_TOOLTIPS["seed"]}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["stream_tokens_to_terminal"]}),
                 "enable_thinking": ("BOOLEAN", {"default": False, "tooltip": "Gemma 4 can reason, but audio transcription and short analysis are usually clearer with thinking disabled."}),
+                "auto_finalization_retry": ("BOOLEAN", {"default": False, "tooltip": "If enabled, runs an extra LLM completion when the first output is empty or reasoning-only. Disabled by default so one node execution performs one generation pass."}),
                 "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["hf_token"]}),
             },
             "optional": {
@@ -2112,6 +2136,7 @@ class ThinkingLLM_Gemma4_Audio_GGUF(QwenVLGGUFBase):
         seed,
         stream_tokens_to_terminal=False,
         enable_thinking=False,
+        auto_finalization_retry=False,
         hf_token="",
         audio=None,
         audio_file_path="",
@@ -2151,6 +2176,7 @@ class ThinkingLLM_Gemma4_Audio_GGUF(QwenVLGGUFBase):
             node_class="ThinkingLLM_Gemma4_Audio_GGUF",
             stream_to_terminal=stream_tokens_to_terminal,
             enable_thinking=enable_thinking,
+            auto_finalization_retry=auto_finalization_retry,
             hf_token=hf_token,
         )
         hf_token = ""
@@ -2201,6 +2227,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
                 "ctx_checkpoints": ("INT", {"default": 0, "min": 0, "max": 32, "tooltip": GGUF_TOOLTIPS["ctx_checkpoints"]}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": GGUF_TOOLTIPS["stream_tokens_to_terminal"]}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. For non-Qwen GGUF models this is advisory."}),
+                "auto_finalization_retry": ("BOOLEAN", {"default": False, "tooltip": "If enabled, runs an extra LLM completion when the first output is empty or reasoning-only. Disabled by default so one node execution performs one generation pass."}),
                 "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["hf_token"]}),
                             },
             "optional": {
@@ -2255,6 +2282,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
         extra_pnginfo=None,
         stream_tokens_to_terminal=False,
         enable_thinking=True,
+        auto_finalization_retry=False,
         hf_token="",
     ):
         _ = legacy_seed_mode
@@ -2292,6 +2320,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             node_class="ThinkingLLM_QwenVL_GGUF_Advanced",
             stream_to_terminal=stream_tokens_to_terminal,
             enable_thinking=enable_thinking,
+            auto_finalization_retry=auto_finalization_retry,
             hf_token=hf_token,
         )
         hf_token = ""

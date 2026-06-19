@@ -79,6 +79,7 @@ GGUF_PROMPT_TOOLTIPS = {
     "keep_last_prompt": "Return the saved per-node prompt instead of generating a new one when available.",
     "stream_tokens_to_terminal": "Show clean wrapped generated tokens in the ComfyUI terminal. Streaming bypasses fixed-seed reuse for a fresh run.",
     "enable_thinking": "Enable model reasoning/thinking when supported. The node still returns the cleaned final prompt, so reasoning may be hidden or empty.",
+    "auto_finalization_retry": "If enabled, runs an extra LLM completion when the first output is empty or reasoning-only. Disabled by default so one node execution performs one generation pass.",
     "hf_token": "Optional Hugging Face access token for private or gated GGUF downloads. It is passed only to the download call, never logged or cached, and the in-memory copy is dropped after the download attempt. Clear this field before saving or sharing workflows.",
 }
 
@@ -481,6 +482,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": GGUF_PROMPT_TOOLTIPS["keep_last_prompt"]}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": GGUF_PROMPT_TOOLTIPS["stream_tokens_to_terminal"]}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": GGUF_PROMPT_TOOLTIPS["enable_thinking"]}),
+                "auto_finalization_retry": ("BOOLEAN", {"default": False, "tooltip": GGUF_PROMPT_TOOLTIPS["auto_finalization_retry"]}),
                 "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_PROMPT_TOOLTIPS["hf_token"]}),
             },
             "hidden": {
@@ -715,6 +717,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         stream_to_terminal=False,
         initial_stage_label="INITIAL GENERATION",
         enable_thinking=True,
+        auto_finalization_retry=False,
     ):
         """Returns (cleaned_prompt, raw_trace) tuple."""
         stream_display = TerminalStreamDisplay("QwenVL GGUF", suppress_planning=True, compact=True) if stream_to_terminal else None
@@ -860,6 +863,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         best_cleaned = cleaned.strip()
         if _prompt_output_is_usable(best_cleaned):
             return best_cleaned, "\n\n".join(raw_trace_parts)
+        if not auto_finalization_retry:
+            return best_cleaned or "", "\n\n".join(raw_trace_parts)
 
         current_raw = raw
         for attempt_number in range(2, _PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS + 1):
@@ -924,6 +929,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         unique_id=None,
         extra_pnginfo=None,
         enable_thinking=True,
+        auto_finalization_retry=False,
         hf_token="",
     ):
         node_class = "ThinkingLLM_QwenVL_GGUF_PromptEnhancer"
@@ -935,6 +941,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             english_output=bool(english_output),
             device=device,
             enable_thinking=bool(enable_thinking),
+            auto_finalization_retry=bool(auto_finalization_retry),
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -1021,6 +1028,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             stream_to_terminal=stream_tokens_to_terminal,
             initial_stage_label="INITIAL GENERATION",
             enable_thinking=effective_thinking,
+            auto_finalization_retry=auto_finalization_retry,
         )
         full_raw_trace = raw_trace
         if english_output:
@@ -1039,6 +1047,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 stream_to_terminal=stream_tokens_to_terminal,
                 initial_stage_label="TRANSLATION STAGE",
                 enable_thinking=effective_thinking,
+                auto_finalization_retry=auto_finalization_retry,
             )
             full_raw_trace = f"{raw_trace}\n\n{trans_trace}"
             final = clean_model_output(translated, OutputCleanConfig(mode="prompt")) or translated.strip()

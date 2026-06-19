@@ -1068,6 +1068,24 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
         self.assertIn("gemma-4-12b", model_meta["default"].lower())
         self.assertIn("Audio", input_types["required"]["custom_prompt"][1]["default"])
 
+    def test_gguf_nodes_disable_auto_finalization_retry_by_default(self):
+        package = load_thinkingllm_loader_subset([
+            "AILab_QwenVL_GGUF.py",
+            "AILab_QwenVL_GGUF_PromptEnhancer.py",
+        ])
+
+        for node_name in (
+            "ThinkingLLM_QwenVL_GGUF",
+            "ThinkingLLM_QwenVL_GGUF_Advanced",
+            "ThinkingLLM_Gemma4_Audio_GGUF",
+            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+        ):
+            with self.subTest(node_name=node_name):
+                required = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"]
+                self.assertIn("auto_finalization_retry", required)
+                self.assertEqual(required["auto_finalization_retry"][0], "BOOLEAN")
+                self.assertEqual(required["auto_finalization_retry"][1]["default"], False)
+
     def test_qwen3_asr_node_is_not_registered(self):
         package = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py", "AILab_WhisperASR.py"])
 
@@ -1535,6 +1553,109 @@ class TestLlamaCppInstaller(unittest.TestCase):
 
 
 class TestGGUFWindllRuntimeFallback(unittest.TestCase):
+    def test_gguf_loader_reuses_catalog_model_from_extra_llm_path_without_download(self):
+        calls = []
+
+        class DummyChatHandler:
+            def __init__(self, **kwargs):
+                calls.append(("chat", kwargs.get("clip_model_path")))
+
+        class DummyLlama:
+            def __init__(self, **kwargs):
+                calls.append(("llama", kwargs.get("model_path")))
+
+        chat_format_module = build_stub_module(
+            "llama_cpp.llama_chat_format",
+            Qwen35VLChatHandler=DummyChatHandler,
+            Qwen3VLChatHandler=DummyChatHandler,
+        )
+        installer_module = build_stub_module(
+            "AILab_LlamaCppInstaller",
+            ensure_llama_cpp_backend=lambda *args, **kwargs: DummyLlama,
+            format_llama_cpp_backend_info=lambda info=None: "stub backend",
+            get_last_llama_cpp_backend_info=lambda: {
+                "gpu_offload": True,
+                "vision_handlers": ["Qwen35VLChatHandler"],
+            },
+            relax_windows_dll_directory_for_long_paths=contextlib.nullcontext,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            dev_models = temp_root / "dev" / "models"
+            shared_llm = temp_root / "shared" / "models" / "LLM"
+            shared_model_dir = shared_llm / "GGUF" / "HauhauCS" / "Qwen3.5-4B-Uncensored-HauhauCS-Aggressive"
+            shared_model_dir.mkdir(parents=True)
+            model_filename = "Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf"
+            mmproj_filename = "mmproj-Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-BF16.gguf"
+            (shared_model_dir / model_filename).write_bytes(b"GGUF")
+            (shared_model_dir / mmproj_filename).write_bytes(b"mmproj")
+
+            stubs = build_loader_test_stubs()
+            stubs.update(
+                {
+                    "folder_paths": build_stub_module(
+                        "folder_paths",
+                        models_dir=str(dev_models),
+                        folder_names_and_paths={"LLM": ([str(shared_llm)], set())},
+                        get_folder_paths=lambda name: [str(shared_llm)] if name == "LLM" else [],
+                    ),
+                    "AILab_LlamaCppInstaller": installer_module,
+                    "llama_cpp": build_stub_module("llama_cpp", llama_chat_format=chat_format_module),
+                    "llama_cpp.llama_chat_format": chat_format_module,
+                }
+            )
+
+            with mock.patch.dict(sys.modules, stubs, clear=False):
+                module = load_module_from_file(
+                    "AILab_QwenVL_GGUF.py",
+                    "thinkingllm_gguf_extra_llm_reuse_test",
+                )
+
+            model_name = next(
+                name
+                for name in module.GGUF_VL_CATALOG["models"]
+                if name.startswith(model_filename)
+            )
+            loader = module.QwenVLGGUFBase()
+
+            with mock.patch.dict(sys.modules, stubs, clear=False), mock.patch.object(
+                module,
+                "_download_single_file",
+                side_effect=AssertionError("download should not be called for shared local GGUF"),
+            ), mock.patch.object(
+                module,
+                "_pick_device",
+                return_value="cpu",
+            ), mock.patch.object(
+                module,
+                "read_gguf_architecture",
+                return_value="qwen35",
+            ):
+                loader._load_model(
+                    model_name=model_name,
+                    device="cpu",
+                    ctx=128,
+                    n_batch=16,
+                    n_ubatch=None,
+                    gpu_layers=0,
+                    image_max_tokens=64,
+                    top_k=0,
+                    pool_size=1024,
+                    n_threads=None,
+                    n_threads_batch=None,
+                    flash_attn=False,
+                    offload_kqv=False,
+                    ctx_checkpoints=None,
+                    enable_thinking=True,
+                    unique_id=None,
+                )
+
+        self.assertEqual(calls[0][0], "chat")
+        self.assertTrue(str(calls[0][1]).endswith(mmproj_filename))
+        self.assertEqual(calls[1][0], "llama")
+        self.assertTrue(str(calls[1][1]).endswith(model_filename))
+
     def test_gguf_runtime_reuses_windows_dll_relaxation_for_handler_and_llama(self):
         enter_events = []
 
@@ -1754,6 +1875,50 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         self.assertEqual(loader.llm.reset_count, 1)
         self.assertEqual(loader.llm.events, ["reset", "completion"])
 
+    def test_gguf_invoke_does_not_auto_finalize_by_default(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gguf_no_default_finalization_test",
+            )
+
+        class DummyLlama:
+            def __init__(self):
+                self.events = []
+                self.calls = 0
+
+            def reset(self):
+                self.events.append(("reset", self.calls))
+
+            def create_chat_completion(self, **kwargs):
+                self.calls += 1
+                self.events.append(("completion", self.calls))
+                return iter([
+                    {"choices": [{"delta": {"reasoning_content": "hidden reasoning only"}}]},
+                ])
+
+        loader = module.QwenVLGGUFBase()
+        loader.llm = DummyLlama()
+
+        text, raw_trace = loader._invoke(
+            system_prompt="system",
+            user_prompt="user",
+            images_b64=[],
+            audio_b64=[],
+            max_tokens=8,
+            temperature=0.0,
+            top_p=1.0,
+            repetition_penalty=1.0,
+            seed=1,
+            stream_to_terminal=False,
+            enable_thinking=True,
+        )
+
+        self.assertEqual(text, "")
+        self.assertIn("[STREAMING]", raw_trace)
+        self.assertNotIn("FINALIZATION ATTEMPT", raw_trace)
+        self.assertEqual(loader.llm.events, [("reset", 0), ("completion", 1)])
+
     def test_gguf_invoke_resets_before_finalization_retry_completion(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             module = load_module_from_file(
@@ -1795,6 +1960,7 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
             seed=1,
             stream_to_terminal=False,
             enable_thinking=True,
+            auto_finalization_retry=True,
         )
 
         self.assertEqual(text, "final answer")

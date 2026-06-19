@@ -1,5 +1,18 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.11 (2026/06/19) — GGUF Single-Pass Execution Fix
+
+### 2.3.11 Changes
+
+- Disabled automatic GGUF finalization retries by default so one node execution performs one LLM generation pass unless explicitly configured otherwise.
+- Added `auto_finalization_retry` to `ThinkingLLM (GGUF)`, `ThinkingLLM Advanced (GGUF)`, `ThinkingLLM Gemma 4 Audio (GGUF)`, and `ThinkingLLM Prompt Enhancer (GGUF)` for users who still want the old empty/reasoning-only retry behavior.
+- Fixed catalogued GGUF model reuse across ComfyUI `extra_model_paths.yaml` `LLM` mappings, preventing unnecessary re-downloads when models already exist in a shared `models/LLM/GGUF` directory.
+
+### 2.3.11 Validation
+
+- Added regression coverage for default single-pass GGUF execution, explicit opt-in finalization retry, GGUF node UI defaults, and shared `LLM/GGUF` model reuse.
+- Targeted GGUF tests pass.
+
 ## Version 2.3.10 (2026/06/19) — ComfyUI 2.0 Advanced GGUF Layout Fix
 
 ### 2.3.10 Changes
