@@ -27,7 +27,6 @@ import torch
 from huggingface_hub import snapshot_download
 from AILab_LlamaCppInstaller import ensure_llama_cpp_backend
 
-import folder_paths
 from AILab_OutputCleaner import OutputCleanConfig, clean_model_output, prompt_output_guard
 from comfy.model_management import throw_exception_if_processing_interrupted
 from comfy.model_management import throw_exception_if_processing_interrupted
@@ -60,7 +59,15 @@ from AILab_QwenVL import (
     _make_node_state_key,
     _build_workflow_fingerprint,
 )
-from AILab_QwenVL_GGUF import construct_llama_safely, read_gguf_architecture, register_active_gguf_loader, release_other_gguf_loaders, _filter_kwargs_for_callable
+from AILab_QwenVL_GGUF import (
+    construct_llama_safely,
+    read_gguf_architecture,
+    register_active_gguf_loader,
+    release_other_gguf_loaders,
+    _filter_kwargs_for_callable,
+    _find_existing_local_file_in_dirs,
+    _gguf_search_dirs,
+)
 
 
 GGUF_PROMPT_TOOLTIPS = {
@@ -291,13 +298,6 @@ def _safe_dirname(value: str) -> str:
     return "".join(ch for ch in value if ch.isalnum() or ch in "._- ").strip() or "unknown"
 
 
-def _resolve_base_dir(base_dir_value: str) -> Path:
-    base_dir = Path(base_dir_value)
-    if base_dir.is_absolute():
-        return base_dir
-    return Path(folder_paths.models_dir) / base_dir
-
-
 def _model_name_to_filename_candidates(model_name: str) -> set[str]:
     raw = (model_name or "").strip()
     if not raw:
@@ -310,20 +310,6 @@ def _model_name_to_filename_candidates(model_name: str) -> set[str]:
         tail = raw.rsplit("/", 1)[-1].strip()
         candidates.update({tail, f"{tail}.gguf"})
     return candidates
-
-
-def _find_existing_local_file(base_dir: Path, filename: str) -> Path | None:
-    """Reuse an already-downloaded GGUF file anywhere under the shared base dir."""
-    wanted = Path(filename).name
-    if not wanted:
-        return None
-    try:
-        for candidate in base_dir.rglob(wanted):
-            if candidate.is_file():
-                return candidate
-    except Exception:
-        return None
-    return None
 
 
 class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
@@ -438,19 +424,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         # Scan filesystem for locally available models not in JSON config
         # Collect all directories to scan: the configured base_dir + any extra LLM paths from ComfyUI
         existing_filenames = {Path(e.get("filename", "")).name for e in models.values() if e.get("filename")}
-        scan_dirs: list[Path] = [_resolve_base_dir(base_dir)]
-        try:
-            if "LLM" in folder_paths.folder_names_and_paths:
-                for llm_path in folder_paths.get_folder_paths("LLM"):
-                    gguf_dir = Path(llm_path) / "GGUF"
-                    if gguf_dir not in scan_dirs:
-                        scan_dirs.append(gguf_dir)
-                    llm_p = Path(llm_path)
-                    if llm_p not in scan_dirs:
-                        scan_dirs.append(llm_p)
-        except Exception:
-            pass
-        for scan_dir in scan_dirs:
+        for scan_dir in _gguf_search_dirs(base_dir):
             local_models = ThinkingLLM_QwenVL_GGUF_PromptEnhancer._scan_local_gguf_text_models(scan_dir, existing_filenames)
             models.update(local_models)
             existing_filenames.update(Path(e.get("filename", "")).name for e in local_models.values() if e.get("filename"))
@@ -551,7 +525,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         if filename and Path(filename).is_absolute():
             return Path(filename)
 
-        base_dir = _resolve_base_dir(self.gguf_models.get("base_dir") or "LLM/GGUF")
+        search_dirs = _gguf_search_dirs(self.gguf_models.get("base_dir") or "LLM/GGUF")
+        base_dir = search_dirs[0]
 
         path = entry.get("path")
         if path:
@@ -566,7 +541,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 target = base_dir / repo_dir / Path(filename).name
             if target.exists():
                 return target
-            existing = _find_existing_local_file(base_dir, filename)
+            existing = _find_existing_local_file_in_dirs(search_dirs, filename)
             if existing is not None:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 try:

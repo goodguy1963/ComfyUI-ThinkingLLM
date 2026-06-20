@@ -1572,6 +1572,77 @@ class TestLlamaCppInstaller(unittest.TestCase):
 
 
 class TestGGUFWindllRuntimeFallback(unittest.TestCase):
+    def test_gguf_prompt_enhancer_reuses_catalog_model_from_extra_llm_path_without_download(self):
+        calls = []
+
+        class DummyLlama:
+            def __init__(self, **kwargs):
+                calls.append(kwargs.get("model_path"))
+
+        installer_module = build_stub_module(
+            "AILab_LlamaCppInstaller",
+            ensure_llama_cpp_backend=lambda *args, **kwargs: DummyLlama,
+            format_llama_cpp_backend_info=lambda info=None: "stub backend",
+            get_last_llama_cpp_backend_info=lambda: {"gpu_offload": True, "vision_handlers": []},
+            relax_windows_dll_directory_for_long_paths=contextlib.nullcontext,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            dev_models = temp_root / "dev" / "models"
+            shared_llm = temp_root / "shared" / "models" / "LLM"
+            shared_model_dir = shared_llm / "GGUF" / "Qwen" / "Qwen3-4B-GGUF"
+            shared_model_dir.mkdir(parents=True)
+            model_filename = "Qwen3-4B-Q4_K_M.gguf"
+            (shared_model_dir / model_filename).write_bytes(b"GGUF")
+
+            stubs = build_loader_test_stubs()
+            stubs.update(
+                {
+                    "folder_paths": build_stub_module(
+                        "folder_paths",
+                        models_dir=str(dev_models),
+                        folder_names_and_paths={"LLM": ([str(shared_llm)], set())},
+                        get_folder_paths=lambda name: [str(shared_llm)] if name == "LLM" else [],
+                    ),
+                    "AILab_LlamaCppInstaller": installer_module,
+                }
+            )
+
+            with mock.patch.dict(sys.modules, stubs, clear=False):
+                module = load_module_from_file(
+                    "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                    "thinkingllm_gguf_prompt_extra_llm_reuse_test",
+                )
+
+            model_name = next(
+                name
+                for name in module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer.load_gguf_models()["models"]
+                if name.startswith(model_filename)
+            )
+            loader = module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer()
+
+            with mock.patch.dict(sys.modules, stubs, clear=False), mock.patch.object(
+                module,
+                "download_hf_file_to_path",
+                side_effect=AssertionError("download should not be called for shared local GGUF"),
+            ), mock.patch.object(
+                module,
+                "read_gguf_architecture",
+                return_value="qwen3",
+            ):
+                loader._load_model(
+                    model_name=model_name,
+                    device="cpu",
+                    enable_thinking=True,
+                    unique_id=None,
+                    context_length_override=128,
+                    quiet=True,
+                )
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(str(calls[0]).endswith(model_filename))
+
     def test_gguf_loader_reuses_catalog_model_from_extra_llm_path_without_download(self):
         calls = []
 
