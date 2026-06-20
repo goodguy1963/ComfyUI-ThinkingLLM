@@ -78,6 +78,10 @@ LAST_SAVED_PROMPT = None  # kept only to avoid ImportError in legacy importers
 # Load per-node state at startup for per-node prompt and trace access
 load_node_prompt_state()
 
+_GEMMA4_CPU_MULTIMODAL_MAX_CTX = 32768
+_GEMMA4_CPU_MULTIMODAL_MAX_BATCH = 256
+_GEMMA4_CPU_MULTIMODAL_MAX_IMAGE_TOKENS = 2048
+
 
 def read_gguf_architecture(filepath: Path) -> str | None:
     """Read general.architecture from a GGUF file header without loading the model.
@@ -1326,6 +1330,30 @@ class QwenVLGGUFBase:
         img_max = int(image_max_tokens) if image_max_tokens is not None else resolved.image_max_tokens
 
         has_mmproj = mmproj_path is not None and mmproj_path.exists()
+        gpu_offload = None if backend_info is None else backend_info.get("gpu_offload")
+
+        # Detect architecture from GGUF metadata before selecting a multimodal handler.
+        arch = read_gguf_architecture(model_path)
+        self.gguf_arch = arch
+        is_qwen35 = arch in ("qwen35", "qwen35moe") if arch else "qwen3.5-" in model_name.lower()
+        self.supports_qwen_soft_think = arch == "qwen3" if arch else "qwen3-" in model_name.lower()
+        self.uses_qwen_template_thinking = bool(is_qwen35 or arch == "qwen3" or arch == "qwen")
+
+        if arch == "gemma4" and has_mmproj and gpu_offload is False:
+            original_settings = (n_ctx, n_batch_val, n_ubatch_val, img_max)
+            n_ctx = min(n_ctx, _GEMMA4_CPU_MULTIMODAL_MAX_CTX)
+            n_batch_val = min(n_batch_val, _GEMMA4_CPU_MULTIMODAL_MAX_BATCH)
+            n_ubatch_val = min(n_ubatch_val, n_batch_val)
+            img_max = min(img_max, _GEMMA4_CPU_MULTIMODAL_MAX_IMAGE_TOKENS)
+            downgraded_settings = (n_ctx, n_batch_val, n_ubatch_val, img_max)
+            if downgraded_settings != original_settings:
+                load_warnings.append(
+                    "downgraded unsafe Gemma 4 multimodal settings for CPU-only llama.cpp backend: "
+                    f"ctx {original_settings[0]}->{n_ctx}, "
+                    f"n_batch {original_settings[1]}->{n_batch_val}, "
+                    f"n_ubatch {original_settings[2]}->{n_ubatch_val}, "
+                    f"image_max_tokens {original_settings[3]}->{img_max}"
+                )
 
         signature = (
             str(model_path),
@@ -1358,13 +1386,6 @@ class QwenVLGGUFBase:
         if torch.cuda.is_available():
             torch.cuda.synchronize()
             time.sleep(0.1)  # Brief pause for cleanup to complete
-
-        # Detect architecture from GGUF metadata before selecting a multimodal handler.
-        arch = read_gguf_architecture(model_path)
-        self.gguf_arch = arch
-        is_qwen35 = arch in ("qwen35", "qwen35moe") if arch else "qwen3.5-" in model_name.lower()
-        self.supports_qwen_soft_think = arch == "qwen3" if arch else "qwen3-" in model_name.lower()
-        self.uses_qwen_template_thinking = bool(is_qwen35 or arch == "qwen3" or arch == "qwen")
 
         self.chat_handler = None
         if has_mmproj:
@@ -1446,7 +1467,6 @@ class QwenVLGGUFBase:
         if device_kind == "cuda" and n_gpu_layers == 0:
             load_warnings.append("device=cuda selected but n_gpu_layers=0; model will run on CPU")
             print("[QwenVL] Warning: device=cuda selected but n_gpu_layers=0; model will run on CPU.")
-        gpu_offload = None if backend_info is None else backend_info.get("gpu_offload")
         self.current_backend_gpu_offload = gpu_offload
         if device_kind == "cuda" and n_gpu_layers != 0 and gpu_offload is False:
             load_warnings.append("backend reports no GPU offload support; CUDA request is likely CPU-only")
@@ -1491,14 +1511,19 @@ class QwenVLGGUFBase:
         context_length = int(getattr(self, "current_context_length", 0) or 0)
         batch_size = int(getattr(self, "current_batch_size", 0) or 0)
         image_tokens = int(getattr(self, "current_image_token_budget", 0) or 0)
-        if context_length <= 32768 and batch_size <= 256 and image_tokens <= 2048:
+        if (
+            context_length <= _GEMMA4_CPU_MULTIMODAL_MAX_CTX
+            and batch_size <= _GEMMA4_CPU_MULTIMODAL_MAX_BATCH
+            and image_tokens <= _GEMMA4_CPU_MULTIMODAL_MAX_IMAGE_TOKENS
+        ):
             return
         raise RuntimeError(
             "Gemma 4 GGUF multimodal generation was blocked before llama.cpp could abort ComfyUI. "
             "The installed llama-cpp-python backend reports no GPU offload support, while this run uses "
             f"ctx={context_length}, batch={batch_size}, image_max_tokens={image_tokens}. "
-            "Install a CUDA-enabled llama-cpp-python vision backend, or retry with device=cpu, ctx<=32768, "
-            "n_batch<=256, and image_max_tokens<=2048."
+            "Install a CUDA-enabled llama-cpp-python vision backend, or retry with device=cpu, "
+            f"ctx<={_GEMMA4_CPU_MULTIMODAL_MAX_CTX}, n_batch<={_GEMMA4_CPU_MULTIMODAL_MAX_BATCH}, "
+            f"and image_max_tokens<={_GEMMA4_CPU_MULTIMODAL_MAX_IMAGE_TOKENS}."
         )
 
     def _invoke(
