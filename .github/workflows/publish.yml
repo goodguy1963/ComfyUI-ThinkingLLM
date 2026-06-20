@@ -18,7 +18,62 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+      - name: Check registry version
+        id: registry_version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node_id="$(python3 - <<'PY'
+          import tomllib
+          with open("pyproject.toml", "rb") as handle:
+              data = tomllib.load(handle)
+          print(data["project"]["name"])
+          PY
+          )"
+          version="$(python3 - <<'PY'
+          import tomllib
+          with open("pyproject.toml", "rb") as handle:
+              data = tomllib.load(handle)
+          print(data["project"]["version"])
+          PY
+          )"
+
+          url="https://api.comfy.org/nodes/${node_id}/versions"
+          http_code="$(curl -sS -o registry_versions.json -w "%{http_code}" "${url}")"
+
+          if [ "${http_code}" = "404" ]; then
+            exists="false"
+          elif [ "${http_code}" -ge 200 ] && [ "${http_code}" -lt 300 ]; then
+            exists="$(python3 - "${version}" <<'PY'
+          import json
+          import sys
+
+          version = sys.argv[1]
+          with open("registry_versions.json", "r", encoding="utf-8") as handle:
+              versions = json.load(handle)
+          print("true" if any(item.get("version") == version for item in versions) else "false")
+          PY
+          )"
+          else
+            cat registry_versions.json
+            echo "Registry version lookup failed with HTTP ${http_code}" >&2
+            exit 1
+          fi
+
+          echo "node_id=${node_id}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "exists=${exists}" >> "${GITHUB_OUTPUT}"
+
+          if [ "${exists}" = "true" ]; then
+            echo "::notice::${node_id} ${version} is already published in the Comfy registry; skipping duplicate publish."
+          fi
       - name: Publish Custom Node
+        if: steps.registry_version.outputs.exists != 'true'
         uses: Comfy-Org/publish-node-action@v1
         with:
           personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+      - name: Already published
+        if: steps.registry_version.outputs.exists == 'true'
+        run: |
+          echo "${{ steps.registry_version.outputs.node_id }} ${{ steps.registry_version.outputs.version }} is already live in the Comfy registry."
