@@ -44,6 +44,7 @@ from AILab_LlamaCppInstaller import (
     get_last_llama_cpp_backend_info,
     relax_windows_dll_directory_for_long_paths,
 )
+import comfy.model_management as comfy_model_management
 from comfy.model_management import throw_exception_if_processing_interrupted
 
 # Import cache functions from main module
@@ -78,9 +79,9 @@ LAST_SAVED_PROMPT = None  # kept only to avoid ImportError in legacy importers
 # Load per-node state at startup for per-node prompt and trace access
 load_node_prompt_state()
 
-_GEMMA4_CPU_MULTIMODAL_MAX_CTX = 32768
-_GEMMA4_CPU_MULTIMODAL_MAX_BATCH = 256
-_GEMMA4_CPU_MULTIMODAL_MAX_IMAGE_TOKENS = 2048
+_GEMMA4_MULTIMODAL_MAX_CTX = 32768
+_GEMMA4_MULTIMODAL_IMAGE_TOKENS = 1120
+_GEMMA4_MULTIMODAL_MAX_BATCH = 2048
 
 
 def read_gguf_architecture(filepath: Path) -> str | None:
@@ -882,6 +883,12 @@ def _current_cuda_device_index() -> int | None:
     try:
         if not torch.cuda.is_available():
             return None
+        try:
+            comfy_device = comfy_model_management.get_torch_device()
+            if getattr(comfy_device, "type", None) == "cuda" and getattr(comfy_device, "index", None) is not None:
+                return int(comfy_device.index)
+        except Exception:
+            pass
         return int(torch.cuda.current_device())
     except Exception:
         return None
@@ -1125,6 +1132,7 @@ class QwenVLGGUFBase:
         self.uses_qwen_template_thinking = False
         self.current_backend_gpu_offload = None
         self.current_batch_size = None
+        self.current_ubatch_size = None
         self.current_image_token_budget = None
         self.current_context_length = None
         self.gguf_arch = None
@@ -1365,16 +1373,19 @@ class QwenVLGGUFBase:
         self.supports_qwen_soft_think = arch == "qwen3" if arch else "qwen3-" in model_name.lower()
         self.uses_qwen_template_thinking = bool(is_qwen35 or arch == "qwen3" or arch == "qwen")
 
-        if arch == "gemma4" and has_mmproj and gpu_offload is False:
+        if arch == "gemma4" and has_mmproj:
             original_settings = (n_ctx, n_batch_val, n_ubatch_val, img_max)
-            n_ctx = min(n_ctx, _GEMMA4_CPU_MULTIMODAL_MAX_CTX)
-            n_batch_val = min(n_batch_val, _GEMMA4_CPU_MULTIMODAL_MAX_BATCH)
-            n_ubatch_val = min(n_ubatch_val, n_batch_val)
-            img_max = min(img_max, _GEMMA4_CPU_MULTIMODAL_MAX_IMAGE_TOKENS)
+            n_ctx = min(n_ctx, _GEMMA4_MULTIMODAL_MAX_CTX)
+            img_max = min(img_max, _GEMMA4_MULTIMODAL_IMAGE_TOKENS)
+            required_batch = max(img_max, 1)
+            n_batch_val = max(n_batch_val, required_batch)
+            n_batch_val = min(n_batch_val, _GEMMA4_MULTIMODAL_MAX_BATCH)
+            n_ubatch_val = max(n_ubatch_val, required_batch)
+            n_ubatch_val = min(n_ubatch_val, n_batch_val, _GEMMA4_MULTIMODAL_MAX_BATCH)
             downgraded_settings = (n_ctx, n_batch_val, n_ubatch_val, img_max)
             if downgraded_settings != original_settings:
                 load_warnings.append(
-                    "downgraded unsafe Gemma 4 multimodal settings for CPU-only llama.cpp backend: "
+                    "applied Gemma 4 multimodal compatibility settings: "
                     f"ctx {original_settings[0]}->{n_ctx}, "
                     f"n_batch {original_settings[1]}->{n_batch_val}, "
                     f"n_ubatch {original_settings[2]}->{n_ubatch_val}, "
@@ -1468,6 +1479,7 @@ class QwenVLGGUFBase:
         self.current_context_length = n_ctx
         self.current_image_token_budget = img_max
         self.current_batch_size = n_batch_val
+        self.current_ubatch_size = n_ubatch_val
 
         print(
             f"[QwenVL] Loading GGUF: {model_path.name} "
@@ -1541,24 +1553,32 @@ class QwenVLGGUFBase:
         arch = str(getattr(self, "gguf_arch", "") or "").lower()
         if arch != "gemma4":
             return
-        if getattr(self, "current_backend_gpu_offload", None) is not False:
-            return
+        if audio_b64:
+            raise RuntimeError(
+                "Gemma 4 GGUF audio input is disabled because the installed llama.cpp backend can abort the "
+                "ComfyUI process for Gemma 4 audio. Use image/text input with Gemma 4 GGUF, or use a backend "
+                "that explicitly supports Gemma 4 audio."
+            )
         context_length = int(getattr(self, "current_context_length", 0) or 0)
         batch_size = int(getattr(self, "current_batch_size", 0) or 0)
+        ubatch_size = int(getattr(self, "current_ubatch_size", 0) or 0)
         image_tokens = int(getattr(self, "current_image_token_budget", 0) or 0)
         if (
-            context_length <= _GEMMA4_CPU_MULTIMODAL_MAX_CTX
-            and batch_size <= _GEMMA4_CPU_MULTIMODAL_MAX_BATCH
-            and image_tokens <= _GEMMA4_CPU_MULTIMODAL_MAX_IMAGE_TOKENS
+            context_length <= _GEMMA4_MULTIMODAL_MAX_CTX
+            and image_tokens <= _GEMMA4_MULTIMODAL_IMAGE_TOKENS
+            and batch_size >= max(image_tokens, 1)
+            and ubatch_size >= max(image_tokens, 1)
+            and batch_size <= _GEMMA4_MULTIMODAL_MAX_BATCH
+            and ubatch_size <= _GEMMA4_MULTIMODAL_MAX_BATCH
         ):
             return
         raise RuntimeError(
             "Gemma 4 GGUF multimodal generation was blocked before llama.cpp could abort ComfyUI. "
-            "The installed llama-cpp-python backend reports no GPU offload support, while this run uses "
-            f"ctx={context_length}, batch={batch_size}, image_max_tokens={image_tokens}. "
-            "Install a CUDA-enabled llama-cpp-python vision backend, or retry with device=cpu, "
-            f"ctx<={_GEMMA4_CPU_MULTIMODAL_MAX_CTX}, n_batch<={_GEMMA4_CPU_MULTIMODAL_MAX_BATCH}, "
-            f"and image_max_tokens<={_GEMMA4_CPU_MULTIMODAL_MAX_IMAGE_TOKENS}."
+            "The installed llama-cpp-python backend can abort with unsafe Gemma 4 image settings; this run uses "
+            f"ctx={context_length}, batch={batch_size}, ubatch={ubatch_size}, image_max_tokens={image_tokens}. "
+            f"Retry with ctx<={_GEMMA4_MULTIMODAL_MAX_CTX}, "
+            f"image_max_tokens<={_GEMMA4_MULTIMODAL_IMAGE_TOKENS}, and n_batch/n_ubatch large enough "
+            "to hold the image token chunk."
         )
 
     def _invoke(

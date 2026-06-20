@@ -79,6 +79,7 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
     pil_package = build_stub_module("PIL", Image=pil_image)
     comfy_model_management = build_stub_module(
         "comfy.model_management",
+        get_torch_device=lambda: types.SimpleNamespace(type="cuda", index=0),
         throw_exception_if_processing_interrupted=lambda: None,
     )
     comfy_package = build_stub_module("comfy", model_management=comfy_model_management)
@@ -2228,6 +2229,7 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         )
         stub_modules = build_loader_test_stubs()
         stub_modules["AILab_LlamaCppInstaller"] = installer_module
+        stub_modules["comfy.model_management"].get_torch_device = lambda: types.SimpleNamespace(type="cuda", index=0)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             model_path = Path(temp_dir) / "model.gguf"
@@ -2282,10 +2284,10 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
                                                     unique_id=None,
                                                 )
 
-        self.assertEqual(captured_llama_kwargs[0]["main_gpu"], 1)
-        self.assertIn("main_gpu=1", loader.last_backend_trace)
+        self.assertEqual(captured_llama_kwargs[0]["main_gpu"], 0)
+        self.assertIn("main_gpu=0", loader.last_backend_trace)
 
-    def test_gemma4_cpu_only_multimodal_load_downgrades_unsafe_settings(self):
+    def test_gemma4_multimodal_load_uses_compatible_image_ubatch_settings(self):
         captured_chat_kwargs = []
         captured_llama_kwargs = []
 
@@ -2369,15 +2371,105 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
                                 unique_id=None,
                             )
 
-        self.assertEqual(captured_chat_kwargs[0]["image_max_tokens"], 2048)
+        self.assertEqual(captured_chat_kwargs[0]["image_max_tokens"], 1120)
         self.assertEqual(captured_llama_kwargs[0]["n_ctx"], 32768)
-        self.assertEqual(captured_llama_kwargs[0]["n_batch"], 256)
-        self.assertEqual(captured_llama_kwargs[0]["n_ubatch"], 256)
-        self.assertEqual(captured_llama_kwargs[0]["image_max_tokens"], 2048)
+        self.assertEqual(captured_llama_kwargs[0]["n_batch"], 1120)
+        self.assertEqual(captured_llama_kwargs[0]["n_ubatch"], 1120)
+        self.assertEqual(captured_llama_kwargs[0]["image_max_tokens"], 1120)
         self.assertEqual(loader.current_context_length, 32768)
-        self.assertEqual(loader.current_batch_size, 256)
-        self.assertEqual(loader.current_image_token_budget, 2048)
-        self.assertIn("downgraded unsafe Gemma 4 multimodal settings", loader.last_backend_trace)
+        self.assertEqual(loader.current_batch_size, 1120)
+        self.assertEqual(loader.current_image_token_budget, 1120)
+        self.assertIn("applied Gemma 4 multimodal compatibility settings", loader.last_backend_trace)
+
+    def test_gemma4_gpu_multimodal_load_clamps_crash_log_settings(self):
+        captured_chat_kwargs = []
+        captured_llama_kwargs = []
+
+        Gemma4ChatHandler = type(
+            "Gemma4ChatHandler",
+            (),
+            {"__init__": lambda self, **kwargs: captured_chat_kwargs.append(dict(kwargs))},
+        )
+
+        class DummyLlama:
+            def __init__(self, **kwargs):
+                captured_llama_kwargs.append(dict(kwargs))
+
+        chat_format_module = build_stub_module(
+            "llama_cpp.llama_chat_format",
+            Gemma4ChatHandler=Gemma4ChatHandler,
+        )
+        installer_module = build_stub_module(
+            "AILab_LlamaCppInstaller",
+            ensure_llama_cpp_backend=lambda *args, **kwargs: DummyLlama,
+            format_llama_cpp_backend_info=lambda info=None: "stub backend",
+            get_last_llama_cpp_backend_info=lambda: {"gpu_offload": True, "vision_handlers": ["Gemma4ChatHandler"]},
+            relax_windows_dll_directory_for_long_paths=contextlib.nullcontext,
+        )
+        stub_modules = build_loader_test_stubs()
+        stub_modules.update(
+            {
+                "AILab_LlamaCppInstaller": installer_module,
+                "llama_cpp": build_stub_module("llama_cpp", llama_chat_format=chat_format_module),
+                "llama_cpp.llama_chat_format": chat_format_module,
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_path = Path(temp_dir) / "google_gemma-4-E4B-it-Q8_0.gguf"
+            mmproj_path = Path(temp_dir) / "mmproj-F16.gguf"
+            model_path.write_bytes(b"GGUF")
+            mmproj_path.write_bytes(b"mmproj")
+
+            with mock.patch.dict(sys.modules, stub_modules, clear=False):
+                module = load_module_from_file(
+                    "AILab_QwenVL_GGUF.py",
+                    "thinkingllm_gemma4_gpu_load_downgrade_test",
+                )
+                loader = module.QwenVLGGUFBase()
+                resolved = module.GGUFVLResolved(
+                    display_name="gemma",
+                    repo_id=None,
+                    alt_repo_ids=[],
+                    author=None,
+                    repo_dirname="gemma",
+                    model_filename=str(model_path),
+                    mmproj_filename=str(mmproj_path),
+                    context_length=131072,
+                    image_max_tokens=4096,
+                    n_batch=512,
+                    gpu_layers=-1,
+                    top_k=64,
+                    pool_size=4194304,
+                )
+
+                with mock.patch.object(module, "_resolve_model_entry", return_value=resolved):
+                    with mock.patch.object(module, "_pick_device", return_value="cuda"):
+                        with mock.patch.object(module, "read_gguf_architecture", return_value="gemma4"):
+                            loader._load_model(
+                                model_name="google_gemma-4-E4B-it-Q8_0.gguf",
+                                device="cuda",
+                                ctx=None,
+                                n_batch=None,
+                                n_ubatch=None,
+                                gpu_layers=-1,
+                                image_max_tokens=None,
+                                top_k=None,
+                                pool_size=None,
+                                n_threads=None,
+                                n_threads_batch=None,
+                                flash_attn=True,
+                                offload_kqv=True,
+                                ctx_checkpoints=0,
+                                enable_thinking=True,
+                                unique_id=None,
+                            )
+
+        self.assertEqual(captured_chat_kwargs[0]["image_max_tokens"], 1120)
+        self.assertEqual(captured_llama_kwargs[0]["n_ctx"], 32768)
+        self.assertEqual(captured_llama_kwargs[0]["n_batch"], 1120)
+        self.assertEqual(captured_llama_kwargs[0]["n_ubatch"], 1120)
+        self.assertEqual(captured_llama_kwargs[0]["image_max_tokens"], 1120)
 
     def test_gemma4_cpu_only_multimodal_guard_blocks_native_abort_risk(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
@@ -2400,6 +2492,40 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
                 user_prompt="Describe this image.",
                 images_b64=["BASE64PNG"],
                 audio_b64=[],
+                max_tokens=256,
+                temperature=0.0,
+                top_p=1.0,
+                repetition_penalty=1.0,
+                seed=1,
+                model_name="google_gemma-4-E4B-it-Q8_0.gguf",
+                stream_to_terminal=False,
+                enable_thinking=False,
+                auto_finalization_retry=False,
+                top_k=64,
+            )
+
+    def test_gemma4_audio_guard_blocks_unsupported_native_audio_path(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gemma4_audio_abort_guard_test",
+            )
+
+        loader = module.QwenVLGGUFBase()
+        loader.chat_handler = object()
+        loader.gguf_arch = "gemma4"
+        loader.current_backend_gpu_offload = True
+        loader.current_context_length = 32768
+        loader.current_batch_size = 1120
+        loader.current_ubatch_size = 1120
+        loader.current_image_token_budget = 1120
+
+        with self.assertRaisesRegex(RuntimeError, "Gemma 4 GGUF audio input is disabled"):
+            loader._invoke(
+                system_prompt="You are helpful.",
+                user_prompt="Transcribe this audio.",
+                images_b64=[],
+                audio_b64=["BASE64WAV"],
                 max_tokens=256,
                 temperature=0.0,
                 top_p=1.0,
