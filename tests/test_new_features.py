@@ -2212,6 +2212,39 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         self.assertNotIn("force_reasoning", captured_chat_kwargs[0])
         self.assertIn("clip_model_path", captured_chat_kwargs[0])
 
+    def test_gemma4_cpu_only_multimodal_guard_blocks_native_abort_risk(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gemma4_cpu_abort_guard_test",
+            )
+
+        loader = module.QwenVLGGUFBase()
+        loader.chat_handler = object()
+        loader.gguf_arch = "gemma4"
+        loader.current_backend_gpu_offload = False
+        loader.current_context_length = 131072
+        loader.current_batch_size = 512
+        loader.current_image_token_budget = 4096
+
+        with self.assertRaisesRegex(RuntimeError, "Gemma 4 GGUF multimodal generation was blocked"):
+            loader._invoke(
+                system_prompt="You are helpful.",
+                user_prompt="Describe this image.",
+                images_b64=["BASE64PNG"],
+                audio_b64=[],
+                max_tokens=256,
+                temperature=0.0,
+                top_p=1.0,
+                repetition_penalty=1.0,
+                seed=1,
+                model_name="google_gemma-4-E4B-it-Q8_0.gguf",
+                stream_to_terminal=False,
+                enable_thinking=False,
+                auto_finalization_retry=False,
+                top_k=64,
+            )
+
     def test_gguf_thinking_toggle_updates_without_reload_signature(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             module = load_module_from_file(

@@ -1094,6 +1094,11 @@ class QwenVLGGUFBase:
         self.current_signature = None
         self.last_backend_trace = ""
         self.uses_qwen_template_thinking = False
+        self.current_backend_gpu_offload = None
+        self.current_batch_size = None
+        self.current_image_token_budget = None
+        self.current_context_length = None
+        self.gguf_arch = None
         register_active_gguf_loader(self)
 
     def _uses_chat_template_thinking(self) -> bool:
@@ -1412,6 +1417,7 @@ class QwenVLGGUFBase:
 
         self.current_context_length = n_ctx
         self.current_image_token_budget = img_max
+        self.current_batch_size = n_batch_val
 
         print(
             f"[QwenVL] Loading GGUF: {model_path.name} "
@@ -1441,6 +1447,7 @@ class QwenVLGGUFBase:
             load_warnings.append("device=cuda selected but n_gpu_layers=0; model will run on CPU")
             print("[QwenVL] Warning: device=cuda selected but n_gpu_layers=0; model will run on CPU.")
         gpu_offload = None if backend_info is None else backend_info.get("gpu_offload")
+        self.current_backend_gpu_offload = gpu_offload
         if device_kind == "cuda" and n_gpu_layers != 0 and gpu_offload is False:
             load_warnings.append("backend reports no GPU offload support; CUDA request is likely CPU-only")
             print("[QwenVL] Warning: llama.cpp backend reports no GPU offload support; CUDA request is likely CPU-only.")
@@ -1473,6 +1480,27 @@ class QwenVLGGUFBase:
             self.llm = construct_llama_safely(Llama, llm_kwargs_filtered, "QwenVL GGUF")
         self.current_signature = signature
 
+    def _raise_if_unsafe_native_multimodal_path(self, images_b64: list[str], audio_b64: list[str] | None):
+        if not images_b64 and not audio_b64:
+            return
+        arch = str(getattr(self, "gguf_arch", "") or "").lower()
+        if arch != "gemma4":
+            return
+        if getattr(self, "current_backend_gpu_offload", None) is not False:
+            return
+        context_length = int(getattr(self, "current_context_length", 0) or 0)
+        batch_size = int(getattr(self, "current_batch_size", 0) or 0)
+        image_tokens = int(getattr(self, "current_image_token_budget", 0) or 0)
+        if context_length <= 32768 and batch_size <= 256 and image_tokens <= 2048:
+            return
+        raise RuntimeError(
+            "Gemma 4 GGUF multimodal generation was blocked before llama.cpp could abort ComfyUI. "
+            "The installed llama-cpp-python backend reports no GPU offload support, while this run uses "
+            f"ctx={context_length}, batch={batch_size}, image_max_tokens={image_tokens}. "
+            "Install a CUDA-enabled llama-cpp-python vision backend, or retry with device=cpu, ctx<=32768, "
+            "n_batch<=256, and image_max_tokens<=2048."
+        )
+
     def _invoke(
         self,
         system_prompt: str,
@@ -1492,6 +1520,7 @@ class QwenVLGGUFBase:
     ):
         """Returns (cleaned_text, raw_text) tuple."""
         ensure_cuda_vram_headroom("QwenVL GGUF", min_free_gb=1.0, min_free_ratio=0.08)
+        self._raise_if_unsafe_native_multimodal_path(images_b64, audio_b64 or [])
         supports_soft_think = getattr(self, "supports_qwen_soft_think", False)
         if supports_soft_think:
             directive = "/think" if enable_thinking else "/no_think"
