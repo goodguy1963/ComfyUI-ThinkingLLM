@@ -1,5 +1,18 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.13 (2026/06/20) — Recommendation Note Cleanup
+
+### 2.3.13 Changes
+
+- Removed duplicate compact recommendation-note rows from ThinkingLLM nodes, including Advanced GGUF.
+- Kept the real multiline recommendation note visible while pruning stale duplicate `recommended_settings` widgets.
+- Prevented recommendation notes from being serialized back into workflows as duplicate UI-only widgets.
+
+### 2.3.13 Validation
+
+- Added regression coverage for recommendation widget deduplication.
+- Full local regression suite passes.
+
 ## Version 2.3.12 (2026/06/20) — Rollback Recovery Release
 
 ### 2.3.12 Changes

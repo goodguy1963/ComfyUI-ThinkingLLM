@@ -134,6 +134,24 @@ function hideStableWidget(node, widget) {
     widget.draw = () => {};
 }
 
+function findWidgets(node, name) {
+    return node.widgets?.filter((widget) => widget?.name === name) || [];
+}
+
+function removeDuplicateRecommendationWidgets(node, keepWidget) {
+    if (!node.widgets?.length || !keepWidget) {
+        return;
+    }
+    for (let index = node.widgets.length - 1; index >= 0; index -= 1) {
+        const widget = node.widgets[index];
+        if (widget?.name !== RECOMMENDATION_WIDGET_NAME || widget === keepWidget) {
+            continue;
+        }
+        hideStableWidget(node, widget);
+        node.widgets.splice(index, 1);
+    }
+}
+
 function hideGgufAdvancedInternals(node) {
     if (!["AILab_QwenVL_GGUF_Advanced", "ThinkingLLM_QwenVL_GGUF_Advanced"].includes(node.comfyClass)) {
         return;
@@ -308,11 +326,13 @@ function ensureRecommendationWidget(node) {
     if (!THINKINGLLM_NODE_NAMES.has(node.comfyClass)) {
         return null;
     }
-    let widget = findWidget(node, RECOMMENDATION_WIDGET_NAME);
-    if (widget) {
-        return widget;
+    let widget = findWidgets(node, RECOMMENDATION_WIDGET_NAME)
+        .find((candidate) => candidate?.inputEl)
+        || findWidget(node, RECOMMENDATION_WIDGET_NAME);
+    if (!widget) {
+        widget = ComfyWidgets.STRING(node, RECOMMENDATION_WIDGET_NAME, ["STRING", { multiline: true }], app).widget;
     }
-    widget = ComfyWidgets.STRING(node, RECOMMENDATION_WIDGET_NAME, ["STRING", { multiline: true }], app).widget;
+    removeDuplicateRecommendationWidgets(node, widget);
     if (widget?.inputEl) {
         widget.inputEl.readOnly = true;
         widget.inputEl.style.opacity = 0.78;
@@ -322,7 +342,9 @@ function ensureRecommendationWidget(node) {
     }
     widget.options = { ...(widget.options || {}), serialize: false };
     widget.serializeValue = async () => undefined;
-    widget.value = RECOMMENDATION_PLACEHOLDER;
+    if (!widget.value) {
+        widget.value = RECOMMENDATION_PLACEHOLDER;
+    }
     return widget;
 }
 
