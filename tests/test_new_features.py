@@ -461,6 +461,20 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertNotIn("Example:", vision_prompt)
         self.assertNotIn("Examples:", text_prompt)
 
+    def test_custom_prompt_image_no_preset_alias_is_available_for_saved_workflows(self):
+        label = "💬 Custom prompt + image (no preset)"
+        data = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
+
+        self.assertIn(label, data["_preset_prompts"])
+        self.assertEqual(data["qwenvl"][label], "")
+
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            package = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py"])
+
+        values = package.NODE_CLASS_MAPPINGS["ThinkingLLM_QwenVL_GGUF"].INPUT_TYPES()["required"]["preset_prompt"][0]
+        self.assertIn("🚫 No preset (image-only)", values)
+        self.assertIn(label, values)
+
     def test_ltx_presets_are_exposed_by_relevant_nodes(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             package = load_thinkingllm_loader_subset(
