@@ -1,5 +1,18 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.12 (2026/06/20) — Rollback Recovery Release
+
+### 2.3.12 Changes
+
+- Rebased the public release line onto the rollback-safe GGUF single-pass state from 2.3.11.
+- Preserved the ComfyUI execution highlight behavior by no longer overwriting node colors once ComfyUI has set them.
+- Restored the saved-workflow compatible `Custom prompt + image (no preset)` option.
+
+### 2.3.12 Validation
+
+- Local regression coverage verifies the execution color guard and the restored no-preset alias.
+- Full local regression suite passes.
+
 ## Version 2.3.11 (2026/06/19) — GGUF Single-Pass Execution Fix
 
 ### 2.3.11 Changes
