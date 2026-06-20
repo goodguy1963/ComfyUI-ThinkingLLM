@@ -21,6 +21,15 @@ NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 WEB_DIRECTORY = "./web"
 
+LEGACY_NODE_REPLACEMENTS = {
+    "AILab_QwenVL": "ThinkingLLM_QwenVL",
+    "AILab_QwenVL_Advanced": "ThinkingLLM_QwenVL_Advanced",
+    "AILab_QwenVL_GGUF": "ThinkingLLM_QwenVL_GGUF",
+    "AILab_QwenVL_GGUF_Advanced": "ThinkingLLM_QwenVL_GGUF_Advanced",
+    "AILab_QwenVL_PromptEnhancer": "ThinkingLLM_QwenVL_PromptEnhancer",
+    "AILab_QwenVL_GGUF_PromptEnhancer": "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+}
+
 def load_modules_from_directory(directory):
     for file in os.listdir(directory):
         if file.endswith(".py"):
@@ -50,10 +59,34 @@ load_modules_from_directory(current_dir)
 nodes_dir = os.path.join(current_dir, "nodes")
 if os.path.exists(nodes_dir):
     load_modules_from_directory(nodes_dir)
+
+for legacy_node_name in LEGACY_NODE_REPLACEMENTS:
+    NODE_CLASS_MAPPINGS.pop(legacy_node_name, None)
+    NODE_DISPLAY_NAME_MAPPINGS.pop(legacy_node_name, None)
+
+
+def _register_legacy_node_replacements():
+    try:
+        from comfy_api.latest._io import NodeReplace
+        from server import PromptServer
+    except Exception:
+        return
+
+    manager = getattr(getattr(PromptServer, "instance", None), "node_replace_manager", None)
+    if manager is None:
+        return
+
+    for old_node_id, new_node_id in LEGACY_NODE_REPLACEMENTS.items():
+        manager.register(NodeReplace(new_node_id=new_node_id, old_node_id=old_node_id))
+
+
+_register_legacy_node_replacements()
+
 NODE_CLASS_MAPPINGS = dict(sorted(NODE_CLASS_MAPPINGS.items(), key=lambda x: NODE_DISPLAY_NAME_MAPPINGS.get(x[0], x[0])))
 NODE_DISPLAY_NAME_MAPPINGS = dict(sorted(NODE_DISPLAY_NAME_MAPPINGS.items(), key=lambda x: x[1]))
 
 __all__ = [
     "NODE_CLASS_MAPPINGS",
-    "NODE_DISPLAY_NAME_MAPPINGS"
+    "NODE_DISPLAY_NAME_MAPPINGS",
+    "LEGACY_NODE_REPLACEMENTS",
 ]

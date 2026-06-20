@@ -955,6 +955,77 @@ class TestLegacyNodeNameCompatibility(unittest.TestCase):
                     self.assertEqual(mappings[canonical_name], mappings[legacy_name])
                     self.assertEqual(displays[canonical_name], displays[legacy_name])
 
+    def test_package_export_search_surface_has_no_duplicate_thinkingllm_rows(self):
+        package = load_thinkingllm_loader_subset([
+            "AILab_QwenVL.py",
+            "AILab_QwenVL_GGUF.py",
+            "AILab_QwenVL_PromptEnhancer.py",
+            "AILab_QwenVL_GGUF_PromptEnhancer.py",
+            "AILab_WhisperASR.py",
+        ])
+
+        exported_names = set(package.NODE_CLASS_MAPPINGS)
+        exported_displays = package.NODE_DISPLAY_NAME_MAPPINGS
+        self.assertFalse(
+            [name for name in exported_names if name.startswith("AILab_QwenVL")],
+            "legacy AILab aliases should not be exported as visible search rows",
+        )
+        seen = {}
+        duplicates = {}
+        for node_name, display_name in exported_displays.items():
+            if not str(display_name).startswith("ThinkingLLM"):
+                continue
+            if display_name in seen:
+                duplicates.setdefault(display_name, [seen[display_name]]).append(node_name)
+            else:
+                seen[display_name] = node_name
+        self.assertEqual(duplicates, {})
+
+    def test_package_exposes_legacy_replacements_for_old_workflows(self):
+        package = load_thinkingllm_loader_subset([
+            "AILab_QwenVL.py",
+            "AILab_QwenVL_GGUF.py",
+            "AILab_QwenVL_PromptEnhancer.py",
+            "AILab_QwenVL_GGUF_PromptEnhancer.py",
+        ])
+
+        replacements = getattr(package, "LEGACY_NODE_REPLACEMENTS", {})
+        expected = {legacy: current for current, legacy in self.CURRENT_TO_LEGACY.items()}
+        self.assertEqual(replacements, expected)
+
+    def test_package_registers_legacy_replacements_when_comfy_manager_is_available(self):
+        class StubNodeReplace:
+            def __init__(self, new_node_id, old_node_id):
+                self.new_node_id = new_node_id
+                self.old_node_id = old_node_id
+
+        class StubManager:
+            def __init__(self):
+                self.registered = []
+
+            def register(self, node_replace):
+                self.registered.append((node_replace.old_node_id, node_replace.new_node_id))
+
+        manager = StubManager()
+        prompt_server = type("PromptServer", (), {"instance": types.SimpleNamespace(node_replace_manager=manager)})
+        stubs = build_loader_test_stubs()
+        stubs.update({
+            "server": build_stub_module("server", PromptServer=prompt_server),
+            "comfy_api": build_stub_module("comfy_api"),
+            "comfy_api.latest": build_stub_module("comfy_api.latest"),
+            "comfy_api.latest._io": build_stub_module("comfy_api.latest._io", NodeReplace=StubNodeReplace),
+        })
+
+        with mock.patch.dict(sys.modules, stubs, clear=False):
+            package = load_thinkingllm_loader_subset([
+                "AILab_QwenVL.py",
+                "AILab_QwenVL_GGUF.py",
+                "AILab_QwenVL_PromptEnhancer.py",
+                "AILab_QwenVL_GGUF_PromptEnhancer.py",
+            ])
+
+        self.assertEqual(dict(manager.registered), package.LEGACY_NODE_REPLACEMENTS)
+
     def test_example_workflow_legacy_types_are_covered(self):
         resolved_types = set()
         for filename in self.MAPPING_FILES:
@@ -1056,6 +1127,42 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
 
         simple_cls = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py"]).NODE_CLASS_MAPPINGS["ThinkingLLM_QwenVL_GGUF"]
         self.assertEqual(simple_cls.INPUT_TYPES()["optional"]["audio"], ("AUDIO",))
+
+    def test_thinkingllm_node_input_capabilities_are_intentional(self):
+        package = load_thinkingllm_loader_subset([
+            "AILab_QwenVL.py",
+            "AILab_QwenVL_GGUF.py",
+            "AILab_QwenVL_PromptEnhancer.py",
+            "AILab_QwenVL_GGUF_PromptEnhancer.py",
+            "AILab_WhisperASR.py",
+        ])
+        expected_optional_inputs = {
+            "ThinkingLLM_QwenVL": {"image", "video"},
+            "ThinkingLLM_QwenVL_Advanced": {"image", "video"},
+            "ThinkingLLM_QwenVL_PromptEnhancer": set(),
+            "ThinkingLLM_QwenVL_GGUF": {"image", "video", "audio", "audio_file_path"},
+            "ThinkingLLM_QwenVL_GGUF_Advanced": {"image", "video", "audio", "audio_file_path"},
+            "ThinkingLLM_Gemma4_Audio_GGUF": {"audio", "audio_file_path"},
+            "ThinkingLLM_Whisper_ASR": {"audio", "audio_file_path"},
+            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": set(),
+        }
+
+        for node_name, expected in expected_optional_inputs.items():
+            with self.subTest(node_name=node_name):
+                input_types = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()
+                self.assertEqual(set(input_types.get("optional", {})), expected)
+
+    def test_gguf_vision_selector_includes_google_gemma4_e4b_image_model(self):
+        package = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py"])
+        expected_model_file = "google_gemma-4-E4B-it-Q4_K_M.gguf"
+
+        for node_name in ("ThinkingLLM_QwenVL_GGUF", "ThinkingLLM_QwenVL_GGUF_Advanced"):
+            with self.subTest(node_name=node_name):
+                model_keys = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"]["model_name"][0]
+                self.assertTrue(
+                    any(expected_model_file in key for key in model_keys),
+                    f"{expected_model_file} should be available in the image-capable GGUF selector",
+                )
 
     def test_gguf_vision_advanced_allows_larger_reasoning_output_budget(self):
         node_cls = self._load_gguf_advanced_class()

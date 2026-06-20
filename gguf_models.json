@@ -288,10 +288,11 @@
             "repo_name": "google_gemma-4-E4B-it-GGUF",
             "repo_id": "bartowski/google_gemma-4-E4B-it-GGUF",
             "model_files": [
-                "gemma-4-E4B-it-Q4_K_M.gguf",
-                "gemma-4-E4B-it-Q6_K.gguf",
-                "gemma-4-E4B-it-Q8_0.gguf",
-                "gemma-4-E4B-it-BF16.gguf"
+                "google_gemma-4-E4B-it-Q4_K_M.gguf",
+                "google_gemma-4-E4B-it-Q5_K_M.gguf",
+                "google_gemma-4-E4B-it-Q6_K.gguf",
+                "google_gemma-4-E4B-it-Q8_0.gguf",
+                "google_gemma-4-E4B-it-bf16.gguf"
             ],
             "defaults": {
                 "context_length": 131072
@@ -476,6 +477,27 @@
             ],
             "defaults": {
                 "context_length": 262144,
+                "image_max_tokens": 4096,
+                "n_batch": 512,
+                "gpu_layers": -1,
+                "top_k": 64,
+                "pool_size": 4194304
+            }
+        },
+        "google_gemma-4-E4B-it-GGUF [Q4:5.4GB|Q5:5.8GB|Q6:6.3GB|Q8:8GB|BF16:15GB|VRAM:~7GB]": {
+            "author": "bartowski",
+            "repo_name": "google_gemma-4-E4B-it-GGUF",
+            "repo_id": "bartowski/google_gemma-4-E4B-it-GGUF",
+            "mmproj_file": "mmproj-google_gemma-4-E4B-it-f16.gguf",
+            "model_files": [
+                "google_gemma-4-E4B-it-Q4_K_M.gguf",
+                "google_gemma-4-E4B-it-Q5_K_M.gguf",
+                "google_gemma-4-E4B-it-Q6_K.gguf",
+                "google_gemma-4-E4B-it-Q8_0.gguf",
+                "google_gemma-4-E4B-it-bf16.gguf"
+            ],
+            "defaults": {
+                "context_length": 131072,
                 "image_max_tokens": 4096,
                 "n_batch": 512,
                 "gpu_layers": -1,
