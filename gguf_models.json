@@ -294,6 +294,13 @@
                 "google_gemma-4-E4B-it-Q8_0.gguf",
                 "google_gemma-4-E4B-it-bf16.gguf"
             ],
+            "local_filenames": {
+                "google_gemma-4-E4B-it-Q4_K_M.gguf": ["gemma-4-E4B-it-Q4_K_M.gguf"],
+                "google_gemma-4-E4B-it-Q5_K_M.gguf": ["gemma-4-E4B-it-Q5_K_M.gguf"],
+                "google_gemma-4-E4B-it-Q6_K.gguf": ["gemma-4-E4B-it-Q6_K.gguf"],
+                "google_gemma-4-E4B-it-Q8_0.gguf": ["gemma-4-E4B-it-Q8_0.gguf"],
+                "google_gemma-4-E4B-it-bf16.gguf": ["gemma-4-E4B-it-BF16.gguf"]
+            },
             "defaults": {
                 "context_length": 131072
             }
@@ -496,6 +503,16 @@
                 "google_gemma-4-E4B-it-Q8_0.gguf",
                 "google_gemma-4-E4B-it-bf16.gguf"
             ],
+            "local_filenames": {
+                "google_gemma-4-E4B-it-Q4_K_M.gguf": ["gemma-4-E4B-it-Q4_K_M.gguf"],
+                "google_gemma-4-E4B-it-Q5_K_M.gguf": ["gemma-4-E4B-it-Q5_K_M.gguf"],
+                "google_gemma-4-E4B-it-Q6_K.gguf": ["gemma-4-E4B-it-Q6_K.gguf"],
+                "google_gemma-4-E4B-it-Q8_0.gguf": ["gemma-4-E4B-it-Q8_0.gguf"],
+                "google_gemma-4-E4B-it-bf16.gguf": ["gemma-4-E4B-it-BF16.gguf"]
+            },
+            "mmproj_local_filenames": {
+                "mmproj-google_gemma-4-E4B-it-f16.gguf": ["mmproj-F16.gguf", "mmproj-BF16.gguf"]
+            },
             "defaults": {
                 "context_length": 131072,
                 "image_max_tokens": 4096,

@@ -312,6 +312,34 @@ def _model_name_to_filename_candidates(model_name: str) -> set[str]:
     return candidates
 
 
+def _as_filename_list(value) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, (list, tuple, set)):
+        values = list(value)
+    else:
+        return []
+
+    filenames: list[str] = []
+    for item in values:
+        name = Path(str(item)).name
+        if name and name not in filenames:
+            filenames.append(name)
+    return filenames
+
+
+def _filename_aliases_for(payload, key: str | None) -> list[str]:
+    if not isinstance(payload, dict) or not key:
+        return []
+    return _as_filename_list(payload.get(key) or payload.get(Path(key).name))
+
+
+def _filename_search_candidates(filename: str, aliases: list[str] | None = None) -> list[str]:
+    return _as_filename_list([filename, *(aliases or [])])
+
+
 class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
     RETURN_TYPES = ("STRING", "STRING")
     RETURN_NAMES = ("ENHANCED_OUTPUT", "RAW_TRACE")
@@ -397,6 +425,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 defaults: dict = _defaults_raw if isinstance(_defaults_raw, dict) else {}
                 repo_id = repo.get("repo_id")
                 alt_repo_ids = repo.get("alt_repo_ids") or []
+                local_filenames = repo.get("local_filenames") or repo.get("local_model_files") or {}
                 model_files = repo.get("model_files") or []
                 quant_sizes = _parse_repo_quant_sizes(repo_key)
                 for model_file in model_files:
@@ -417,6 +446,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                             "repo_id": repo_id,
                             "alt_repo_ids": alt_repo_ids,
                             "filename": model_file,
+                            "local_filenames": _filename_aliases_for(local_filenames, model_file),
                         }
                     )
                     models[display] = entry
@@ -507,6 +537,18 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         if not quiet:
             print(f"[QwenVL PromptEnhancer DEBUG] VRAM cleanup completed")
 
+    @staticmethod
+    def _find_existing_local_file_in_dirs(search_dirs: list[Path], filename: str, aliases: list[str] | None = None) -> Path | None:
+        for search_dir in search_dirs:
+            for wanted in _filename_search_candidates(filename, aliases):
+                try:
+                    for candidate in search_dir.rglob(wanted):
+                        if candidate.is_file():
+                            return candidate
+                except Exception:
+                    continue
+        return None
+
     def _resolve_model_path(self, model_name):
         models = self.gguf_models.get("models") or {}
         entry = models.get(model_name) or {}
@@ -541,7 +583,11 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 target = base_dir / repo_dir / Path(filename).name
             if target.exists():
                 return target
-            existing = _find_existing_local_file_in_dirs(search_dirs, filename)
+            existing = self._find_existing_local_file_in_dirs(
+                search_dirs,
+                filename,
+                _as_filename_list(entry.get("local_filenames") or entry.get("local_model_files")),
+            )
             if existing is not None:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 try:

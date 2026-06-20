@@ -1853,6 +1853,171 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         self.assertEqual(calls[1][0], "llama")
         self.assertTrue(str(calls[1][1]).endswith(model_filename))
 
+    def test_gguf_loader_reuses_google_gemma_alias_from_extra_llm_path_without_download(self):
+        calls = []
+
+        class DummyChatHandler:
+            def __init__(self, **kwargs):
+                calls.append(("chat", kwargs.get("clip_model_path")))
+
+        class DummyLlama:
+            def __init__(self, **kwargs):
+                calls.append(("llama", kwargs.get("model_path")))
+
+        chat_format_module = build_stub_module(
+            "llama_cpp.llama_chat_format",
+            Gemma4ChatHandler=DummyChatHandler,
+        )
+        installer_module = build_stub_module(
+            "AILab_LlamaCppInstaller",
+            ensure_llama_cpp_backend=lambda *args, **kwargs: DummyLlama,
+            format_llama_cpp_backend_info=lambda info=None: "stub backend",
+            get_last_llama_cpp_backend_info=lambda: {
+                "gpu_offload": True,
+                "vision_handlers": ["Gemma4ChatHandler"],
+            },
+            relax_windows_dll_directory_for_long_paths=contextlib.nullcontext,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            dev_models = temp_root / "dev" / "models"
+            shared_llm = temp_root / "shared" / "models" / "LLM"
+            shared_model_dir = shared_llm / "GGUF" / "unsloth" / "gemma-4-E4B-it-GGUF"
+            shared_model_dir.mkdir(parents=True)
+            local_model_filename = "gemma-4-E4B-it-Q8_0.gguf"
+            local_mmproj_filename = "mmproj-F16.gguf"
+            (shared_model_dir / local_model_filename).write_bytes(b"GGUF")
+            (shared_model_dir / local_mmproj_filename).write_bytes(b"mmproj")
+
+            stubs = build_loader_test_stubs()
+            stubs.update(
+                {
+                    "folder_paths": build_stub_module(
+                        "folder_paths",
+                        models_dir=str(dev_models),
+                        folder_names_and_paths={"LLM": ([str(shared_llm)], set())},
+                        get_folder_paths=lambda name: [str(shared_llm)] if name == "LLM" else [],
+                    ),
+                    "AILab_LlamaCppInstaller": installer_module,
+                    "llama_cpp": build_stub_module("llama_cpp", llama_chat_format=chat_format_module),
+                    "llama_cpp.llama_chat_format": chat_format_module,
+                }
+            )
+
+            with mock.patch.dict(sys.modules, stubs, clear=False):
+                module = load_module_from_file(
+                    "AILab_QwenVL_GGUF.py",
+                    "thinkingllm_gguf_google_gemma_alias_reuse_test",
+                )
+
+            model_name = "google_gemma-4-E4B-it-Q8_0.gguf [~8GB]"
+            loader = module.QwenVLGGUFBase()
+
+            with mock.patch.dict(sys.modules, stubs, clear=False), mock.patch.object(
+                module,
+                "_download_single_file",
+                side_effect=AssertionError("download should not be called for shared local GGUF alias"),
+            ), mock.patch.object(
+                module,
+                "_pick_device",
+                return_value="cpu",
+            ), mock.patch.object(
+                module,
+                "read_gguf_architecture",
+                return_value="gemma4",
+            ):
+                loader._load_model(
+                    model_name=model_name,
+                    device="cpu",
+                    ctx=128,
+                    n_batch=16,
+                    n_ubatch=None,
+                    gpu_layers=0,
+                    image_max_tokens=64,
+                    top_k=0,
+                    pool_size=1024,
+                    n_threads=None,
+                    n_threads_batch=None,
+                    flash_attn=False,
+                    offload_kqv=False,
+                    ctx_checkpoints=None,
+                    enable_thinking=True,
+                    unique_id=None,
+                )
+
+        self.assertEqual(calls[0][0], "chat")
+        self.assertTrue(str(calls[0][1]).endswith((local_mmproj_filename, "mmproj-google_gemma-4-E4B-it-f16.gguf")))
+        self.assertEqual(calls[1][0], "llama")
+        self.assertTrue(str(calls[1][1]).endswith((local_model_filename, "google_gemma-4-E4B-it-Q8_0.gguf")))
+
+    def test_gguf_prompt_enhancer_reuses_google_gemma_alias_from_extra_llm_path_without_download(self):
+        calls = []
+
+        class DummyLlama:
+            def __init__(self, **kwargs):
+                calls.append(kwargs.get("model_path"))
+
+        installer_module = build_stub_module(
+            "AILab_LlamaCppInstaller",
+            ensure_llama_cpp_backend=lambda *args, **kwargs: DummyLlama,
+            format_llama_cpp_backend_info=lambda info=None: "stub backend",
+            get_last_llama_cpp_backend_info=lambda: {"gpu_offload": True, "vision_handlers": []},
+            relax_windows_dll_directory_for_long_paths=contextlib.nullcontext,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            dev_models = temp_root / "dev" / "models"
+            shared_llm = temp_root / "shared" / "models" / "LLM"
+            shared_model_dir = shared_llm / "GGUF" / "unsloth" / "gemma-4-E4B-it-GGUF"
+            shared_model_dir.mkdir(parents=True)
+            local_model_filename = "gemma-4-E4B-it-Q8_0.gguf"
+            (shared_model_dir / local_model_filename).write_bytes(b"GGUF")
+
+            stubs = build_loader_test_stubs()
+            stubs.update(
+                {
+                    "folder_paths": build_stub_module(
+                        "folder_paths",
+                        models_dir=str(dev_models),
+                        folder_names_and_paths={"LLM": ([str(shared_llm)], set())},
+                        get_folder_paths=lambda name: [str(shared_llm)] if name == "LLM" else [],
+                    ),
+                    "AILab_LlamaCppInstaller": installer_module,
+                }
+            )
+
+            with mock.patch.dict(sys.modules, stubs, clear=False):
+                module = load_module_from_file(
+                    "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                    "thinkingllm_gguf_prompt_google_gemma_alias_reuse_test",
+                )
+
+            model_name = "google_gemma-4-E4B-it-Q8_0.gguf [~8GB]"
+            loader = module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer()
+
+            with mock.patch.dict(sys.modules, stubs, clear=False), mock.patch.object(
+                module,
+                "download_hf_file_to_path",
+                side_effect=AssertionError("download should not be called for shared local GGUF alias"),
+            ), mock.patch.object(
+                module,
+                "read_gguf_architecture",
+                return_value="gemma4",
+            ):
+                loader._load_model(
+                    model_name=model_name,
+                    device="cpu",
+                    enable_thinking=True,
+                    unique_id=None,
+                    context_length_override=128,
+                    quiet=True,
+                )
+
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(str(calls[0]).endswith(local_model_filename))
+
     def test_gguf_runtime_reuses_windows_dll_relaxation_for_handler_and_llama(self):
         enter_events = []
 

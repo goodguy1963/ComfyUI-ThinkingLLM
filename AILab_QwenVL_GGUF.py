@@ -24,7 +24,7 @@ import sys
 import time
 import weakref
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -324,6 +324,8 @@ class GGUFVLResolved:
     gpu_layers: int
     top_k: int
     pool_size: int
+    local_filenames: list[str] = field(default_factory=list)
+    mmproj_local_filenames: list[str] = field(default_factory=list)
 
 
 def _resolve_base_dir(base_dir_value: str) -> Path:
@@ -369,6 +371,34 @@ def _model_name_to_filename_candidates(model_name: str) -> set[str]:
         tail = raw.rsplit("/", 1)[-1].strip()
         candidates.update({tail, f"{tail}.gguf"})
     return candidates
+
+
+def _as_filename_list(value) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, (list, tuple, set)):
+        values = list(value)
+    else:
+        return []
+
+    filenames: list[str] = []
+    for item in values:
+        name = Path(str(item)).name
+        if name and name not in filenames:
+            filenames.append(name)
+    return filenames
+
+
+def _filename_aliases_for(payload, key: str | None) -> list[str]:
+    if not isinstance(payload, dict) or not key:
+        return []
+    return _as_filename_list(payload.get(key) or payload.get(Path(key).name))
+
+
+def _filename_search_candidates(filename: str, aliases: list[str] | None = None) -> list[str]:
+    return _as_filename_list([filename, *(aliases or [])])
 
 
 def _is_removed_qwen3_asr_filename(filename: str) -> bool:
@@ -455,6 +485,8 @@ def _load_gguf_vl_catalog():
         defaults = repo.get("defaults") or {}
         mmproj_file = repo.get("mmproj_file")
         mmproj_files = repo.get("mmproj_files") or {}
+        local_filenames = repo.get("local_filenames") or repo.get("local_model_files") or {}
+        mmproj_local_filenames = repo.get("mmproj_local_filenames") or repo.get("local_mmproj_files") or {}
         model_files = repo.get("model_files") or []
 
         quant_sizes = _parse_repo_quant_sizes(repo_key)
@@ -467,6 +499,7 @@ def _load_gguf_vl_catalog():
             if display in seen_display_names:
                 display = f"{display} ({repo_key})"
             seen_display_names.add(display)
+            resolved_mmproj_file = mmproj_files.get(model_file) or mmproj_file
             flattened[display] = {
                 **defaults,
                 "author": author,
@@ -474,7 +507,10 @@ def _load_gguf_vl_catalog():
                 "repo_id": repo_id,
                 "alt_repo_ids": alt_repo_ids,
                 "filename": model_file,
-                "mmproj_filename": mmproj_files.get(model_file) or mmproj_file,
+                "local_filenames": _filename_aliases_for(local_filenames, model_file),
+                "mmproj_filename": resolved_mmproj_file,
+                "mmproj_local_filenames": _filename_aliases_for(mmproj_local_filenames, resolved_mmproj_file)
+                + _filename_aliases_for(mmproj_local_filenames, model_file),
             }
 
     legacy_models = data.get("models") or {}
@@ -485,6 +521,8 @@ def _load_gguf_vl_catalog():
                 defaults = entry.get("defaults") or {}
                 mmproj_file = entry.get("mmproj_file")
                 mmproj_files = entry.get("mmproj_files") or {}
+                local_filenames = entry.get("local_filenames") or entry.get("local_model_files") or {}
+                mmproj_local_filenames = entry.get("mmproj_local_filenames") or entry.get("local_mmproj_files") or {}
                 author = entry.get("author") or entry.get("publisher")
                 repo_name = entry.get("repo_name") or entry.get("repo_name_override") or name
                 repo_id = entry.get("repo_id")
@@ -497,6 +535,7 @@ def _load_gguf_vl_catalog():
                         display = f"{display} [~{quant_sizes[q]}]"
                     if display in flattened:
                         display = f"{display} ({name})"
+                    resolved_mmproj_file = mmproj_files.get(model_file) or mmproj_file
                     flattened[display] = {
                         **defaults,
                         "author": author,
@@ -504,7 +543,10 @@ def _load_gguf_vl_catalog():
                         "repo_id": repo_id,
                         "alt_repo_ids": alt_repo_ids,
                         "filename": model_file,
-                        "mmproj_filename": mmproj_files.get(model_file) or mmproj_file,
+                        "local_filenames": _filename_aliases_for(local_filenames, model_file),
+                        "mmproj_filename": resolved_mmproj_file,
+                        "mmproj_local_filenames": _filename_aliases_for(mmproj_local_filenames, resolved_mmproj_file)
+                        + _filename_aliases_for(mmproj_local_filenames, model_file),
                     }
             else:
                 flattened[name] = entry
@@ -976,23 +1018,21 @@ def _download_single_file(repo_ids: list[str], filename: str, target_path: Path,
         raise FileNotFoundError(f"[QwenVL] File not found after download: {target_path}")
 
 
-def _find_existing_local_file(base_dir: Path, filename: str) -> Path | None:
+def _find_existing_local_file(base_dir: Path, filename: str, aliases: list[str] | None = None) -> Path | None:
     """Reuse an already-downloaded GGUF file anywhere under the shared base dir."""
-    wanted = Path(filename).name
-    if not wanted:
-        return None
-    try:
-        for candidate in base_dir.rglob(wanted):
-            if candidate.is_file():
-                return candidate
-    except Exception:
-        return None
+    for wanted in _filename_search_candidates(filename, aliases):
+        try:
+            for candidate in base_dir.rglob(wanted):
+                if candidate.is_file():
+                    return candidate
+        except Exception:
+            continue
     return None
 
 
-def _find_existing_local_file_in_dirs(search_dirs: list[Path], filename: str) -> Path | None:
+def _find_existing_local_file_in_dirs(search_dirs: list[Path], filename: str, aliases: list[str] | None = None) -> Path | None:
     for search_dir in search_dirs:
-        found = _find_existing_local_file(search_dir, filename)
+        found = _find_existing_local_file(search_dir, filename, aliases)
         if found is not None:
             return found
     return None
@@ -1035,7 +1075,9 @@ def _resolve_model_entry(model_name: str) -> GGUFVLResolved:
         author=str(author) if author else None,
         repo_dirname=_safe_dirname(str(repo_dirname)),
         model_filename=str(model_filename),
+        local_filenames=_as_filename_list(entry.get("local_filenames") or entry.get("local_model_files")),
         mmproj_filename=str(mmproj_filename) if mmproj_filename else None,
+        mmproj_local_filenames=_as_filename_list(entry.get("mmproj_local_filenames") or entry.get("local_mmproj_files")),
         context_length=_int("context_length", 32768),
         image_max_tokens=_int("image_max_tokens", 4096),
         n_batch=_int("n_batch", 512),
@@ -1194,7 +1236,7 @@ class QwenVLGGUFBase:
             model_path = target_dir / Path(resolved.model_filename).name
             mmproj_path = target_dir / Path(resolved.mmproj_filename).name if resolved.mmproj_filename else None
 
-            existing_model = _find_existing_local_file_in_dirs(search_dirs, resolved.model_filename)
+            existing_model = _find_existing_local_file_in_dirs(search_dirs, resolved.model_filename, resolved.local_filenames)
             if existing_model is not None:
                 model_path.parent.mkdir(parents=True, exist_ok=True)
                 if not model_path.exists():
@@ -1206,7 +1248,11 @@ class QwenVLGGUFBase:
                     model_path = model_path
 
             if mmproj_path is not None:
-                existing_mmproj = _find_existing_local_file_in_dirs(search_dirs, resolved.mmproj_filename)
+                existing_mmproj = _find_existing_local_file_in_dirs(
+                    search_dirs,
+                    resolved.mmproj_filename,
+                    resolved.mmproj_local_filenames,
+                )
                 if existing_mmproj is not None:
                     mmproj_path.parent.mkdir(parents=True, exist_ok=True)
                     if not mmproj_path.exists():
