@@ -2212,6 +2212,79 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         self.assertNotIn("force_reasoning", captured_chat_kwargs[0])
         self.assertIn("clip_model_path", captured_chat_kwargs[0])
 
+    def test_gguf_loader_passes_current_cuda_device_as_llama_main_gpu(self):
+        captured_llama_kwargs = []
+
+        class DummyLlama:
+            def __init__(self, **kwargs):
+                captured_llama_kwargs.append(dict(kwargs))
+
+        installer_module = build_stub_module(
+            "AILab_LlamaCppInstaller",
+            ensure_llama_cpp_backend=lambda *args, **kwargs: DummyLlama,
+            format_llama_cpp_backend_info=lambda info=None: "stub backend",
+            get_last_llama_cpp_backend_info=lambda: {"gpu_offload": True, "vision_handlers": []},
+            relax_windows_dll_directory_for_long_paths=contextlib.nullcontext,
+        )
+        stub_modules = build_loader_test_stubs()
+        stub_modules["AILab_LlamaCppInstaller"] = installer_module
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_path = Path(temp_dir) / "model.gguf"
+            model_path.write_bytes(b"GGUF")
+
+            with mock.patch.dict(sys.modules, stub_modules, clear=False):
+                module = load_module_from_file(
+                    "AILab_QwenVL_GGUF.py",
+                    "thinkingllm_gguf_main_gpu_test",
+                )
+                loader = module.QwenVLGGUFBase()
+                resolved = module.GGUFVLResolved(
+                    display_name="model",
+                    repo_id=None,
+                    alt_repo_ids=[],
+                    author=None,
+                    repo_dirname="model",
+                    model_filename=str(model_path),
+                    mmproj_filename=None,
+                    context_length=4096,
+                    image_max_tokens=1024,
+                    n_batch=64,
+                    gpu_layers=-1,
+                    top_k=20,
+                    pool_size=1024,
+                )
+
+                with mock.patch.object(module, "_resolve_model_entry", return_value=resolved):
+                    with mock.patch.object(module, "_pick_device", return_value="cuda"):
+                        with mock.patch.object(module, "read_gguf_architecture", return_value="qwen"):
+                            with mock.patch.object(module.torch.cuda, "is_available", return_value=True):
+                                with mock.patch.object(module.torch.cuda, "current_device", return_value=1, create=True):
+                                    with mock.patch.object(module.torch.cuda, "synchronize", return_value=None, create=True):
+                                        with mock.patch.object(module.torch.cuda, "empty_cache", return_value=None, create=True):
+                                            with mock.patch.object(module.torch.cuda, "ipc_collect", return_value=None, create=True):
+                                                loader._load_model(
+                                                    model_name="model.gguf",
+                                                    device="cuda",
+                                                    ctx=None,
+                                                    n_batch=None,
+                                                    n_ubatch=None,
+                                                    gpu_layers=-1,
+                                                    image_max_tokens=None,
+                                                    top_k=None,
+                                                    pool_size=None,
+                                                    n_threads=None,
+                                                    n_threads_batch=None,
+                                                    flash_attn=False,
+                                                    offload_kqv=False,
+                                                    ctx_checkpoints=None,
+                                                    enable_thinking=True,
+                                                    unique_id=None,
+                                                )
+
+        self.assertEqual(captured_llama_kwargs[0]["main_gpu"], 1)
+        self.assertIn("main_gpu=1", loader.last_backend_trace)
+
     def test_gemma4_cpu_only_multimodal_load_downgrades_unsafe_settings(self):
         captured_chat_kwargs = []
         captured_llama_kwargs = []

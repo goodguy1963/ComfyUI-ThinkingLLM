@@ -878,12 +878,36 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _current_cuda_device_index() -> int | None:
+    try:
+        if not torch.cuda.is_available():
+            return None
+        return int(torch.cuda.current_device())
+    except Exception:
+        return None
+
+
+def _cuda_device_label(index: int | None = None) -> str:
+    if index is None:
+        index = _current_cuda_device_index()
+    if index is None:
+        return "cuda:unknown"
+    try:
+        props = torch.cuda.get_device_properties(index)
+        name = getattr(props, "name", "") or torch.cuda.get_device_name(index)
+        total_gb = float(getattr(props, "total_memory", 0) or 0) / 1024**3
+        return f"cuda:{index} {name} ({total_gb:.2f}GB)"
+    except Exception:
+        return f"cuda:{index}"
+
+
 def _format_backend_trace(
     backend_info: dict | None,
     *,
     model_path: Path,
     device_kind: str,
     n_gpu_layers: int,
+    main_gpu: int | None,
     n_ctx: int,
     n_batch: int,
     n_ubatch: int,
@@ -900,6 +924,7 @@ def _format_backend_trace(
         format_llama_cpp_backend_info(backend_info),
         (
             f"model={model_path.name}; device={device_kind}; gpu_layers={n_gpu_layers}; "
+            f"main_gpu={main_gpu if main_gpu is not None else 'auto'}; "
             f"ctx={n_ctx}; batch={n_batch}; ubatch={n_ubatch}"
         ),
         (
@@ -1320,6 +1345,7 @@ class QwenVLGGUFBase:
             n_gpu_layers = int(gpu_layers) if gpu_layers is not None else resolved.gpu_layers
         else:
             n_gpu_layers = 0
+        llama_main_gpu = _current_cuda_device_index() if device_kind == "cuda" and n_gpu_layers != 0 else None
 
         logical_cpus = os.cpu_count() or 0
         if logical_cpus > 32 and n_threads_val is None and n_threads_batch_val is None:
@@ -1363,6 +1389,7 @@ class QwenVLGGUFBase:
             n_batch_val,
             n_ubatch_val,
             device_kind,
+            llama_main_gpu,
             img_max,
             top_k_val,
             pool_size_val,
@@ -1422,6 +1449,8 @@ class QwenVLGGUFBase:
             "offload_kqv": bool(offload_kqv),
             "ctx_checkpoints": ctx_checkpoints_val,
         }
+        if llama_main_gpu is not None:
+            llm_kwargs["main_gpu"] = llama_main_gpu
 
         # Thinking toggle: for Qwen3.5/4 we control enable_thinking via the chat template kwarg.
         # For non-Qwen backends (Gemma, LLaMA) the flag is advisory and may be silently ignored.
@@ -1442,7 +1471,9 @@ class QwenVLGGUFBase:
 
         print(
             f"[QwenVL] Loading GGUF: {model_path.name} "
-            f"(device={device_kind}, gpu_layers={n_gpu_layers}, ctx={n_ctx}, batch={n_batch_val}, ubatch={n_ubatch_val})"
+            f"(device={device_kind}, gpu_layers={n_gpu_layers}, "
+            f"main_gpu={llama_main_gpu if llama_main_gpu is not None else 'auto'}, "
+            f"ctx={n_ctx}, batch={n_batch_val}, ubatch={n_ubatch_val})"
         )
         llm_kwargs_filtered = _filter_kwargs_for_callable(getattr(Llama, "__init__", Llama), llm_kwargs)
         if has_mmproj and self.chat_handler is not None and "chat_handler" not in llm_kwargs_filtered:
@@ -1464,6 +1495,9 @@ class QwenVLGGUFBase:
                 "[QwenVL] Warning: installed llama_cpp Llama() does not accept performance kwargs: "
                 f"{', '.join(dropped_perf_kwargs)}"
             )
+        if llama_main_gpu is not None and "main_gpu" not in llm_kwargs_filtered:
+            load_warnings.append("installed llama_cpp Llama() does not accept main_gpu; cannot pin selected CUDA device")
+            print("[QwenVL] Warning: installed llama_cpp Llama() does not accept main_gpu; cannot pin selected CUDA device.")
         if device_kind == "cuda" and n_gpu_layers == 0:
             load_warnings.append("device=cuda selected but n_gpu_layers=0; model will run on CPU")
             print("[QwenVL] Warning: device=cuda selected but n_gpu_layers=0; model will run on CPU.")
@@ -1484,6 +1518,7 @@ class QwenVLGGUFBase:
             model_path=model_path,
             device_kind=device_kind,
             n_gpu_layers=n_gpu_layers,
+            main_gpu=llama_main_gpu,
             n_ctx=n_ctx,
             n_batch=n_batch_val,
             n_ubatch=n_ubatch_val,
@@ -1957,9 +1992,21 @@ class QwenVLGGUFBase:
 
         # Debug VRAM before model loading
         if torch.cuda.is_available():
-            allocated = torch.cuda.memory_allocated()
-            total = torch.cuda.get_device_properties(0).total_memory
-            print(f"[QwenVL GGUF DEBUG] VRAM before loading: {allocated/1024**3:.2f}GB / {total/1024**3:.2f}GB")
+            cuda_index = _current_cuda_device_index()
+            allocated = torch.cuda.memory_allocated(cuda_index) if cuda_index is not None else torch.cuda.memory_allocated()
+            total = 0
+            try:
+                if cuda_index is not None:
+                    total = int(torch.cuda.get_device_properties(cuda_index).total_memory)
+            except Exception:
+                total = 0
+            if total:
+                print(
+                    f"[QwenVL GGUF DEBUG] VRAM before loading on {_cuda_device_label(cuda_index)}: "
+                    f"{allocated/1024**3:.2f}GB / {total/1024**3:.2f}GB"
+                )
+            else:
+                print(f"[QwenVL GGUF DEBUG] VRAM before loading on {_cuda_device_label(cuda_index)}: {allocated/1024**3:.2f}GB")
 
         text = None
         last_exc: Exception | None = None
