@@ -107,10 +107,10 @@ function loadPresetTooltips() {
 
 function setNodeColors(node, theme) {
     if (!theme) { return; }
-    if (theme.nodeColor) {
+    if (!node.color && theme.nodeColor) {
         node.color = theme.nodeColor;
     }
-    if (theme.nodeBgColor) {
+    if (!node.bgcolor && theme.nodeBgColor) {
         node.bgcolor = theme.nodeBgColor;
     }
     if (theme.width) {

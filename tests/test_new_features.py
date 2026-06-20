@@ -533,6 +533,8 @@ class TestModelRecommendations(unittest.TestCase):
 
     def test_appearance_js_styles_all_visible_plugin_nodes(self):
         source = read_source("web/js/appearance.js")
+        self.assertIn("if (!node.color && theme.nodeColor)", source)
+        self.assertIn("if (!node.bgcolor && theme.nodeBgColor)", source)
         expected_node_names = [
             "AILab_QwenVL",
             "AILab_QwenVL_Advanced",
