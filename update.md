@@ -1,5 +1,20 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.14 (2026/06/20) — Gemma4 GGUF Stability Release
+
+### 2.3.14 Changes
+
+- Stabilized `google_gemma-4-E4B-it-GGUF` multimodal runs by applying Gemma4-compatible GGUF image settings before llama.cpp execution.
+- Pinned llama.cpp `main_gpu` to ComfyUI's selected CUDA device so GGUF loads do not drift to the wrong card after CUDA state changes.
+- Blocked unsupported Gemma4 GGUF audio before native llama.cpp can abort the ComfyUI process.
+- Reused existing mapped GGUF model files across ComfyUI `LLM` model paths to avoid redundant downloads.
+- Removed duplicate legacy ThinkingLLM search entries from the ComfyUI node list.
+
+### 2.3.14 Validation
+
+- Full local regression suite passes.
+- Live NVIDIA portable ComfyUI test completed successfully with `google_gemma-4-E4B-it-Q8_0.gguf` and an image prompt.
+
 ## Version 2.3.13 (2026/06/20) — Recommendation Note Cleanup
 
 ### 2.3.13 Changes
