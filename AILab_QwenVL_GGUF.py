@@ -649,7 +649,7 @@ def _unexpected_kwarg_names_from_type_error(exc: TypeError) -> list[str]:
 def _filter_mmproj_handler_kwargs(handler_cls, kwargs: dict) -> dict:
     filtered = _filter_kwargs_for_callable(getattr(handler_cls, "__init__", handler_cls), kwargs)
     handler_name = getattr(handler_cls, "__name__", "")
-    if "MTMD" in handler_name:
+    if "Qwen" not in handler_name:
         filtered.pop("force_reasoning", None)
     return filtered
 

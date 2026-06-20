@@ -2029,7 +2029,7 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
             finally:
                 enter_events.append("exit")
 
-        class DummyChatHandler:
+        class Qwen3VLChatHandler:
             def __init__(self, **kwargs):
                 enter_events.append(("chat", sorted(kwargs)))
 
@@ -2039,7 +2039,7 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
 
         chat_format_module = build_stub_module(
             "llama_cpp.llama_chat_format",
-            Qwen3VLChatHandler=DummyChatHandler,
+            Qwen3VLChatHandler=Qwen3VLChatHandler,
         )
         installer_module = build_stub_module(
             "AILab_LlamaCppInstaller",
@@ -2124,6 +2124,93 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
                 "image_min_tokens",
             }.issubset(set(enter_events[4][1]))
         )
+
+    def test_gemma4_chat_handler_does_not_receive_qwen_force_reasoning_kwarg(self):
+        captured_chat_kwargs = []
+
+        Gemma4ChatHandler = type(
+            "Gemma4ChatHandler",
+            (),
+            {"__init__": lambda self, **kwargs: captured_chat_kwargs.append(dict(kwargs))},
+        )
+
+        class DummyLlama:
+            def __init__(self, **kwargs):
+                pass
+
+        chat_format_module = build_stub_module(
+            "llama_cpp.llama_chat_format",
+            Gemma4ChatHandler=Gemma4ChatHandler,
+        )
+        installer_module = build_stub_module(
+            "AILab_LlamaCppInstaller",
+            ensure_llama_cpp_backend=lambda *args, **kwargs: DummyLlama,
+            format_llama_cpp_backend_info=lambda info=None: "stub backend",
+            get_last_llama_cpp_backend_info=lambda: {"gpu_offload": True, "vision_handlers": ["Gemma4ChatHandler"]},
+            relax_windows_dll_directory_for_long_paths=contextlib.nullcontext,
+        )
+        stub_modules = build_loader_test_stubs()
+        stub_modules.update(
+            {
+                "AILab_LlamaCppInstaller": installer_module,
+                "llama_cpp": build_stub_module("llama_cpp", llama_chat_format=chat_format_module),
+                "llama_cpp.llama_chat_format": chat_format_module,
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_path = Path(temp_dir) / "gemma.gguf"
+            mmproj_path = Path(temp_dir) / "mmproj.gguf"
+            model_path.write_bytes(b"GGUF")
+            mmproj_path.write_bytes(b"mmproj")
+
+            with mock.patch.dict(sys.modules, stub_modules, clear=False):
+                module = load_module_from_file(
+                    "AILab_QwenVL_GGUF.py",
+                    "thinkingllm_gemma4_handler_kwargs_test",
+                )
+                loader = module.QwenVLGGUFBase()
+                resolved = module.GGUFVLResolved(
+                    display_name="gemma",
+                    repo_id=None,
+                    alt_repo_ids=[],
+                    author=None,
+                    repo_dirname="gemma",
+                    model_filename=str(model_path),
+                    mmproj_filename=str(mmproj_path),
+                    context_length=4096,
+                    image_max_tokens=1024,
+                    n_batch=64,
+                    gpu_layers=0,
+                    top_k=20,
+                    pool_size=1024,
+                )
+
+                with mock.patch.object(module, "_resolve_model_entry", return_value=resolved):
+                    with mock.patch.object(module, "_pick_device", return_value="cpu"):
+                        with mock.patch.object(module, "read_gguf_architecture", return_value="gemma4"):
+                            loader._load_model(
+                                model_name="google_gemma-4-E4B-it-Q8_0.gguf",
+                                device="cpu",
+                                ctx=None,
+                                n_batch=None,
+                                n_ubatch=None,
+                                gpu_layers=None,
+                                image_max_tokens=None,
+                                top_k=None,
+                                pool_size=None,
+                                n_threads=None,
+                                n_threads_batch=None,
+                                flash_attn=False,
+                                offload_kqv=False,
+                                ctx_checkpoints=None,
+                                enable_thinking=True,
+                                unique_id=None,
+                            )
+
+        self.assertEqual(len(captured_chat_kwargs), 1)
+        self.assertNotIn("force_reasoning", captured_chat_kwargs[0])
+        self.assertIn("clip_model_path", captured_chat_kwargs[0])
 
     def test_gguf_thinking_toggle_updates_without_reload_signature(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
