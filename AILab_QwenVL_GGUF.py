@@ -556,10 +556,22 @@ def _load_gguf_vl_catalog():
             else:
                 flattened[name] = entry
 
-    # Scan filesystem for locally available models not in JSON config
-    # Collect all directories to scan: the configured base_dir + any extra LLM paths from ComfyUI
+    # Mark catalog entries already present on disk, then add uncatalogued local models.
+    search_dirs = _gguf_search_dirs(base_dir)
+    installed_filenames: set[str] = set()
+    for directory in search_dirs:
+        try:
+            installed_filenames.update(path.name for path in directory.rglob("*.gguf") if path.is_file())
+        except (OSError, PermissionError):
+            pass
+    for display, entry in list(flattened.items()):
+        filenames = _filename_search_candidates(entry.get("filename", ""), entry.get("local_filenames"))
+        if any(filename in installed_filenames for filename in filenames):
+            flattened.pop(display)
+            flattened[f"{display} [installed]"] = {**entry, "catalog_display_name": display}
+
     existing_filenames = {Path(e.get("filename", "")).name for e in flattened.values() if e.get("filename")}
-    for scan_dir in _gguf_search_dirs(base_dir):
+    for scan_dir in search_dirs:
         local_models = _scan_local_gguf_models(scan_dir, existing_filenames)
         flattened.update(local_models)
         # Update existing_filenames so we don't add duplicates across directories
@@ -571,7 +583,7 @@ def _load_gguf_vl_catalog():
 GGUF_VL_CATALOG = _load_gguf_vl_catalog()
 
 GGUF_TOOLTIPS = {
-    "model_name": "GGUF vision model from gguf_models.json or auto-detected local files. First run downloads the selected GGUF and mmproj files when they are not already on disk.",
+    "model_name": "GGUF vision model from gguf_models.json or auto-detected local files. [installed] means the catalog model file was found on disk; [local] means an uncatalogued local model. Missing GGUF or mmproj files are downloaded on first use.",
     "audio_model_name": "Gemma 4 audio-capable GGUF model. Only Gemma 4 E2B, E4B, and 12B are listed; 26B/31B variants are image/text-only for this purpose.",
     "audio_file_path": "Optional local audio file path. M4A, MP3, WAV, FLAC, and other FFmpeg-readable files are decoded to 16 kHz mono WAV before inference.",
     "device": "auto prefers CUDA when PyTorch sees an NVIDIA GPU. If RAW_TRACE says GPU offload is no or unknown, verify your llama-cpp-python CUDA wheel before blaming the model.",
@@ -1080,6 +1092,9 @@ def _resolve_model_entry(model_name: str) -> GGUFVLResolved:
     if not entry:
         wanted = _model_name_to_filename_candidates(model_name)
         for candidate in all_models.values():
+            if candidate.get("catalog_display_name") == model_name:
+                entry = candidate
+                break
             filename = candidate.get("filename")
             if filename and Path(filename).name in wanted:
                 entry = candidate

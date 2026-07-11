@@ -1,5 +1,17 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.15 (2026/07/12) — Installed GGUF Visibility
+
+### 2.3.15 Changes
+
+- Marked catalogued GGUF model files found on disk with `[installed]` in both ThinkingLLM GGUF selectors.
+- Kept `[local]` for uncatalogued GGUF files and preserved compatibility with model names stored by older workflows.
+
+### 2.3.15 Validation
+
+- Added regression coverage for installed-model labelling, duplicate suppression, and legacy model-name resolution.
+- Full local regression suite passes.
+
 ## Version 2.3.14 (2026/06/20) — Gemma4 GGUF Stability Release
 
 ### 2.3.14 Changes

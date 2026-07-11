@@ -1165,6 +1165,38 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
                     f"{expected_model_file} should be available in the image-capable GGUF selector",
                 )
 
+    def test_catalog_model_is_marked_installed_and_old_display_name_still_resolves(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file("AILab_QwenVL_GGUF.py", "thinkingllm_installed_catalog_test")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            models_dir = Path(temp_dir)
+            gguf_dir = models_dir / "LLM" / "GGUF"
+            gguf_dir.mkdir(parents=True)
+            (gguf_dir / "model.gguf").write_bytes(b"GGUF")
+            config_path = models_dir / "gguf_models.json"
+            config_path.write_text(json.dumps({
+                "base_dir": "LLM/GGUF",
+                "repos": {
+                    "test": {
+                        "repo_id": "example/test",
+                        "mmproj_file": "mmproj.gguf",
+                        "model_files": ["model.gguf"],
+                    }
+                },
+            }), encoding="utf-8")
+
+            with mock.patch.object(module, "GGUF_CONFIG_PATH", config_path):
+                with mock.patch.object(module.folder_paths, "models_dir", str(models_dir)):
+                    catalog = module._load_gguf_vl_catalog()
+
+            self.assertIn("model.gguf [installed]", catalog["models"])
+            self.assertNotIn("[local] model.gguf", catalog["models"])
+
+            with mock.patch.object(module, "GGUF_VL_CATALOG", catalog):
+                resolved = module._resolve_model_entry("model.gguf")
+            self.assertEqual(resolved.model_filename, "model.gguf")
+
     def test_gguf_vision_advanced_allows_larger_reasoning_output_budget(self):
         node_cls = self._load_gguf_advanced_class()
         max_tokens_type, max_tokens_meta = node_cls.INPUT_TYPES()["required"]["max_tokens"]
