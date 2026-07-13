@@ -210,15 +210,19 @@
                 "context_length": 131072
             }
         },
-        "Gemma-4-E2B-it-GGUF [Q4:2GB|Q8:3.5GB|VRAM:~3GB]": {
-            "author": "ggml-org",
-            "repo_name": "gemma-4-E2B-it-GGUF",
-            "repo_id": "ggml-org/gemma-4-E2B-it-GGUF",
+        "Gemma-4-E2B-it-GGUF [Q4:3.2GB|Q8:4.7GB|BF16:8.7GB|VRAM:~5GB]": {
+            "author": "bartowski",
+            "repo_name": "google_gemma-4-E2B-it-GGUF",
+            "repo_id": "bartowski/google_gemma-4-E2B-it-GGUF",
             "model_files": [
-                "gemma-4-E2B-it-Q4_K_M.gguf",
-                "gemma-4-E2B-it-Q8_0.gguf",
-                "gemma-4-E2B-it-BF16.gguf"
+                "google_gemma-4-E2B-it-Q4_K_S.gguf",
+                "google_gemma-4-E2B-it-Q8_0.gguf",
+                "google_gemma-4-E2B-it-bf16.gguf"
             ],
+            "local_filenames": {
+                "google_gemma-4-E2B-it-Q8_0.gguf": ["gemma-4-E2B-it-Q8_0.gguf"],
+                "google_gemma-4-E2B-it-bf16.gguf": ["gemma-4-E2B-it-bf16.gguf", "gemma-4-E2B-it-BF16.gguf"]
+            },
             "defaults": {
                 "context_length": 131072
             }
@@ -305,15 +309,19 @@
                 "context_length": 131072
             }
         },
-        "Gemma-4-E2B-Uncensored-GGUF [Q4:2GB|Q8:3.5GB|VRAM:~3GB]": {
-            "author": "ggml-org",
-            "repo_name": "gemma-4-E2B-it-GGUF",
-            "repo_id": "ggml-org/gemma-4-E2B-it-GGUF",
+        "Gemma-4-E2B-Uncensored-GGUF [Q4:3.2GB|Q8:4.7GB|BF16:8.7GB|VRAM:~5GB]": {
+            "author": "bartowski",
+            "repo_name": "google_gemma-4-E2B-it-GGUF",
+            "repo_id": "bartowski/google_gemma-4-E2B-it-GGUF",
             "model_files": [
-                "gemma-4-E2B-it-Q4_K_M.gguf",
-                "gemma-4-E2B-it-Q8_0.gguf",
-                "gemma-4-E2B-it-BF16.gguf"
+                "google_gemma-4-E2B-it-Q4_K_S.gguf",
+                "google_gemma-4-E2B-it-Q8_0.gguf",
+                "google_gemma-4-E2B-it-bf16.gguf"
             ],
+            "local_filenames": {
+                "google_gemma-4-E2B-it-Q8_0.gguf": ["gemma-4-E2B-it-Q8_0.gguf"],
+                "google_gemma-4-E2B-it-bf16.gguf": ["gemma-4-E2B-it-bf16.gguf", "gemma-4-E2B-it-BF16.gguf"]
+            },
             "defaults": {
                 "context_length": 131072
             }

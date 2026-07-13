@@ -425,6 +425,19 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertGreaterEqual(len(gguf_text[text_key].get("model_files") or []), 8)
         self.assertGreaterEqual(len(gguf_vision[vision_key].get("model_files") or []), 8)
 
+    def test_gemma4_e2b_text_catalog_uses_current_hugging_face_files(self):
+        payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
+        entries = [entry for key, entry in (payload.get("Qwen_model") or {}).items() if "Gemma-4-E2B" in key]
+
+        self.assertTrue(entries)
+        for entry in entries:
+            self.assertEqual(entry["repo_id"], "bartowski/google_gemma-4-E2B-it-GGUF")
+            self.assertEqual(entry["model_files"], [
+                "google_gemma-4-E2B-it-Q4_K_S.gguf",
+                "google_gemma-4-E2B-it-Q8_0.gguf",
+                "google_gemma-4-E2B-it-bf16.gguf",
+            ])
+
     def test_qwen3_asr_gguf_catalog_is_removed(self):
         gguf_payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
         vision_catalog = gguf_payload.get("qwenVL_model") or {}

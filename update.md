@@ -1,5 +1,18 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.16 (2026/07/13) — Gemma 4 E2B Catalog Repair
+
+### 2.3.16 Changes
+
+- Replaced stale Gemma 4 E2B GGUF download entries with currently hosted Bartowski Q4_K_S, Q8_0, and BF16 files.
+- Preserved reuse of existing ggml-org Q8_0 and BF16 downloads through local filename aliases.
+
+### 2.3.16 Validation
+
+- Verified the replacement filenames against the live Hugging Face repository API.
+- Added regression coverage for both Gemma 4 E2B text-catalog entries.
+- Full local regression suite passes.
+
 ## Version 2.3.15 (2026/07/12) — Installed GGUF Visibility
 
 ### 2.3.15 Changes
