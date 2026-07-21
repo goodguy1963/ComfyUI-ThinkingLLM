@@ -2437,8 +2437,8 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("RESPONSE", "RAW_TRACE")
+    RETURN_TYPES = ("STRING", "STRING", "IMAGE")
+    RETURN_NAMES = ("RESPONSE", "RAW_TRACE", "MASK_PREVIEW")
     FUNCTION = "process"
     CATEGORY = "ThinkingLLM"
 
@@ -2521,7 +2521,8 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             hf_token=hf_token,
         )
         hf_token = ""
-        return result
+        mask_preview, _ = apply_mask_highlight(image, mask)
+        return (*result, mask_preview)
 
 
 NODE_CLASS_MAPPINGS = {

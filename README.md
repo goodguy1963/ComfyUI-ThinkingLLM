@@ -80,6 +80,10 @@ White mask pixels select the area to analyze. Black pixels preserve surrounding 
 
 ThinkingLLM does not edit the image itself. It examines the masked area and surrounding scene, then generates a positive description of what should appear inside the mask. The downstream diffusion model performs the actual replacement.
 
+#### Previewing the LLM mask view
+
+`ThinkingLLM (Advanced)` and `ThinkingLLM (GGUF Advanced)` return a third output named `MASK_PREVIEW`. Connect it to a ComfyUI **Preview Image** node to inspect the exact highlighted image used for mask-focused analysis. The selected area remains at normal brightness and the surrounding scene is dimmed to 20%. When no mask is connected, the preview returns the original connected image.
+
 Without a custom instruction, the preset infers the most natural background continuation. It describes matching surfaces, perspective, materials, texture, color, lighting, shadows, reflections, and image style while avoiding phrases such as "remove the object" or "erase this area."
 
 Example output:

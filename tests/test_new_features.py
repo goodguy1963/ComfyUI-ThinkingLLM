@@ -1289,6 +1289,15 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
         self.assertEqual(node_cls.RETURN_TYPES, ("STRING", "STRING"))
         self.assertEqual(node_cls.RETURN_NAMES, ("RESPONSE", "RAW_TRACE"))
 
+    def test_advanced_vision_nodes_expose_mask_preview(self):
+        package = load_thinkingllm_loader_subset(["AILab_QwenVL.py", "AILab_QwenVL_GGUF.py"])
+
+        for node_name in ("ThinkingLLM_QwenVL_Advanced", "ThinkingLLM_QwenVL_GGUF_Advanced"):
+            with self.subTest(node_name=node_name):
+                node_cls = package.NODE_CLASS_MAPPINGS[node_name]
+                self.assertEqual(node_cls.RETURN_TYPES, ("STRING", "STRING", "IMAGE"))
+                self.assertEqual(node_cls.RETURN_NAMES, ("RESPONSE", "RAW_TRACE", "MASK_PREVIEW"))
+
     def test_gemma4_audio_node_is_audio_only_and_model_filtered(self):
         node_cls = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py"]).NODE_CLASS_MAPPINGS["ThinkingLLM_Gemma4_Audio_GGUF"]
         input_types = node_cls.INPUT_TYPES()

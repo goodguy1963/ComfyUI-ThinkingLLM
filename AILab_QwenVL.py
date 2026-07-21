@@ -2051,8 +2051,8 @@ class ThinkingLLM_QwenVL_Advanced(QwenVLBase):
             },
         }
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("RESPONSE", "RAW_TRACE")
+    RETURN_TYPES = ("STRING", "STRING", "IMAGE")
+    RETURN_NAMES = ("RESPONSE", "RAW_TRACE", "MASK_PREVIEW")
     FUNCTION = "process"
     CATEGORY = "ThinkingLLM"
 
@@ -2065,7 +2065,8 @@ class ThinkingLLM_QwenVL_Advanced(QwenVLBase):
         key = _make_node_state_key("ThinkingLLM_QwenVL_Advanced", unique_id, extra_pnginfo)
         entry = NODE_PROMPT_STATE.get(key, {})
         raw_trace = entry.get("raw_trace", "") if isinstance(entry, dict) else ""
-        return (result[0], raw_trace)
+        mask_preview, _ = apply_mask_highlight(image, mask)
+        return (result[0], raw_trace, mask_preview)
 
 NODE_CLASS_MAPPINGS = {
     "ThinkingLLM_QwenVL": ThinkingLLM_QwenVL,
