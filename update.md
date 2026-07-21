@@ -1,5 +1,18 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.18 (2026/07/21) - Advanced Mask Preview
+
+### 2.3.18 Changes
+
+- Added a `MASK_PREVIEW` image output to the Hugging Face and GGUF advanced vision nodes.
+- The preview shows selected pixels at normal brightness and surrounding context dimmed to 20%.
+- Simple nodes keep their existing two-output workflow contract.
+- Documented how to connect `MASK_PREVIEW` to a ComfyUI Preview Image node.
+
+### 2.3.18 Validation
+
+- All 98 regression tests pass.
+
 ## Version 2.3.17 (2026/07/21) - Mask-Focused Image Editing
 
 ### 2.3.17 Changes
