@@ -1,5 +1,20 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.17 (2026/07/21) - Mask-Focused Image Editing
+
+### 2.3.17 Changes
+
+- Added optional `MASK` input support to all four ThinkingLLM vision nodes.
+- Kept selected pixels at normal brightness while dimming surrounding context for focused visual analysis.
+- Added shared Hugging Face and GGUF mask preprocessing with mask-aware cache invalidation.
+- Added the `👁️ Remove (Mask Area)` preset for positive background-continuation and replacement prompts.
+- Documented the complete mask-focused object-removal workflow in the README.
+
+### 2.3.17 Validation
+
+- Verified mask resizing, soft-mask blending, alpha preservation, input validation, cache invalidation, and node compatibility.
+- Full local regression suite passes with 97 tests.
+
 ## Version 2.3.16 (2026/07/13) — Gemma 4 E2B Catalog Repair
 
 ### 2.3.16 Changes

@@ -58,6 +58,42 @@ Audio is available through dedicated nodes so the model list stays honest:
 
 The Advanced GGUF node also exposes optional `audio`, but this is for power users. Use the info box before assuming a model can hear audio. Normal Qwen/Qwen-VL models are not audio models.
 
+### Mask-focused image analysis and object removal
+
+The four ThinkingLLM vision nodes accept an optional ComfyUI `MASK` input:
+
+- `ThinkingLLM`
+- `ThinkingLLM (Advanced)`
+- `ThinkingLLM (GGUF)`
+- `ThinkingLLM (GGUF Advanced)`
+
+White mask pixels select the area to analyze. Black pixels preserve surrounding context, and soft mask values create a gradual transition. ThinkingLLM keeps the selected area at normal brightness while dimming everything outside it, helping the vision model focus on the mask without losing the scene's geometry, lighting, or background context.
+
+#### Object-removal workflow
+
+1. Connect the source image to ThinkingLLM's `image` input.
+2. Connect the corresponding mask to its `mask` input.
+3. Select `👁️ Remove (Mask Area)` from `preset_prompt`.
+4. Optionally describe the desired replacement in `custom_prompt`, such as `continue the brick wall` or `fill with matching wooden floor`.
+5. Connect `RESPONSE` to the positive prompt input of your diffusion inpainting workflow.
+6. Send the original image and mask separately to the diffusion model's inpainting inputs.
+
+ThinkingLLM does not edit the image itself. It examines the masked area and surrounding scene, then generates a positive description of what should appear inside the mask. The downstream diffusion model performs the actual replacement.
+
+Without a custom instruction, the preset infers the most natural background continuation. It describes matching surfaces, perspective, materials, texture, color, lighting, shadows, reflections, and image style while avoiding phrases such as "remove the object" or "erase this area."
+
+Example output:
+
+> Continuous warm beige plaster wall with subtle uneven texture, matching the existing perspective, soft window illumination, natural tonal variation, and the floor-edge shadows.
+
+#### Notes and limitations
+
+- Masks apply to still images only, not video input.
+- Mask dimensions are resized automatically to match the image.
+- An empty mask or a mask without an image produces a clear error.
+- Image batches continue to use the first image and first mask.
+- Precise masks with a small amount of surrounding context generally produce the best reconstruction prompt.
+
 ## Nodes
 
 ### Transformers / HF nodes
