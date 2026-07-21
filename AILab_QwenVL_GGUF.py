@@ -51,6 +51,8 @@ from comfy.model_management import throw_exception_if_processing_interrupted
 sys.path.append(str(Path(__file__).parent))
 from AILab_QwenVL import (
     PROMPT_CACHE,
+    MASK_FOCUS_INSTRUCTION,
+    apply_mask_highlight,
     apply_qwen_soft_thinking_directive,
     build_node_input_signature,
     download_hf_file_to_path,
@@ -1907,6 +1909,7 @@ class QwenVLGGUFBase:
         seed,
         keep_model_loaded,
         device,
+        mask=None,
         audio=None,
         audio_file_path="",
         ctx=None,
@@ -1930,7 +1933,10 @@ class QwenVLGGUFBase:
         hf_token="",
     ):
         print(f"[QwenVL GGUF DEBUG] Starting run with seed={seed}")
+        image, mask_hash = apply_mask_highlight(image, mask)
         image_hash = get_image_hash(image)
+        if mask_hash:
+            image_hash = f"{image_hash}:{mask_hash}"
         video_hash = get_video_hash(video)
         audio_hash = _get_audio_hash(audio)
         audio_file_hash = _get_audio_file_hash(audio_file_path)
@@ -2009,6 +2015,8 @@ class QwenVLGGUFBase:
             prompt = f"{custom_prompt.strip()}\n\n{prompt_template}" if prompt_template else custom_prompt.strip()
         else:
             prompt = prompt_template
+        if mask_hash:
+            prompt = f"{prompt}\n\n{MASK_FOCUS_INSTRUCTION}".strip()
 
         print(f"[QwenVL GGUF DEBUG] Final prompt: {prompt[:100]}...")
 
@@ -2153,6 +2161,7 @@ class QwenVLGGUFBase:
                     "preset": preset_prompt,
                     "seed": int(seed),
                     "image_hash": image_hash,
+                    "mask_hash": mask_hash,
                     "video_hash": video_hash
                 }
                 save_prompt_cache()  # Save cache to file
@@ -2203,6 +2212,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             "optional": {
                 "image": ("IMAGE",),
                 "video": ("IMAGE",),
+                "mask": ("MASK",),
                 "audio": ("AUDIO",),
                 "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["audio_file_path"]}),
             },
@@ -2227,6 +2237,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
         seed,
         image=None,
         video=None,
+        mask=None,
         audio=None,
         audio_file_path="",
         unique_id=None,
@@ -2242,6 +2253,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             custom_prompt=custom_prompt,
             image=image,
             video=video,
+            mask=mask,
             frame_count=16,
             audio=audio,
             audio_file_path=audio_file_path,
@@ -2415,6 +2427,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             "optional": {
                 "image": ("IMAGE",),
                 "video": ("IMAGE",),
+                "mask": ("MASK",),
                 "audio": ("AUDIO",),
                 "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["audio_file_path"]}),
             },
@@ -2458,6 +2471,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
         ctx_checkpoints,
         image=None,
         video=None,
+        mask=None,
         audio=None,
         audio_file_path="",
         unique_id=None,
@@ -2475,6 +2489,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             custom_prompt=custom_prompt,
             image=image,
             video=video,
+            mask=mask,
             frame_count=frame_count,
             audio=audio,
             audio_file_path=audio_file_path,

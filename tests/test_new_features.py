@@ -10,6 +10,7 @@ plain shell without ML dependencies.
 import ast
 import base64
 import contextlib
+import hashlib
 import importlib.util
 import inspect
 import io
@@ -25,6 +26,8 @@ import unittest
 import wave
 from pathlib import Path
 from unittest import mock
+
+import torch
 
 
 HERE = Path(__file__).resolve().parent
@@ -154,6 +157,7 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             HF_VL_MODELS={},
             NODE_PROMPT_STATE={},
             PROMPT_CACHE={},
+            MASK_FOCUS_INSTRUCTION="mask focus instruction",
             _make_node_state_key=lambda *args, **kwargs: "node-key",
             _build_workflow_fingerprint=lambda *args, **kwargs: "workflow-fingerprint",
             _default_model_from_config=lambda models, fallback: next(
@@ -165,6 +169,7 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
                 next(iter(models.keys()), fallback),
             ),
             apply_qwen_soft_thinking_directive=lambda *args, **kwargs: None,
+            apply_mask_highlight=lambda image, mask: (image, "mask-hash" if mask is not None else None),
             build_node_input_signature=lambda *args, **kwargs: {},
             download_hf_file_to_path=lambda *args, **kwargs: None,
             ensure_model=lambda *args, **kwargs: None,
@@ -316,6 +321,67 @@ def iter_catalog_display_names() -> list[str]:
             for model_file in repo.get("model_files") or []:
                 names.append(str(Path(model_file).name))
     return names
+
+
+class TestMaskFocusedImageAnalysis(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        function_node = next(
+            node
+            for node in parse_source("AILab_QwenVL.py").body
+            if isinstance(node, ast.FunctionDef) and node.name == "apply_mask_highlight"
+        )
+        namespace = {"hashlib": hashlib, "torch": torch}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[function_node], type_ignores=[])), "AILab_QwenVL.py", "exec"), namespace)
+        cls.apply_mask_highlight = staticmethod(namespace["apply_mask_highlight"])
+
+    def test_mask_dims_rgb_and_preserves_alpha_without_mutating_input(self):
+        image = torch.ones((1, 2, 2, 4), dtype=torch.float32)
+        image[..., 3] = 0.5
+        original = image.clone()
+        mask = torch.tensor([[[1.0, 0.0], [0.5, 1.0]]])
+
+        highlighted, mask_hash = self.apply_mask_highlight(image, mask)
+
+        expected_brightness = torch.tensor([[1.0, 0.2], [0.6, 1.0]])
+        torch.testing.assert_close(highlighted[0, ..., :3], expected_brightness[..., None].expand(-1, -1, 3))
+        torch.testing.assert_close(highlighted[..., 3], original[..., 3])
+        torch.testing.assert_close(image, original)
+        self.assertEqual(len(mask_hash), 16)
+
+    def test_mask_resizes_and_hashes_complete_content(self):
+        image = torch.ones((1, 4, 4, 3), dtype=torch.float32)
+        first_mask = torch.zeros((1, 4, 4), dtype=torch.float32)
+        second_mask = first_mask.clone()
+        first_mask[0, 0, 0] = 1.0
+        second_mask[0, 0, 0] = 1.0
+        second_mask[0, -1, -1] = 1.0
+        small_mask = torch.tensor([[[1.0, 0.0], [0.0, 0.0]]])
+
+        resized, _ = self.apply_mask_highlight(image, small_mask)
+        _, first_hash = self.apply_mask_highlight(image, first_mask)
+        _, second_hash = self.apply_mask_highlight(image, second_mask)
+
+        self.assertEqual(resized.shape, image.shape)
+        self.assertGreater(float(resized[0, 0, 0, 0]), float(resized[0, -1, -1, 0]))
+        self.assertNotEqual(first_hash, second_hash)
+
+    def test_mask_requires_an_image_and_a_nonempty_selection(self):
+        with self.assertRaisesRegex(ValueError, "requires an image"):
+            self.apply_mask_highlight(None, torch.ones((1, 2, 2)))
+        with self.assertRaisesRegex(ValueError, "MASK is empty"):
+            self.apply_mask_highlight(torch.ones((1, 2, 2, 3)), torch.zeros((1, 2, 2)))
+
+    def test_both_backends_apply_the_shared_focus_instruction(self):
+        hf_source = read_source("AILab_QwenVL.py")
+        gguf_source = read_source("AILab_QwenVL_GGUF.py")
+
+        self.assertIn("image, mask_hash = apply_mask_highlight(image, mask)", hf_source)
+        self.assertIn("image, mask_hash = apply_mask_highlight(image, mask)", gguf_source)
+        self.assertIn('image_hash = f"{image_hash}:{mask_hash}"', hf_source)
+        self.assertIn('image_hash = f"{image_hash}:{mask_hash}"', gguf_source)
+        self.assertIn('prompt = f"{prompt}\\n\\n{MASK_FOCUS_INSTRUCTION}".strip()', hf_source)
+        self.assertIn('prompt = f"{prompt}\\n\\n{MASK_FOCUS_INSTRUCTION}".strip()', gguf_source)
 
 
 class TestTerminalDisplayHelper(unittest.TestCase):
@@ -1151,11 +1217,11 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
             "AILab_WhisperASR.py",
         ])
         expected_optional_inputs = {
-            "ThinkingLLM_QwenVL": {"image", "video"},
-            "ThinkingLLM_QwenVL_Advanced": {"image", "video"},
+            "ThinkingLLM_QwenVL": {"image", "video", "mask"},
+            "ThinkingLLM_QwenVL_Advanced": {"image", "video", "mask"},
             "ThinkingLLM_QwenVL_PromptEnhancer": set(),
-            "ThinkingLLM_QwenVL_GGUF": {"image", "video", "audio", "audio_file_path"},
-            "ThinkingLLM_QwenVL_GGUF_Advanced": {"image", "video", "audio", "audio_file_path"},
+            "ThinkingLLM_QwenVL_GGUF": {"image", "video", "mask", "audio", "audio_file_path"},
+            "ThinkingLLM_QwenVL_GGUF_Advanced": {"image", "video", "mask", "audio", "audio_file_path"},
             "ThinkingLLM_Gemma4_Audio_GGUF": {"audio", "audio_file_path"},
             "ThinkingLLM_Whisper_ASR": {"audio", "audio_file_path"},
             "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": set(),

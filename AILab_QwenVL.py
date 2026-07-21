@@ -88,6 +88,11 @@ _QWEN_SOFT_SWITCHES = {"/think", "/no_think", "/nothink"}
 _STREAM_HEARTBEAT_INTERVAL_SECONDS = 3.0
 _DOWNLOAD_STATUS_INTERVAL_SECONDS = 0.25
 _HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
+MASK_FOCUS_INSTRUCTION = (
+    "The image has a mask highlight: the selected area is shown at normal brightness and the surrounding "
+    "context is dimmed. Analyze and describe only the normal-brightness selected area. Use the dimmed "
+    "surroundings only for spatial context and do not describe them."
+)
 
 
 def _format_download_size(num_bytes) -> str:
@@ -611,6 +616,54 @@ def get_image_hash(image):
     except:
         return None
 
+
+def apply_mask_highlight(image, mask):
+    """Dim pixels outside the first ComfyUI mask while preserving image shape and alpha."""
+    if mask is None:
+        return image, None
+    if image is None:
+        raise ValueError("[QwenVL] A mask requires an image input.")
+    if not torch.is_tensor(image) or image.ndim not in (3, 4):
+        raise ValueError("[QwenVL] IMAGE must have shape [H,W,C] or [B,H,W,C].")
+    if not torch.is_tensor(mask):
+        raise ValueError("[QwenVL] MASK must be a tensor.")
+
+    if mask.ndim == 2:
+        selected_mask = mask
+    elif mask.ndim == 3:
+        selected_mask = mask[0]
+    else:
+        raise ValueError("[QwenVL] MASK must have shape [H,W] or [B,H,W].")
+
+    selected_mask = selected_mask.detach().float().clamp(0.0, 1.0)
+    if not torch.isfinite(selected_mask).all():
+        raise ValueError("[QwenVL] MASK contains non-finite values.")
+    if not torch.any(selected_mask > 0):
+        raise ValueError("[QwenVL] MASK is empty; select at least one pixel.")
+
+    frame = image[0] if image.ndim == 4 else image
+    resized_mask = torch.nn.functional.interpolate(
+        selected_mask[None, None],
+        size=frame.shape[:2],
+        mode="bilinear",
+        align_corners=False,
+    )[0, 0].to(device=frame.device, dtype=frame.dtype)
+    brightness = 0.2 + 0.8 * resized_mask
+
+    highlighted_frame = frame.clone()
+    color_channels = min(int(frame.shape[-1]), 3)
+    highlighted_frame[..., :color_channels] *= brightness.unsqueeze(-1)
+    highlighted = image.clone()
+    if image.ndim == 4:
+        highlighted[0] = highlighted_frame
+    else:
+        highlighted = highlighted_frame
+
+    digest = hashlib.md5()
+    digest.update(str(tuple(mask.shape)).encode("ascii"))
+    digest.update(mask.detach().contiguous().cpu().numpy().tobytes())
+    return highlighted, digest.hexdigest()[:16]
+
 def get_video_hash(video):
     """Generate hash for video tensor (same as image)"""
     return get_image_hash(video)
@@ -628,7 +681,7 @@ __all__ = [
     'PROMPT_CACHE', 'NODE_PROMPT_STATE',
     'get_cache_key', 'get_alternative_cache_key',
     'save_prompt_cache',
-    'get_image_hash', 'get_video_hash',
+    'get_image_hash', 'get_video_hash', 'apply_mask_highlight', 'MASK_FOCUS_INSTRUCTION',
     'check_pytorch_memory', 'set_pytorch_memory_fraction',
     'get_device_info', 'tensor_to_pil', 'enforce_memory',
     'quantization_config', 'ensure_model', 'resolve_attention_mode',
@@ -1788,9 +1841,12 @@ class QwenVLBase:
         cleaned_text = raw_text  # generate() returns raw; caller cleans if needed
         return cleaned_text, raw_text
 
-    def run(self, model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt=False, unique_id=None, extra_pnginfo=None, node_class="QwenVL", stream_to_terminal=False, enable_thinking=True, hf_token: str | None = None):
+    def run(self, model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt=False, unique_id=None, extra_pnginfo=None, node_class="QwenVL", stream_to_terminal=False, enable_thinking=True, hf_token: str | None = None, mask=None):
         torch.manual_seed(seed)
+        image, mask_hash = apply_mask_highlight(image, mask)
         image_hash = get_image_hash(image)
+        if mask_hash:
+            image_hash = f"{image_hash}:{mask_hash}"
         video_hash = get_video_hash(video)
         input_signature = build_node_input_signature(
             model_name=model_name,
@@ -1847,6 +1903,8 @@ class QwenVLBase:
             prompt = f"{custom_prompt.strip()}\n\n{prompt_template}" if prompt_template else custom_prompt.strip()
         else:
             prompt = prompt_template
+        if mask_hash:
+            prompt = f"{prompt}\n\n{MASK_FOCUS_INSTRUCTION}".strip()
             
         self.load_model(
             model_name,
@@ -1883,6 +1941,7 @@ class QwenVLBase:
                 "preset": preset_prompt,
                 "seed": seed,
                 "image_hash": image_hash,
+                "mask_hash": mask_hash,
                 "video_hash": video_hash
             }
             save_prompt_cache()  # Save cache to file
@@ -1923,6 +1982,7 @@ class ThinkingLLM_QwenVL(QwenVLBase):
             "optional": {
                 "image": ("IMAGE",),
                 "video": ("IMAGE",),
+                "mask": ("MASK",),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -1935,10 +1995,10 @@ class ThinkingLLM_QwenVL(QwenVLBase):
     FUNCTION = "process"
     CATEGORY = "ThinkingLLM"
 
-    def process(self, model_name, preset_prompt, custom_prompt, attention_mode, max_tokens, keep_model_loaded, seed, keep_last_prompt=False, image=None, video=None, unique_id=None, extra_pnginfo=None, stream_tokens_to_terminal=False, enable_thinking=True, hf_token=""):
+    def process(self, model_name, preset_prompt, custom_prompt, attention_mode, max_tokens, keep_model_loaded, seed, keep_last_prompt=False, image=None, video=None, mask=None, unique_id=None, extra_pnginfo=None, stream_tokens_to_terminal=False, enable_thinking=True, hf_token=""):
         # Always use FP16 - dropdown removed but keep working logic
         quantization = Quantization.FP16.value
-        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, 16, max_tokens, 0.6, 0.9, 1, 1.2, seed, keep_model_loaded, attention_mode, False, "auto", keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="ThinkingLLM_QwenVL", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking, hf_token=hf_token)
+        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, 16, max_tokens, 0.6, 0.9, 1, 1.2, seed, keep_model_loaded, attention_mode, False, "auto", keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="ThinkingLLM_QwenVL", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking, hf_token=hf_token, mask=mask)
         hf_token = ""
         # Retrieve the raw_trace that was saved alongside the cleaned prompt in run()
         key = _make_node_state_key("ThinkingLLM_QwenVL", unique_id, extra_pnginfo)
@@ -1983,6 +2043,7 @@ class ThinkingLLM_QwenVL_Advanced(QwenVLBase):
             "optional": {
                 "image": ("IMAGE",),
                 "video": ("IMAGE",),
+                "mask": ("MASK",),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -1995,10 +2056,10 @@ class ThinkingLLM_QwenVL_Advanced(QwenVLBase):
     FUNCTION = "process"
     CATEGORY = "ThinkingLLM"
 
-    def process(self, model_name, attention_mode, use_torch_compile, device, preset_prompt, custom_prompt, max_tokens, temperature, top_p, num_beams, repetition_penalty, frame_count, keep_model_loaded, seed, keep_last_prompt, image=None, video=None, unique_id=None, extra_pnginfo=None, stream_tokens_to_terminal=False, enable_thinking=True, hf_token=""):
+    def process(self, model_name, attention_mode, use_torch_compile, device, preset_prompt, custom_prompt, max_tokens, temperature, top_p, num_beams, repetition_penalty, frame_count, keep_model_loaded, seed, keep_last_prompt, image=None, video=None, mask=None, unique_id=None, extra_pnginfo=None, stream_tokens_to_terminal=False, enable_thinking=True, hf_token=""):
         # Always use FP16 - dropdown removed but keep working logic
         quantization = Quantization.FP16.value
-        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="ThinkingLLM_QwenVL_Advanced", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking, hf_token=hf_token)
+        result = self.run(model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt, unique_id=unique_id, extra_pnginfo=extra_pnginfo, node_class="ThinkingLLM_QwenVL_Advanced", stream_to_terminal=stream_tokens_to_terminal, enable_thinking=enable_thinking, hf_token=hf_token, mask=mask)
         hf_token = ""
         # Read back raw_trace from just-saved per-node state
         key = _make_node_state_key("ThinkingLLM_QwenVL_Advanced", unique_id, extra_pnginfo)
