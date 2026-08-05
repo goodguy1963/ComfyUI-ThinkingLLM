@@ -1,5 +1,18 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.19 (2026/08/06) - MiniMax H3 Prompt Preset
+
+### 2.3.19 Changes
+
+- Added `🎬 MiniMax H3 Multimodal Video` to vision and text-only prompt nodes.
+- Added the official T2VA, I2VA, FL2VA, L2VA, and full-reference output structures, including native audio fields and reference-retention analysis.
+- Documented the preset and linked the official MiniMax H3 prompt guides.
+
+### 2.3.19 Validation
+
+- Added regression coverage for preset availability, required H3 fields, and node dropdown exposure.
+- Kept browser tooltip previews synchronized with the preset source.
+
 ## Version 2.3.18 (2026/07/21) - Advanced Mask Preview
 
 ### 2.3.18 Changes
