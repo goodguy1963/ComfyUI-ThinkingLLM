@@ -5,6 +5,7 @@
             "author": "mradermacher",
             "repo_name": "Qwen3-4B-abliterated-GGUF",
             "repo_id": "mradermacher/Qwen3-4B-abliterated-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3-4B-abliterated.Q4_K_M.gguf",
                 "Qwen3-4B-abliterated.Q5_K_M.gguf",
@@ -20,6 +21,7 @@
             "author": "mradermacher",
             "repo_name": "Josiefied-Qwen3-4B-abliterated-v1-GGUF",
             "repo_id": "mradermacher/Josiefied-Qwen3-4B-abliterated-v1-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Josiefied-Qwen3-4B-abliterated-v1.Q4_K_M.gguf",
                 "Josiefied-Qwen3-4B-abliterated-v1.Q5_K_M.gguf",
@@ -35,6 +37,7 @@
             "author": "mradermacher",
             "repo_name": "Josiefied-Qwen3-8B-abliterated-v1-GGUF",
             "repo_id": "mradermacher/Josiefied-Qwen3-8B-abliterated-v1-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Josiefied-Qwen3-8B-abliterated-v1.Q4_K_M.gguf",
                 "Josiefied-Qwen3-8B-abliterated-v1.Q5_K_M.gguf",
@@ -50,6 +53,7 @@
             "author": "mradermacher",
             "repo_name": "Qwen3-VL-4B-Instruct-c_abliterated-v2-GGUF",
             "repo_id": "mradermacher/Qwen3-VL-4B-Instruct-c_abliterated-v2-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3-VL-4B-Instruct-c_abliterated-v2.Q4_K_M.gguf",
                 "Qwen3-VL-4B-Instruct-c_abliterated-v2.Q5_K_M.gguf",
@@ -65,6 +69,7 @@
             "author": "mradermacher",
             "repo_name": "Qwen3-VL-8B-Instruct-c_abliterated-v3-GGUF",
             "repo_id": "mradermacher/Qwen3-VL-8B-Instruct-c_abliterated-v3-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3-VL-8B-Instruct-c_abliterated-v3.Q4_K_M.gguf",
                 "Qwen3-VL-8B-Instruct-c_abliterated-v3.Q5_K_M.gguf",
@@ -80,6 +85,7 @@
             "author": "DevQuasar",
             "repo_name": "Josiefied-Qwen3-4B-Instruct-2507-gabliterated-v1-GGUF",
             "repo_id": "DevQuasar/Goekdeniz-Guelmez.Josiefied-Qwen3-4B-Instruct-2507-gabliterated-v1-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Goekdeniz-Guelmez.Josiefied-Qwen3-4B-Instruct-2507-gabliterated-v1.Q4_K_M.gguf",
                 "Goekdeniz-Guelmez.Josiefied-Qwen3-4B-Instruct-2507-gabliterated-v1.Q5_K_M.gguf",
@@ -95,6 +101,7 @@
             "author": "Qwen",
             "repo_name": "Qwen3-4B-GGUF",
             "repo_id": "Qwen/Qwen3-4B-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3-4B-Q4_K_M.gguf",
                 "Qwen3-4B-Q5_K_M.gguf",
@@ -109,6 +116,7 @@
             "author": "unsloth",
             "repo_name": "Qwen3.5-4B-GGUF",
             "repo_id": "unsloth/Qwen3.5-4B-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3.5-4B-Q4_K_M.gguf",
                 "Qwen3.5-4B-Q6_K.gguf",
@@ -123,6 +131,7 @@
             "author": "unsloth",
             "repo_name": "Qwen3.5-9B-GGUF",
             "repo_id": "unsloth/Qwen3.5-9B-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3.5-9B-Q4_K_M.gguf",
                 "Qwen3.5-9B-Q6_K.gguf",
@@ -137,6 +146,7 @@
             "author": "unsloth",
             "repo_name": "Qwen3.5-27B-GGUF",
             "repo_id": "unsloth/Qwen3.5-27B-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3.5-27B-Q4_K_M.gguf",
                 "Qwen3.5-27B-Q5_K_M.gguf",
@@ -151,6 +161,7 @@
             "author": "HauhauCS",
             "repo_name": "Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-GGUF",
             "repo_id": "HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
                 "Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf",
@@ -165,6 +176,7 @@
             "author": "HauhauCS",
             "repo_name": "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-GGUF",
             "repo_id": "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
                 "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf",
@@ -179,6 +191,7 @@
             "author": "HauhauCS",
             "repo_name": "Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-GGUF",
             "repo_id": "HauhauCS/Qwen3.5-27B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
                 "Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-Q6_K.gguf",
@@ -193,6 +206,7 @@
             "author": "HauhauCS",
             "repo_name": "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive",
             "repo_id": "HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf",
                 "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q6_K_P.gguf",
@@ -214,6 +228,7 @@
             "author": "bartowski",
             "repo_name": "google_gemma-4-E2B-it-GGUF",
             "repo_id": "bartowski/google_gemma-4-E2B-it-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "google_gemma-4-E2B-it-Q4_K_S.gguf",
                 "google_gemma-4-E2B-it-Q8_0.gguf",
@@ -231,6 +246,7 @@
             "author": "unsloth",
             "repo_name": "gemma-4-E4B-it-GGUF",
             "repo_id": "unsloth/gemma-4-E4B-it-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "gemma-4-E4B-it-Q4_K_M.gguf",
                 "gemma-4-E4B-it-Q6_K.gguf",
@@ -245,6 +261,7 @@
             "author": "unsloth",
             "repo_name": "gemma-4-26B-A4B-it-GGUF",
             "repo_id": "unsloth/gemma-4-26B-A4B-it-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "gemma-4-26B-A4B-it-Q4_K_M.gguf",
                 "gemma-4-26B-A4B-it-Q6_K.gguf",
@@ -259,6 +276,7 @@
             "author": "unsloth",
             "repo_name": "gemma-4-12b-it-GGUF",
             "repo_id": "unsloth/gemma-4-12b-it-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "gemma-4-12b-it-Q4_K_M.gguf",
                 "gemma-4-12b-it-Q4_K_S.gguf",
@@ -277,6 +295,7 @@
             "author": "unsloth",
             "repo_name": "gemma-4-31B-it-GGUF",
             "repo_id": "unsloth/gemma-4-31B-it-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "gemma-4-31B-it-Q4_K_M.gguf",
                 "gemma-4-31B-it-Q6_K.gguf",
@@ -291,6 +310,7 @@
             "author": "bartowski",
             "repo_name": "google_gemma-4-E4B-it-GGUF",
             "repo_id": "bartowski/google_gemma-4-E4B-it-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "google_gemma-4-E4B-it-Q4_K_M.gguf",
                 "google_gemma-4-E4B-it-Q5_K_M.gguf",
@@ -313,6 +333,7 @@
             "author": "bartowski",
             "repo_name": "google_gemma-4-E2B-it-GGUF",
             "repo_id": "bartowski/google_gemma-4-E2B-it-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "google_gemma-4-E2B-it-Q4_K_S.gguf",
                 "google_gemma-4-E2B-it-Q8_0.gguf",
@@ -332,6 +353,7 @@
             "author": "HauhauCS",
             "repo_name": "Qwen3.5-4B-Uncensored-HauhauCS-Aggressive",
             "repo_id": "HauhauCS/Qwen3.5-4B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-BF16.gguf",
             "model_files": [
                 "Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
@@ -352,6 +374,7 @@
             "author": "HauhauCS",
             "repo_name": "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive",
             "repo_id": "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-BF16.gguf",
             "model_files": [
                 "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
@@ -372,6 +395,7 @@
             "author": "HauhauCS",
             "repo_name": "Qwen3.5-27B-Uncensored-HauhauCS-Aggressive",
             "repo_id": "HauhauCS/Qwen3.5-27B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-f16.gguf",
             "model_files": [
                 "Qwen3.5-27B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
@@ -392,6 +416,7 @@
             "author": "HauhauCS",
             "repo_name": "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive",
             "repo_id": "HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-f16.gguf",
             "model_files": [
                 "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf",
@@ -419,6 +444,7 @@
             "author": "unsloth",
             "repo_name": "Qwen3.5-4B-GGUF",
             "repo_id": "unsloth/Qwen3.5-4B-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-BF16.gguf",
             "model_files": [
                 "Qwen3.5-4B-Q4_K_M.gguf",
@@ -439,6 +465,7 @@
             "author": "unsloth",
             "repo_name": "Qwen3.5-9B-GGUF",
             "repo_id": "unsloth/Qwen3.5-9B-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-F32.gguf",
             "model_files": [
                 "Qwen3.5-9B-Q4_K_M.gguf",
@@ -459,6 +486,7 @@
             "author": "unsloth",
             "repo_name": "Qwen3.5-27B-GGUF",
             "repo_id": "unsloth/Qwen3.5-27B-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-F32.gguf",
             "model_files": [
                 "Qwen3.5-27B-Q4_K_M.gguf",
@@ -479,6 +507,7 @@
             "author": "unsloth",
             "repo_name": "gemma-4-12b-it-GGUF",
             "repo_id": "unsloth/gemma-4-12b-it-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-F16.gguf",
             "model_files": [
                 "gemma-4-12b-it-Q4_K_M.gguf",
@@ -503,6 +532,7 @@
             "author": "bartowski",
             "repo_name": "google_gemma-4-E4B-it-GGUF",
             "repo_id": "bartowski/google_gemma-4-E4B-it-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-google_gemma-4-E4B-it-f16.gguf",
             "model_files": [
                 "google_gemma-4-E4B-it-Q4_K_M.gguf",
@@ -534,6 +564,7 @@
             "author": "mradermacher",
             "repo_name": "Qwen3-VL-4B-Instruct-c_abliterated-v2-GGUF",
             "repo_id": "mradermacher/Qwen3-VL-4B-Instruct-c_abliterated-v2-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "Qwen3-VL-4B-Instruct-c_abliterated-v2.mmproj-f16.gguf",
             "model_files": [
                 "Qwen3-VL-4B-Instruct-c_abliterated-v2.Q4_K_M.gguf",
@@ -555,6 +586,7 @@
             "author": "mradermacher",
             "repo_name": "Qwen3-VL-8B-Instruct-c_abliterated-v3-GGUF",
             "repo_id": "mradermacher/Qwen3-VL-8B-Instruct-c_abliterated-v3-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "Qwen3-VL-8B-Instruct-c_abliterated-v3.mmproj-f16.gguf",
             "model_files": [
                 "Qwen3-VL-8B-Instruct-c_abliterated-v3.Q4_K_M.gguf",
@@ -576,6 +608,7 @@
             "author": "mradermacher",
             "repo_name": "Qwen3-VL-32B-Heretic-v2-GGUF",
             "repo_id": "mradermacher/Qwen3-VL-32B-Heretic-v2-GGUF",
+            "commercial_status": "unclear",
             "model_files": [
                 "Qwen3-VL-32B-Heretic-v2.Q4_K_M.gguf",
                 "Qwen3-VL-32B-Heretic-v2.Q5_K_M.gguf",
@@ -595,6 +628,7 @@
             "author": "Qwen",
             "repo_name": "Qwen3-VL-4B-Instruct-GGUF",
             "repo_id": "Qwen/Qwen3-VL-4B-Instruct-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-Qwen3VL-4B-Instruct-F16.gguf",
             "model_files": [
                 "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
@@ -614,6 +648,7 @@
             "author": "Qwen",
             "repo_name": "Qwen3-VL-8B-Instruct-GGUF",
             "repo_id": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
             "model_files": [
                 "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
@@ -633,6 +668,7 @@
             "author": "Qwen",
             "repo_name": "Qwen3-VL-4B-Thinking-GGUF",
             "repo_id": "Qwen/Qwen3-VL-4B-Thinking-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-Qwen3VL-4B-Thinking-F16.gguf",
             "model_files": [
                 "Qwen3VL-4B-Thinking-Q4_K_M.gguf",
@@ -652,6 +688,7 @@
             "author": "Qwen",
             "repo_name": "Qwen3-VL-8B-Thinking-GGUF",
             "repo_id": "Qwen/Qwen3-VL-8B-Thinking-GGUF",
+            "commercial_status": "unclear",
             "mmproj_file": "mmproj-Qwen3VL-8B-Thinking-F16.gguf",
             "model_files": [
                 "Qwen3VL-8B-Thinking-Q4_K_M.gguf",

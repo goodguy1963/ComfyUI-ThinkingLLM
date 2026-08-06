@@ -1,0 +1,24 @@
+{
+  "hf_vl_models": {
+    "Qwen3-VL-4B-Instruct (locked commercial model)": {
+      "repo_id": "Qwen/Qwen3-VL-4B-Instruct",
+      "commercial_status": "cleared",
+      "revision": "ebb281ec70b05090aa6165b016eac8ec08e71b17",
+      "component_id": "MODEL-014",
+      "default": true,
+      "quantized": false,
+      "vram_requirement": {"full": 9.0}
+    }
+  },
+  "hf_text_models": {
+    "Qwen3-4B-Instruct-2507 (locked commercial model)": {
+      "repo_id": "Qwen/Qwen3-4B-Instruct-2507",
+      "commercial_status": "cleared",
+      "revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+      "component_id": "MODEL-006",
+      "default": true,
+      "quantized": false,
+      "vram_requirement": {"full": 9.0}
+    }
+  }
+}

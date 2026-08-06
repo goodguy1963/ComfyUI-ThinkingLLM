@@ -1,7 +1,17 @@
 {
     "hf_vl_models": {
+        "Qwen3-VL-4B-Instruct (locked commercial model)": {
+            "repo_id": "Qwen/Qwen3-VL-4B-Instruct",
+            "commercial_status": "cleared",
+            "revision": "ebb281ec70b05090aa6165b016eac8ec08e71b17",
+            "component_id": "MODEL-014",
+            "default": false,
+            "quantized": false,
+            "vram_requirement": {"full": 9.0}
+        },
         "Qwen3.5-4B-heretic-v2 [DL: 7.5GB, VRAM: 9.0GB]": {
             "repo_id": "tvall43/Qwen3.5-4B-heretic-v2",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -10,6 +20,7 @@
         },
         "Qwen3.5-9B-ultra-uncensored-heretic-v2 [DL: 17GB, VRAM: 19.0GB]": {
             "repo_id": "llmfan46/Qwen3.5-9B-ultra-uncensored-heretic-v2",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -18,6 +29,7 @@
         },
         "Qwen3.5-4B [DL: 7.5GB, VRAM: 9.0GB]": {
             "repo_id": "Qwen/Qwen3.5-4B",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -26,6 +38,7 @@
         },
         "Qwen3.5-9B [DL: 17GB, VRAM: 19.0GB]": {
             "repo_id": "Qwen/Qwen3.5-9B",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -34,6 +47,7 @@
         },
         "Qwen3-VL-4B-Instruct-Abliterated [DL: 7.5GB, VRAM: 6.0GB]": {
             "repo_id": "huihui-ai/Huihui-Qwen3-VL-4B-Instruct-abliterated",
+            "commercial_status": "unclear",
             "default": true,
             "quantized": true,
             "vram_requirement": {
@@ -44,6 +58,7 @@
         },
         "Qwen3-VL-8B-Instruct-Abliterated [DL: 15GB, VRAM: 12.0GB]": {
             "repo_id": "huihui-ai/Huihui-Qwen3-VL-8B-Instruct-abliterated",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": true,
             "vram_requirement": {
@@ -54,6 +69,7 @@
         },
         "Qwen3-VL-4B-Instruct-Unredacted-MAX [DL: 7.5GB, VRAM: 6.0GB]": {
             "repo_id": "prithivMLmods/Qwen3-VL-4B-Instruct-Unredacted-MAX",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -64,6 +80,7 @@
         },
         "Qwen3-VL-8B-Instruct-Unredacted-MAX [DL: 15GB, VRAM: 12.0GB]": {
             "repo_id": "prithivMLmods/Qwen3-VL-8B-Instruct-Unredacted-MAX",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -74,6 +91,7 @@
         },
         "Qwen3-VL-8B-Instruct-abliterated-v1 [DL: 15GB, VRAM: 12.0GB]": {
             "repo_id": "prithivMLmods/Qwen3-VL-8B-Instruct-abliterated-v1",
+            "commercial_status": "external_gated",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -84,6 +102,7 @@
         },
         "Qwen3-VL-4B-Instruct-abliterated-v1 [DL: 7.5GB, VRAM: 6.0GB]": {
             "repo_id": "prithivMLmods/Qwen3-VL-4B-Instruct-abliterated-v1",
+            "commercial_status": "external_gated",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -94,6 +113,7 @@
         },
         "Qwen3-VL-32B-Heretic-v2 [DL: 60GB, VRAM: 48.0GB]": {
             "repo_id": "rpDungeon/Qwen3-VL-32B-Heretic-v2",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -104,6 +124,7 @@
         },
         "Gemma-4-26B-A4B-it [DL: 51.6GB, VRAM: 42.0GB]": {
             "repo_id": "google/gemma-4-26B-A4B-it",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -114,6 +135,7 @@
         },
         "Gemma-4-E4B-it [DL: 16GB, VRAM: 7.0GB]": {
             "repo_id": "google/gemma-4-E4B-it",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -124,6 +146,7 @@
         },
         "Gemma-4-E2B-it [DL: 10.3GB, VRAM: 4.0GB]": {
             "repo_id": "google/gemma-4-E2B-it",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -134,6 +157,7 @@
         },
         "Gemma-4-31B-it [DL: 62.6GB, VRAM: 48.0GB]": {
             "repo_id": "google/gemma-4-31B-it",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -144,6 +168,7 @@
         },
         "Gemma-4-12B [DL: 24GB, VRAM: 24.0GB]": {
             "repo_id": "google/gemma-4-12B",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -154,6 +179,7 @@
         },
         "Gemma-4-E4B-Uncensored [DL: 16GB, VRAM: 7.0GB]": {
             "repo_id": "prithivMLmods/gemma-4-E4B-it-Uncensored-MAX",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -164,6 +190,7 @@
         },
         "Gemma-4-E2B-Uncensored [DL: 10.3GB, VRAM: 4.0GB]": {
             "repo_id": "prithivMLmods/gemma-4-E2B-it-Uncensored-MAX",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -174,6 +201,7 @@
         },
         "Gemma-4-26B-A4B-Heretic [DL: 51.6GB, VRAM: 42.0GB]": {
             "repo_id": "coder3101/gemma-4-26B-A4B-it-heretic",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -184,6 +212,7 @@
         },
         "Gemma-4-E4B-Uncensored-Aggressive [DL: 16GB, VRAM: 7.0GB]": {
             "repo_id": "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -194,6 +223,7 @@
         },
         "Gemma-4-E2B-Uncensored-Aggressive [DL: 10.3GB, VRAM: 4.0GB]": {
             "repo_id": "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -204,8 +234,18 @@
         }
     },
     "hf_text_models": {
+        "Qwen3-4B-Instruct-2507 (locked commercial model)": {
+            "repo_id": "Qwen/Qwen3-4B-Instruct-2507",
+            "commercial_status": "cleared",
+            "revision": "cdbee75f17c01a7cc42f958dc650907174af0554",
+            "component_id": "MODEL-006",
+            "default": false,
+            "quantized": false,
+            "vram_requirement": {"full": 9.0}
+        },
         "Qwen3-VL-4B-Instruct-Abliterated [DL: 7.5GB, VRAM: 6.0GB]": {
             "repo_id": "huihui-ai/Huihui-Qwen3-VL-4B-Instruct-abliterated",
+            "commercial_status": "unclear",
             "default": true,
             "quantized": true,
             "vram_requirement": {
@@ -216,6 +256,7 @@
         },
         "Qwen3-VL-8B-Instruct-Abliterated [DL: 15GB, VRAM: 12.0GB]": {
             "repo_id": "huihui-ai/Huihui-Qwen3-VL-8B-Instruct-abliterated",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": true,
             "vram_requirement": {
@@ -226,6 +267,7 @@
         },
         "qwen3-4b-Z-Image-Engineer [DL: 7.5GB, VRAM: 9.0GB]": {
             "repo_id": "BennyDaBall/qwen3-4b-Z-Image-Engineer",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -234,6 +276,7 @@
         },
         "Qwen3.5-4B-heretic-v2 [DL: 7.5GB, VRAM: 8.0GB]": {
             "repo_id": "tvall43/Qwen3.5-4B-heretic-v2",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -242,6 +285,7 @@
         },
         "Qwen3.5-9B-ultra-uncensored-heretic-v2 [DL: 17GB, VRAM: 18.0GB]": {
             "repo_id": "llmfan46/Qwen3.5-9B-ultra-uncensored-heretic-v2",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -250,6 +294,7 @@
         },
         "Qwen3.5-4B [DL: 7.5GB, VRAM: 8.0GB]": {
             "repo_id": "Qwen/Qwen3.5-4B",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -258,6 +303,7 @@
         },
         "Qwen3.5-9B [DL: 17GB, VRAM: 18.0GB]": {
             "repo_id": "Qwen/Qwen3.5-9B",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -266,6 +312,7 @@
         },
         "Gemma-4-26B-A4B-it [DL: 51.6GB, VRAM: 42.0GB]": {
             "repo_id": "google/gemma-4-26B-A4B-it",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -276,6 +323,7 @@
         },
         "Gemma-4-E4B-it [DL: 16GB, VRAM: 7.0GB]": {
             "repo_id": "google/gemma-4-E4B-it",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -286,6 +334,7 @@
         },
         "Gemma-4-E2B-it [DL: 10.3GB, VRAM: 4.0GB]": {
             "repo_id": "google/gemma-4-E2B-it",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -296,6 +345,7 @@
         },
         "Gemma-4-31B-it [DL: 62.6GB, VRAM: 48.0GB]": {
             "repo_id": "google/gemma-4-31B-it",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -306,6 +356,7 @@
         },
         "Gemma-4-12B [DL: 24GB, VRAM: 24.0GB]": {
             "repo_id": "google/gemma-4-12B",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -316,6 +367,7 @@
         },
         "Gemma-4-E4B-Uncensored [DL: 16GB, VRAM: 7.0GB]": {
             "repo_id": "prithivMLmods/gemma-4-E4B-it-Uncensored-MAX",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -326,6 +378,7 @@
         },
         "Gemma-4-E2B-Uncensored [DL: 10.3GB, VRAM: 4.0GB]": {
             "repo_id": "prithivMLmods/gemma-4-E2B-it-Uncensored-MAX",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -336,6 +389,7 @@
         },
         "Gemma-4-26B-A4B-Heretic [DL: 51.6GB, VRAM: 42.0GB]": {
             "repo_id": "coder3101/gemma-4-26B-A4B-it-heretic",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -346,6 +400,7 @@
         },
         "Gemma-4-E4B-Uncensored-Aggressive [DL: 16GB, VRAM: 7.0GB]": {
             "repo_id": "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {
@@ -356,6 +411,7 @@
         },
         "Gemma-4-E2B-Uncensored-Aggressive [DL: 10.3GB, VRAM: 4.0GB]": {
             "repo_id": "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
             "default": false,
             "quantized": false,
             "vram_requirement": {

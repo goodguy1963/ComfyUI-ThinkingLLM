@@ -62,6 +62,11 @@ from AILab_QwenVL import (
     get_alternative_cache_key,
     get_image_hash,
     get_video_hash,
+    log_llm_input,
+    model_catalog_options,
+    normalize_commercial_status,
+    resolve_model_catalog_name,
+    enforce_model_access,
     save_prompt_cache,
     get_node_saved_prompt,
     get_node_saved_prompt_with_seed,
@@ -331,6 +336,7 @@ class GGUFVLResolved:
     gpu_layers: int
     top_k: int
     pool_size: int
+    commercial_status: str = "unclear"
     local_filenames: list[str] = field(default_factory=list)
     mmproj_local_filenames: list[str] = field(default_factory=list)
 
@@ -448,6 +454,7 @@ def _scan_local_gguf_models(base_dir: Path, existing_filenames: set[str]) -> dic
                 "filename": str(model_file),
                 "mmproj_filename": str(mmproj_path) if mmproj_path else None,
                 "is_local": True,
+                "commercial_status": "local",
                 "repo_id": None,
                 "alt_repo_ids": [],
                 "author": None,
@@ -509,6 +516,7 @@ def _load_gguf_vl_catalog():
             resolved_mmproj_file = mmproj_files.get(model_file) or mmproj_file
             flattened[display] = {
                 **defaults,
+                "commercial_status": repo.get("commercial_status", "unclear"),
                 "author": author,
                 "repo_dirname": repo_name,
                 "repo_id": repo_id,
@@ -545,6 +553,7 @@ def _load_gguf_vl_catalog():
                     resolved_mmproj_file = mmproj_files.get(model_file) or mmproj_file
                     flattened[display] = {
                         **defaults,
+                        "commercial_status": entry.get("commercial_status", "unclear"),
                         "author": author,
                         "repo_dirname": repo_name,
                         "repo_id": repo_id,
@@ -628,12 +637,10 @@ def _is_gemma4_audio_model_name(model_name: str) -> bool:
 
 def _gguf_audio_model_keys() -> list[str]:
     all_models = GGUF_VL_CATALOG.get("models") or {}
-    keys = [
-        key
-        for key, entry in all_models.items()
-        if (entry or {}).get("mmproj_filename") and _is_gemma4_audio_model_name(key)
-    ]
-    return sorted(keys)
+    return model_catalog_options(
+        all_models,
+        lambda name, entry: entry.get("mmproj_filename") and _is_gemma4_audio_model_name(name),
+    )
 
 
 def _filter_kwargs_for_callable(fn, kwargs: dict) -> dict:
@@ -1090,6 +1097,7 @@ def _find_existing_local_file_in_dirs(search_dirs: list[Path], filename: str, al
 
 def _resolve_model_entry(model_name: str) -> GGUFVLResolved:
     all_models = GGUF_VL_CATALOG.get("models") or {}
+    model_name = resolve_model_catalog_name(all_models, model_name)
     entry = all_models.get(model_name) or {}
     if not entry:
         wanted = _model_name_to_filename_candidates(model_name)
@@ -1137,6 +1145,7 @@ def _resolve_model_entry(model_name: str) -> GGUFVLResolved:
         gpu_layers=_int("gpu_layers", -1),
         top_k=_int("top_k", 20),
         pool_size=_int("pool_size", 4194304),
+        commercial_status=normalize_commercial_status(entry),
     )
 
 
@@ -1274,6 +1283,7 @@ class QwenVLGGUFBase:
         backend_info = get_last_llama_cpp_backend_info()
 
         resolved = _resolve_model_entry(model_name)
+        access_info = {"commercial_status": resolved.commercial_status}
 
         # Local models store absolute paths — use them directly, skip download logic
         if Path(resolved.model_filename).is_absolute():
@@ -1283,6 +1293,7 @@ class QwenVLGGUFBase:
                 raise FileNotFoundError(f"[QwenVL] Local GGUF model not found: {model_path}")
             if mmproj_path is not None and not mmproj_path.exists():
                 raise FileNotFoundError(f"[QwenVL] Local mmproj not found: {mmproj_path}")
+            enforce_model_access(access_info, resolved.display_name, local_exists=True, hf_token=hf_token)
         else:
             base_dir_value = GGUF_VL_CATALOG.get("base_dir") or "llm/GGUF"
             search_dirs = _gguf_search_dirs(base_dir_value)
@@ -1330,6 +1341,7 @@ class QwenVLGGUFBase:
             if not model_path.exists():
                 if not repo_ids:
                     raise FileNotFoundError(f"[QwenVL] GGUF model not found locally and no repo_id provided: {model_path}")
+                enforce_model_access(access_info, resolved.repo_id or resolved.display_name, local_exists=False, hf_token=hf_token)
                 _download_single_file(
                     repo_ids,
                     resolved.model_filename,
@@ -1342,6 +1354,7 @@ class QwenVLGGUFBase:
             if mmproj_path is not None and not mmproj_path.exists():
                 if not repo_ids:
                     raise FileNotFoundError(f"[QwenVL] mmproj not found locally and no repo_id provided: {mmproj_path}")
+                enforce_model_access(access_info, resolved.repo_id or resolved.display_name, local_exists=False, hf_token=hf_token)
                 _download_single_file(
                     repo_ids,
                     resolved.mmproj_filename,
@@ -1350,6 +1363,7 @@ class QwenVLGGUFBase:
                     progress_label=f"QwenVL GGUF Download: {Path(resolved.mmproj_filename).name}",
                     hf_token=hf_token,
                 )
+            enforce_model_access(access_info, resolved.display_name, local_exists=True, hf_token=hf_token)
         hf_token = None
 
         device_kind = _pick_device(device)
@@ -1614,6 +1628,8 @@ class QwenVLGGUFBase:
         enable_thinking: bool = True,
         auto_finalization_retry: bool = False,
         top_k: int | None = None,
+        preset_name: str = "",
+        media_summary: dict[str, int] | None = None,
     ):
         """Returns (cleaned_text, raw_text) tuple."""
         ensure_cuda_vram_headroom("QwenVL GGUF", min_free_gb=1.0, min_free_ratio=0.08)
@@ -1665,6 +1681,18 @@ class QwenVLGGUFBase:
                     {"role": "system", "content": system_prompt_text},
                     {"role": "user", "content": effective_user_prompt},
                 ]
+
+            log_llm_input(
+                "QwenVL GGUF",
+                stage_label,
+                preset_name,
+                effective_user_prompt,
+                system_text=system_prompt_text,
+                media=(media_summary or {
+                    "visual_items": sum(bool(item) for item in images_for_call),
+                    "audio": sum(bool(item) for item in audio_for_call),
+                }) if images_for_call or audio_for_call else {},
+            )
 
             start = time.perf_counter()
             stop_tokens = ["<|im_end|>", "<|im_start|>"]
@@ -1932,6 +1960,7 @@ class QwenVLGGUFBase:
         auto_finalization_retry=False,
         hf_token="",
     ):
+        model_name = resolve_model_catalog_name(GGUF_VL_CATALOG.get("models") or {}, model_name)
         print(f"[QwenVL GGUF DEBUG] Starting run with seed={seed}")
         image, mask_hash = apply_mask_highlight(image, mask)
         image_hash = get_image_hash(image)
@@ -1990,7 +2019,7 @@ class QwenVLGGUFBase:
                 input_signature=input_signature,
             )
             if saved:
-                print(f"[QwenVL GGUF] Fixed seed {seed} matched — using per-node prompt: {saved[:50]}...")
+                print(f"[QwenVL GGUF] Preset {preset_prompt}: fixed seed {seed} matched; no LLM call was made.")
                 return (saved, "")
         if not stream_to_terminal:
             print(f"[QwenVL GGUF] Generating new prompt")
@@ -2129,6 +2158,13 @@ class QwenVLGGUFBase:
                         enable_thinking=effective_thinking,
                         auto_finalization_retry=auto_finalization_retry,
                         top_k=top_k,
+                        preset_name=preset_prompt,
+                        media_summary={
+                            "image_input": 1 if image is not None else 0,
+                            "video_input": 1 if video is not None else 0,
+                            "visual_items": len(images_b64),
+                            "audio": len(audio_b64),
+                        },
                     )
                     if self.last_backend_trace:
                         raw_trace = f"{self.last_backend_trace}\n\n{raw_trace}" if raw_trace else self.last_backend_trace
@@ -2189,7 +2225,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
     @classmethod
     def INPUT_TYPES(cls):
         all_models = GGUF_VL_CATALOG.get("models") or {}
-        model_keys = sorted([key for key, entry in all_models.items() if (entry or {}).get("mmproj_filename")]) or ["(no GGUF VL models found)"]
+        model_keys = model_catalog_options(all_models, lambda _name, entry: entry.get("mmproj_filename")) or ["(no GGUF VL models found)"]
         default_model = model_keys[0]
 
         prompts = PRESET_PROMPTS or ["🚫 No preset (image-only)", "🖼️ Detailed Description"]
@@ -2381,7 +2417,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
     @classmethod
     def INPUT_TYPES(cls):
         all_models = GGUF_VL_CATALOG.get("models") or {}
-        model_keys = sorted([key for key, entry in all_models.items() if (entry or {}).get("mmproj_filename")]) or ["(no GGUF VL models found)"]
+        model_keys = model_catalog_options(all_models, lambda _name, entry: entry.get("mmproj_filename")) or ["(no GGUF VL models found)"]
         default_model = model_keys[0]
 
         prompts = PRESET_PROMPTS or ["🚫 No preset (image-only)", "🖼️ Detailed Description"]

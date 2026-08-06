@@ -181,6 +181,14 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             get_alternative_cache_key=lambda *args, **kwargs: "alt-cache-key",
             get_image_hash=lambda *args, **kwargs: "image-hash",
             get_video_hash=lambda *args, **kwargs: "video-hash",
+            log_llm_input=lambda *args, **kwargs: None,
+            model_catalog_label=lambda name, info: name,
+            model_catalog_options=lambda models, predicate=None: sorted(
+                name for name, info in models.items() if predicate is None or predicate(name, info or {})
+            ),
+            normalize_commercial_status=lambda info: "local" if (info or {}).get("is_local") else (info or {}).get("commercial_status", "unclear"),
+            resolve_model_catalog_name=lambda models, selected: selected,
+            enforce_model_access=lambda *args, **kwargs: None,
             save_prompt_cache=lambda *args, **kwargs: None,
             get_node_saved_prompt=lambda *args, **kwargs: None,
             get_node_saved_prompt_with_seed=lambda *args, **kwargs: None,
@@ -435,6 +443,103 @@ class TestBufferedStreamingIntegration(unittest.TestCase):
 
 
 class TestModelRecommendations(unittest.TestCase):
+    def test_model_catalog_statuses_are_valid_and_assignments_are_conservative(self):
+        valid = {"cleared", "external_gated", "unclear", "noncommercial"}
+        hf_payload = json.loads((PKG / "hf_models.json").read_text(encoding="utf-8"))
+        gguf_payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
+        hf_entries = [
+            entry
+            for section in ("hf_vl_models", "hf_text_models")
+            for entry in (hf_payload.get(section) or {}).values()
+        ]
+        gguf_entries = [
+            entry
+            for section in ("Qwen_model", "qwenVL_model")
+            for entry in (gguf_payload.get(section) or {}).values()
+        ]
+
+        self.assertTrue(all(entry.get("commercial_status") in valid for entry in hf_entries + gguf_entries))
+        self.assertEqual(2, sum(entry["commercial_status"] == "cleared" for entry in hf_entries))
+        self.assertEqual(2, sum(entry["commercial_status"] == "external_gated" for entry in hf_entries))
+        self.assertFalse(any(entry["commercial_status"] == "noncommercial" for entry in hf_entries + gguf_entries))
+        self.assertTrue(all(entry["commercial_status"] == "unclear" for entry in gguf_entries))
+
+    def test_commercial_catalog_contains_only_release_locked_models(self):
+        payload = json.loads((PKG / "hf_models.commercial.json").read_text(encoding="utf-8"))
+        entries = [
+            entry
+            for section in ("hf_vl_models", "hf_text_models")
+            for entry in payload.get(section, {}).values()
+        ]
+        self.assertEqual({"MODEL-006", "MODEL-014"}, {entry["component_id"] for entry in entries})
+        self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", entry["revision"]) for entry in entries))
+        self.assertTrue(all(entry["commercial_status"] == "cleared" for entry in entries))
+
+    def test_model_status_dropdown_order_and_legacy_resolution(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_model_status_ui_test")
+        catalog = {
+            "unclear": {},
+            "noncommercial": {"commercial_status": "noncommercial"},
+            "local": {"is_local": True},
+            "gated": {"commercial_status": "external_gated"},
+            "cleared": {"commercial_status": "cleared"},
+            "invalid": {"commercial_status": "not-a-status"},
+        }
+
+        options = module.model_catalog_options(catalog)
+
+        self.assertEqual(["✅", "🔑", "📁", "⚠", "⚠", "🚫"], [option.split()[0] for option in options])
+        for raw_name, entry in catalog.items():
+            decorated = module.model_catalog_label(raw_name, entry)
+            self.assertEqual(raw_name, module.resolve_model_catalog_name(catalog, raw_name))
+            self.assertEqual(raw_name, module.resolve_model_catalog_name(catalog, decorated))
+        self.assertEqual("unclear", module.normalize_commercial_status({}))
+        self.assertEqual("unclear", module.normalize_commercial_status({"commercial_status": "invalid"}))
+
+    def test_hf_and_gguf_nodes_expose_only_prefixed_selectable_models(self):
+        package = load_thinkingllm_loader_subset([
+            "AILab_QwenVL.py",
+            "AILab_QwenVL_GGUF.py",
+            "AILab_QwenVL_PromptEnhancer.py",
+            "AILab_QwenVL_GGUF_PromptEnhancer.py",
+        ])
+        prefixes = ["✅ Commercial | ", "🔑 External / gated | ", "📁 Local / user-supplied | ", "⚠ Rights unclear | ", "🚫 Non-commercial | "]
+        order = {prefix: index for index, prefix in enumerate(prefixes)}
+        node_names = (
+            "ThinkingLLM_QwenVL",
+            "ThinkingLLM_QwenVL_Advanced",
+            "ThinkingLLM_QwenVL_PromptEnhancer",
+            "ThinkingLLM_QwenVL_GGUF",
+            "ThinkingLLM_QwenVL_GGUF_Advanced",
+            "ThinkingLLM_Gemma4_Audio_GGUF",
+            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+        )
+
+        for node_name in node_names:
+            with self.subTest(node_name=node_name):
+                options = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"]["model_name"][0]
+                option_order = [next(order[prefix] for prefix in prefixes if option.startswith(prefix)) for option in options]
+                self.assertEqual(option_order, sorted(option_order))
+                self.assertTrue(all(option not in prefixes for option in options))
+
+    def test_commercial_mode_disables_mutable_runtime_behaviour(self):
+        init_source = read_source("__init__.py")
+        hf_source = read_source("AILab_QwenVL.py")
+        enhancer_source = read_source("AILab_QwenVL_PromptEnhancer.py")
+
+        self.assertIn('os.environ.get("THINKINGLLM_COMMERCIAL_RELEASE") == "1"', init_source)
+        self.assertIn('WEB_DIRECTORY = None if COMMERCIAL_RELEASE else "./web"', init_source)
+        self.assertNotIn('"AILab_QwenVL_GGUF"', re.search(r"COMMERCIAL_MODULES = \{.*?\}", init_source, re.DOTALL).group(0))
+        self.assertIn('COMMERCIAL_NODE_MODULES = {"story_split_node", "vram_cleanup"}', init_source)
+        self.assertIn("only permits preinstalled, hash-locked models", hf_source)
+        self.assertIn("if custom.exists() and not COMMERCIAL_RELEASE", hf_source)
+        self.assertIn("if not COMMERCIAL_RELEASE:\n        _scan_local_hf_models()", hf_source)
+        self.assertIn('"local_files_only": COMMERCIAL_RELEASE', hf_source)
+        self.assertIn("trust_remote_code=not COMMERCIAL_RELEASE", hf_source)
+        self.assertIn('"local_files_only": COMMERCIAL_RELEASE', enhancer_source)
+        self.assertIn("commercial release mode forbids runtime package installation", enhancer_source)
+
     def test_recommendation_rules_have_sources(self):
         payload = load_model_recommendations()
         rules = payload.get("rules") or []
@@ -527,6 +632,72 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertEqual(resolved.model_filename, "gemma-4-12b-it-Q4_K_M.gguf")
         self.assertEqual(resolved.mmproj_filename, "mmproj-F16.gguf")
 
+    def test_minimax_h3_presets_are_split_by_input_mode(self):
+        data = json.loads((PKG / "AILab_System_Prompts.json").read_text(encoding="utf-8"))
+        text_label = "🎬 MiniMax H3 Text-to-Video"
+        reference_label = "🖼️ MiniMax H3 Reference-to-Video"
+
+        self.assertNotIn("🎬 MiniMax H3 Multimodal Video", data["_preset_prompts"])
+        self.assertIn(text_label, data["_preset_prompts"])
+        self.assertIn(reference_label, data["_preset_prompts"])
+        self.assertIn("integrated_multimodal_description", data["qwenvl"][text_label])
+        self.assertNotIn("subject_definitions", data["qwenvl"][text_label])
+        self.assertIn("subject_definitions", data["qwenvl"][reference_label])
+        self.assertIn("retention_analysis", data["qwenvl"][reference_label])
+        self.assertIn(text_label, data["qwen_text"]["styles"])
+        self.assertNotIn(reference_label, data["qwen_text"]["styles"])
+
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            package = load_thinkingllm_loader_subset(
+                [
+                    "AILab_QwenVL.py",
+                    "AILab_QwenVL_GGUF.py",
+                    "AILab_QwenVL_PromptEnhancer.py",
+                    "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                ]
+            )
+
+        for node_name in ("ThinkingLLM_QwenVL", "ThinkingLLM_QwenVL_Advanced", "ThinkingLLM_QwenVL_GGUF", "ThinkingLLM_QwenVL_GGUF_Advanced"):
+            values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"]["preset_prompt"][0]
+            self.assertIn(text_label, values)
+            self.assertIn(reference_label, values)
+        for node_name, widget_name in (("ThinkingLLM_QwenVL_PromptEnhancer", "enhancement_style"), ("ThinkingLLM_QwenVL_GGUF_PromptEnhancer", "preset_system_prompt")):
+            values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0]
+            self.assertIn(text_label, values)
+            self.assertNotIn(reference_label, values)
+
+    def test_llm_input_logging_is_complete_and_shared(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_input_logging_test")
+
+        long_tail = "END-OF-UNTRUNCATED-PROMPT"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            module.log_llm_input(
+                "Backend",
+                "FINALIZATION ATTEMPT 2/3",
+                "Preset Name",
+                f"user text {long_tail}",
+                system_text="system text",
+                formatted_text="<chat>formatted text</chat>",
+                media={"image": 2, "audio": 1},
+            )
+        logged = output.getvalue()
+        self.assertIn("Preset: Preset Name", logged)
+        self.assertIn("Stage: FINALIZATION ATTEMPT 2/3", logged)
+        self.assertIn("system text", logged)
+        self.assertIn(long_tail, logged)
+        self.assertIn("<chat>formatted text</chat>", logged)
+        self.assertIn("image=2, audio=1", logged)
+        self.assertNotIn("data:image", logged)
+        self.assertNotIn("base64", logged.lower())
+
+        for filename in ("AILab_QwenVL.py", "AILab_QwenVL_GGUF.py", "AILab_QwenVL_PromptEnhancer.py", "AILab_QwenVL_GGUF_PromptEnhancer.py"):
+            with self.subTest(filename=filename):
+                source = read_source(filename)
+                self.assertIn("log_llm_input(", source)
+                self.assertIn("no LLM call was made", source)
+
     def test_ltx_presets_are_available_for_vision_and_prompt_enhancers(self):
         data = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
 
@@ -611,7 +782,7 @@ class TestModelRecommendations(unittest.TestCase):
             package = load_thinkingllm_loader_subset(["AILab_QwenVL.py"])
         required = package.NODE_CLASS_MAPPINGS["ThinkingLLM_QwenVL"].INPUT_TYPES()["required"]
         _, meta = required["model_name"]
-        self.assertEqual(meta["default"], "Qwen3-VL-4B-Instruct-Abliterated [DL: 7.5GB, VRAM: 6.0GB]")
+        self.assertEqual(meta["default"], "⚠ Rights unclear | Qwen3-VL-4B-Instruct-Abliterated [DL: 7.5GB, VRAM: 6.0GB]")
 
     def test_appearance_js_loads_recommendation_widget(self):
         source = read_source("web/js/appearance.js")
@@ -850,6 +1021,126 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
                 self.assertIn('"hf_token": ("STRING"', source)
                 self.assertRegex(source, r'"hf_token": \("STRING", \{[^\n]+"tooltip"')
 
+    def test_status_access_policy_blocks_network_and_warns_for_local_restricted_models(self):
+        module = self._load_qwenvl_with_stubs()
+        gated = {"commercial_status": "external_gated"}
+
+        module.enforce_model_access(gated, "private/repo", local_exists=True)
+        with mock.patch.dict(module.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(PermissionError, "no Hugging Face access token"):
+                module.enforce_model_access(gated, "private/repo", local_exists=False)
+        module.enforce_model_access(gated, "private/repo", local_exists=False, hf_token="hf_test")
+
+        for status in ("unclear", "noncommercial"):
+            with self.subTest(status=status):
+                with self.assertRaisesRegex(PermissionError, "Automatic download blocked"):
+                    module.enforce_model_access({"commercial_status": status}, "example/model", local_exists=False)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    module.enforce_model_access({"commercial_status": status}, "example/model", local_exists=True)
+                self.assertIn("Verify its license", output.getvalue())
+
+    def test_commercial_mode_rejects_every_status_except_cleared(self):
+        module = self._load_qwenvl_with_stubs()
+        with mock.patch.object(module, "COMMERCIAL_RELEASE", True):
+            module.enforce_model_access({"commercial_status": "cleared"}, "official/model", local_exists=True)
+            for info in (
+                {"commercial_status": "external_gated"},
+                {"commercial_status": "unclear"},
+                {"commercial_status": "noncommercial"},
+                {"is_local": True},
+            ):
+                with self.subTest(info=info):
+                    with self.assertRaisesRegex(PermissionError, "Commercial mode rejects"):
+                        module.enforce_model_access(info, "blocked/model", local_exists=True)
+
+    def test_gated_hf_snapshot_uses_local_copy_without_token_and_requires_token_before_download(self):
+        module = self._load_qwenvl_with_stubs()
+        entry = {"repo_id": "private/repo", "commercial_status": "external_gated"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            models_dir = Path(temp_dir)
+            target = models_dir / "LLM" / "Qwen-VL" / "repo"
+            target.mkdir(parents=True)
+            (target / "config.json").write_text("{}", encoding="utf-8")
+            (target / "model.safetensors").write_bytes(b"weights")
+            with mock.patch.object(module, "HF_ALL_MODELS", {"gated": entry}), mock.patch.object(
+                module.folder_paths, "models_dir", str(models_dir)
+            ), mock.patch.object(module.folder_paths, "folder_names_and_paths", {}), mock.patch.object(
+                module, "_download_model_snapshot", side_effect=AssertionError("local gated model must not download")
+            ):
+                self.assertEqual(str(target), module.ensure_model("gated"))
+
+            shutil.rmtree(target)
+            with mock.patch.object(module, "HF_ALL_MODELS", {"gated": entry}), mock.patch.object(
+                module.folder_paths, "models_dir", str(models_dir)
+            ), mock.patch.object(module.folder_paths, "folder_names_and_paths", {}), mock.patch.object(
+                module, "_download_model_snapshot", side_effect=AssertionError("missing token must stop before download")
+            ), mock.patch.dict(module.os.environ, {}, clear=True):
+                with self.assertRaisesRegex(PermissionError, "no Hugging Face access token"):
+                    module.ensure_model("gated", hf_token="")
+
+    def test_gated_hf_snapshot_forwards_token_only_to_download(self):
+        module = self._load_qwenvl_with_stubs()
+        captured = []
+
+        def fake_download(repo_id, target, **kwargs):
+            captured.append((repo_id, kwargs.get("hf_token")))
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "config.json").write_text("{}", encoding="utf-8")
+            (target / "model.safetensors").write_bytes(b"weights")
+
+        with tempfile.TemporaryDirectory() as temp_dir, mock.patch.object(
+            module, "HF_ALL_MODELS", {"gated": {"repo_id": "private/repo", "commercial_status": "external_gated"}}
+        ), mock.patch.object(module.folder_paths, "models_dir", temp_dir), mock.patch.object(
+            module.folder_paths, "folder_names_and_paths", {}
+        ), mock.patch.object(module, "_download_model_snapshot", side_effect=fake_download):
+            module.ensure_model("gated", hf_token="hf_test_secret")
+
+        self.assertEqual([("private/repo", "hf_test_secret")], captured)
+
+    def test_gated_gguf_stops_before_download_when_token_is_missing(self):
+        hf_module = self._load_qwenvl_with_stubs()
+        stubs = build_loader_test_stubs()
+        stubs["AILab_QwenVL"] = hf_module
+        with mock.patch.dict(sys.modules, stubs, clear=False):
+            gguf_module = load_module_from_file("AILab_QwenVL_GGUF.py", "thinkingllm_gated_gguf_policy_test")
+
+        with tempfile.TemporaryDirectory() as temp_dir, mock.patch.object(
+            gguf_module,
+            "GGUF_VL_CATALOG",
+            {
+                "base_dir": temp_dir,
+                "models": {
+                    "gated.gguf": {
+                        "filename": "gated.gguf",
+                        "repo_id": "private/repo",
+                        "commercial_status": "external_gated",
+                    }
+                },
+            },
+        ), mock.patch.object(gguf_module.QwenVLGGUFBase, "_load_backend", return_value=object()), mock.patch.object(
+            gguf_module, "_download_single_file", side_effect=AssertionError("missing token must stop before GGUF download")
+        ), mock.patch.dict(hf_module.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(PermissionError, "no Hugging Face access token"):
+                gguf_module.QwenVLGGUFBase()._load_model(
+                    model_name="gated.gguf",
+                    device="cpu",
+                    ctx=None,
+                    n_batch=None,
+                    n_ubatch=None,
+                    gpu_layers=None,
+                    image_max_tokens=None,
+                    top_k=None,
+                    pool_size=None,
+                    n_threads=None,
+                    n_threads_batch=None,
+                    flash_attn=False,
+                    offload_kqv=False,
+                    ctx_checkpoints=None,
+                    hf_token="",
+                )
+
     def test_hf_token_is_not_part_of_prompt_or_cache_signatures(self):
         for filename in self.TOKEN_NODE_FILES:
             tree = parse_source(filename)
@@ -912,6 +1203,19 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
         self.assertNotIn(secret, message)
         self.assertIn("<redacted HF token>", message)
         self.assertIn("access was rejected", message)
+
+    def test_gated_hf_download_without_token_names_both_token_options(self):
+        module = self._load_qwenvl_with_stubs()
+        with mock.patch.dict(module.os.environ, {}, clear=True):
+            message = module._hf_download_error_message(
+                RuntimeError("401 Unauthorized"),
+                repo_id="private/repo",
+                hf_token="",
+            )
+
+        self.assertIn("no Hugging Face access token was supplied", message)
+        self.assertIn("hf_token field", message)
+        self.assertIn("HF_TOKEN environment variable", message)
 
     def test_hf_token_can_fall_back_to_environment(self):
         module = self._load_qwenvl_with_stubs()
@@ -1029,6 +1333,23 @@ class TestNoResidualGlobals(unittest.TestCase):
 
 
 class TestLoaderModuleRegistration(unittest.TestCase):
+    def test_commercial_loader_registers_only_reviewed_hf_modules(self):
+        with mock.patch.dict(os.environ, {"THINKINGLLM_COMMERCIAL_RELEASE": "1"}):
+            package = load_thinkingllm_loader_subset(
+                [
+                    "AILab_QwenVL.py",
+                    "AILab_QwenVL_PromptEnhancer.py",
+                    "AILab_QwenVL_GGUF.py",
+                    "AILab_WhisperASR.py",
+                ]
+            )
+
+        self.assertIn("ThinkingLLM_QwenVL", package.NODE_CLASS_MAPPINGS)
+        self.assertIn("ThinkingLLM_QwenVL_PromptEnhancer", package.NODE_CLASS_MAPPINGS)
+        self.assertNotIn("ThinkingLLM_QwenVL_GGUF", package.NODE_CLASS_MAPPINGS)
+        self.assertNotIn("ThinkingLLM_Whisper_ASR", package.NODE_CLASS_MAPPINGS)
+        self.assertIsNone(package.WEB_DIRECTORY)
+
     def test_loader_registers_qwenvl_modules_with_stubbed_dependencies(self):
         package = load_thinkingllm_loader_subset(
             [

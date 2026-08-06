@@ -141,6 +141,8 @@ The GGUF path requires a multimodal-capable `llama-cpp-python` build. The normal
 
 ThinkingLLM supports these model families out of the box, with pre-configured entries in `hf_models.json` and `gguf_models.json`.
 
+Model dropdowns group entries by rights status: `✅ Commercial` is reviewed for the locked commercial build, `🔑 External / gated` requires the model owner's Hugging Face access terms when a local copy is absent, `📁 Local / user-supplied` is never downloaded, `⚠ Rights unclear` is local-only, and `🚫 Non-commercial` is local-only in the Community version and rejected commercially. Displaying an external or unclear model is not a commercial clearance. Comfy Rail does not ship or automatically download unclear weights.
+
 ### Qwen — Vision-language (HF)
 - Qwen3.5 4B / 9B
 - Qwen3-VL 4B / 8B (Instruct, abliterated, unredacted)
