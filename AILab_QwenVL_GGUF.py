@@ -62,6 +62,7 @@ from AILab_QwenVL import (
     get_alternative_cache_key,
     get_image_hash,
     get_video_hash,
+    log_llm_input,
     save_prompt_cache,
     get_node_saved_prompt,
     get_node_saved_prompt_with_seed,
@@ -1614,6 +1615,8 @@ class QwenVLGGUFBase:
         enable_thinking: bool = True,
         auto_finalization_retry: bool = False,
         top_k: int | None = None,
+        preset_name: str = "",
+        media_summary: dict[str, int] | None = None,
     ):
         """Returns (cleaned_text, raw_text) tuple."""
         ensure_cuda_vram_headroom("QwenVL GGUF", min_free_gb=1.0, min_free_ratio=0.08)
@@ -1665,6 +1668,18 @@ class QwenVLGGUFBase:
                     {"role": "system", "content": system_prompt_text},
                     {"role": "user", "content": effective_user_prompt},
                 ]
+
+            log_llm_input(
+                "QwenVL GGUF",
+                stage_label,
+                preset_name,
+                effective_user_prompt,
+                system_text=system_prompt_text,
+                media=(media_summary or {
+                    "visual_items": sum(bool(item) for item in images_for_call),
+                    "audio": sum(bool(item) for item in audio_for_call),
+                }) if images_for_call or audio_for_call else {},
+            )
 
             start = time.perf_counter()
             stop_tokens = ["<|im_end|>", "<|im_start|>"]
@@ -1990,7 +2005,7 @@ class QwenVLGGUFBase:
                 input_signature=input_signature,
             )
             if saved:
-                print(f"[QwenVL GGUF] Fixed seed {seed} matched — using per-node prompt: {saved[:50]}...")
+                print(f"[QwenVL GGUF] Preset {preset_prompt}: fixed seed {seed} matched; no LLM call was made.")
                 return (saved, "")
         if not stream_to_terminal:
             print(f"[QwenVL GGUF] Generating new prompt")
@@ -2129,6 +2144,13 @@ class QwenVLGGUFBase:
                         enable_thinking=effective_thinking,
                         auto_finalization_retry=auto_finalization_retry,
                         top_k=top_k,
+                        preset_name=preset_prompt,
+                        media_summary={
+                            "image_input": 1 if image is not None else 0,
+                            "video_input": 1 if video is not None else 0,
+                            "visual_items": len(images_b64),
+                            "audio": len(audio_b64),
+                        },
                     )
                     if self.last_backend_trace:
                         raw_trace = f"{self.last_backend_trace}\n\n{raw_trace}" if raw_trace else self.last_backend_trace

@@ -40,6 +40,7 @@ from AILab_QwenVL import (
     get_alternative_cache_key,
     get_node_saved_prompt,
     get_node_saved_prompt_with_seed,
+    log_llm_input,
     resolve_qwen_thinking_mode,
     resolve_qwen_context_window,
     save_prompt_cache,
@@ -231,7 +232,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         # Auto-retrieve saved prompt when seed is fixed (no keep_last_prompt needed)
         saved_prompt = get_node_saved_prompt_with_seed(node_class, unique_id, extra_pnginfo, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
         if saved_prompt and not stream_tokens_to_terminal:
-            print(f"[QwenVL PromptEnhancer HF] Fixed seed {seed} matched — using per-node prompt: {saved_prompt[:50]}...")
+            print(f"[QwenVL PromptEnhancer HF] Preset {enhancement_style}: fixed seed {seed} matched; no LLM call was made.")
             return (saved_prompt, "")
         if saved_prompt and stream_tokens_to_terminal:
             pass
@@ -271,6 +272,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 unique_id=unique_id,
                 enable_thinking=enable_thinking,
                 hf_token=hf_token,
+                preset_name=enhancement_style,
             )
             raw_trace = f"[HF TEXT GENERATION]\n{enhanced_raw}"
         else:
@@ -292,6 +294,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 extra_pnginfo=extra_pnginfo,
                 enable_thinking=enable_thinking,
                 hf_token=hf_token,
+                preset_name=enhancement_style,
             )
             hf_token = ""
             key = _make_node_state_key(node_class, unique_id, extra_pnginfo)
@@ -326,6 +329,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         extra_pnginfo=None,
         enable_thinking=True,
         hf_token: str | None = None,
+        preset_name="",
     ):
         output = self.run(
             model_name=model_name,
@@ -351,6 +355,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             stream_to_terminal=stream_to_terminal,
             enable_thinking=enable_thinking,
             hf_token=hf_token,
+            llm_input_preset_name=preset_name,
         )
         return output[0]
 
@@ -481,6 +486,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         unique_id=None,
         enable_thinking=True,
         hf_token: str | None = None,
+        preset_name="",
     ):
         """Returns (cleaned_prompt, raw_generated_text) tuple."""
         self._load_text_model(model_name, quantization, device, unique_id=unique_id, hf_token=hf_token)
@@ -512,10 +518,10 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             except Exception:
                 formatted_prompt = effective_prompt
             inputs = self.text_tokenizer(formatted_prompt, return_tensors="pt").to(device_choice)
-            return formatted_prompt, inputs
+            return effective_prompt, formatted_prompt, inputs
 
         requested_thinking = bool(enable_thinking)
-        _, inputs = _build_inputs(requested_thinking)
+        effective_prompt, formatted_prompt, inputs = _build_inputs(requested_thinking)
         input_ids = inputs.get("input_ids") if hasattr(inputs, "get") else None
         prompt_tokens = int(input_ids.shape[-1]) if torch.is_tensor(input_ids) else 0
         effective_thinking = resolve_qwen_thinking_mode(
@@ -527,7 +533,15 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             quiet=stream_to_terminal,
         )
         if effective_thinking != requested_thinking:
-            _, inputs = _build_inputs(effective_thinking)
+            effective_prompt, formatted_prompt, inputs = _build_inputs(effective_thinking)
+
+        log_llm_input(
+            "QwenVL PromptEnhancer HF",
+            "INITIAL GENERATION",
+            preset_name,
+            effective_prompt,
+            formatted_text=formatted_prompt,
+        )
 
         if is_qwen35 or supports_soft_think:
             if supports_soft_think:
