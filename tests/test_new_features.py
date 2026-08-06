@@ -116,6 +116,8 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             models_dir=str(PKG),
             folder_names_and_paths={},
             get_folder_paths=lambda *args, **kwargs: [],
+            get_filename_list=lambda *args, **kwargs: [],
+            get_full_path_or_raise=lambda category, filename: str(PKG / filename),
         ),
         "AILab_StreamDisplay": build_stub_module(
             "AILab_StreamDisplay",
@@ -766,6 +768,65 @@ class TestPromptEnhancerMetadata(unittest.TestCase):
         for filename, marker in expectations.items():
             with self.subTest(filename=filename):
                 self.assertIn(marker, read_source(filename))
+
+
+class TestSharedComfyUITextEncoders(unittest.TestCase):
+    def test_discovers_and_runs_supported_native_text_encoders(self):
+        filenames = [
+            "qwen3vl_4b_convrot.safetensors",
+            "qwen3vl_8b_fp8_scaled.safetensors",
+            "gemma-3-12b-it-heretic-v2_int8.safetensors",
+            "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensor",
+            "clip_l.safetensors",
+        ]
+        calls = {}
+
+        class FakeClip:
+            def tokenize(self, text, **kwargs):
+                calls["tokenize"] = (text, kwargs)
+                return "tokens"
+
+            def generate(self, tokens, **kwargs):
+                calls["generate"] = (tokens, kwargs)
+                return [1, 2, 3]
+
+            def decode(self, tokens):
+                return "native answer"
+
+        def load_clip(**kwargs):
+            calls["load"] = kwargs
+            return FakeClip()
+
+        stub_modules = build_loader_test_stubs()
+        stub_modules.pop("AILab_QwenVL", None)
+        stub_modules["folder_paths"].get_filename_list = lambda category: filenames if category == "text_encoders" else []
+        stub_modules["folder_paths"].get_full_path_or_raise = lambda category, filename: str(PKG / filename)
+        comfy_sd = build_stub_module("comfy.sd", load_clip=load_clip)
+        stub_modules["comfy"].sd = comfy_sd
+        stub_modules["comfy.sd"] = comfy_sd
+
+        with mock.patch.dict(sys.modules, stub_modules, clear=False):
+            module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_native_text_encoder_test")
+            qwen_name = "[ComfyUI] qwen3vl_8b_fp8_scaled.safetensors"
+            gemma_name = "[ComfyUI] gemma-3-12b-it-heretic-v2_int8.safetensors"
+
+            self.assertIn("[ComfyUI] qwen3vl_4b_convrot.safetensors", module.HF_VL_MODELS)
+            self.assertIn(qwen_name, module.HF_VL_MODELS)
+            self.assertIn(gemma_name, module.HF_VL_MODELS)
+            self.assertNotIn("[ComfyUI] qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", module.HF_VL_MODELS)
+            self.assertNotIn("[ComfyUI] qwen3vl_32b_minimax_h3_nvfp4_awq.safetensor", module.HF_VL_MODELS)
+
+            node = module.QwenVLBase()
+            node.load_model(qwen_name, "unused", "auto", False, "auto", True)
+            text, raw = node.generate("hello", None, None, 4, 32, 0.7, 0.9, 1, 1.1, model_name=qwen_name, seed=7)
+
+            self.assertEqual(("native answer", "native answer"), (text, raw))
+            self.assertEqual([str(PKG / "qwen3vl_8b_fp8_scaled.safetensors")], calls["load"]["ckpt_paths"])
+            self.assertTrue(calls["tokenize"][1]["thinking"])
+            self.assertEqual(7, calls["generate"][1]["seed"])
+            with self.assertRaisesRegex(ValueError, "not video"):
+                node.generate("hello", None, object(), 4, 32, 0.7, 0.9, 1, 1.1, model_name=gemma_name)
 
 
 class TestHuggingFaceTokenSupport(unittest.TestCase):

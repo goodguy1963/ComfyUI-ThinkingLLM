@@ -709,7 +709,7 @@ NO_PRESET_PROMPT = "🚫 No preset (image-only)"
 PRESET_PROMPTS: list[str] = [NO_PRESET_PROMPT, "Describe this image in detail."]
 
 TOOLTIPS = {
-    "model_name": "Pick the Qwen-VL checkpoint. First run downloads weights into models/LLM/Qwen-VL, so leave disk space.",
+    "model_name": "Pick the checkpoint. [ComfyUI] entries reuse compatible models/text_encoders files; other entries download into models/LLM/Qwen-VL on first use.",
     "quantization": "Precision vs VRAM. FP16 gives the best quality if memory allows; 8-bit suits 8–16 GB GPUs; 4-bit fits 6 GB or lower but is slower.",
     "attention_mode": "auto tries SageAttention → FlashAttention 2 → SDPA in order. SDPA is stable and recommended. Only override when debugging attention backends.",
     "preset_prompt": "Built-in instruction describing how Qwen-VL should analyze the media input.",
@@ -893,7 +893,7 @@ def load_model_configs():
 
 
 def _scan_local_hf_models():
-    """Scan all LLM/Qwen-VL directories for locally available HF models not already in the config."""
+    """Scan local HF directories and compatible ComfyUI text encoders."""
     global HF_VL_MODELS, HF_ALL_MODELS
 
     # Collect all Qwen-VL directories to scan from ComfyUI's multi-path system
@@ -946,8 +946,33 @@ def _scan_local_hf_models():
         except PermissionError:
             pass
 
+    try:
+        text_encoders = folder_paths.get_filename_list("text_encoders")
+    except (AttributeError, KeyError):
+        text_encoders = []
+    for filename in text_encoders:
+        normalized = Path(filename).name.lower().replace("-", "").replace("_", "")
+        family = None
+        if "gemma312b" in normalized:
+            family = "gemma3"
+        elif "qwen3vl" in normalized and ("4b" in normalized or "8b" in normalized):
+            family = "qwen3vl"
+        if not family or not normalized.endswith(".safetensors"):
+            continue
+        display = f"[ComfyUI] {filename}"
+        model_info = {
+            "comfy_text_encoder": filename,
+            "repo_id": None,
+            "is_local": True,
+            "quantized": True,
+            "native_family": family,
+        }
+        HF_VL_MODELS[display] = model_info
+        HF_ALL_MODELS[display] = model_info
+        count += 1
+
     if count:
-        print(f"[QwenVL] Discovered {count} local HF model(s) on disk")
+        print(f"[QwenVL] Discovered {count} local model(s) on disk")
 
 
 if not HF_ALL_MODELS:
@@ -1522,6 +1547,23 @@ class QwenVLBase:
         unique_id=None,
         hf_token: str | None = None,
     ):
+        model_info = HF_ALL_MODELS.get(model_name, {})
+        comfy_filename = model_info.get("comfy_text_encoder")
+        if comfy_filename:
+            model_path = folder_paths.get_full_path_or_raise("text_encoders", comfy_filename)
+            signature = (model_name, "comfy", model_path)
+            if keep_model_loaded and self.model is not None and self.current_signature == signature:
+                return
+            self.clear()
+            from comfy import sd as comfy_sd
+            self.model = comfy_sd.load_clip(
+                ckpt_paths=[model_path],
+                embedding_directory=folder_paths.get_folder_paths("embeddings"),
+            )
+            self.current_signature = signature
+            print(f"[QwenVL] Loaded shared ComfyUI text encoder: {comfy_filename}")
+            return
+
         quant = Quantization.from_value(quant_value)  # Skip enforce_memory for now
         
         # Safety check: ensure quant is not None
@@ -1679,7 +1721,53 @@ class QwenVLBase:
         model_name="",
         stream_to_terminal=False,
         enable_thinking=True,
+        seed=0,
     ):
+        model_info = HF_ALL_MODELS.get(model_name, {})
+        native_family = model_info.get("native_family")
+        if native_family:
+            if num_beams != 1:
+                raise ValueError("[QwenVL] ComfyUI text encoders support num_beams=1 only")
+            if native_family == "gemma3" and video is not None:
+                raise ValueError("[QwenVL] Gemma 3 shared text encoders support text and image input, not video")
+
+            tokenize_kwargs = {"skip_template": False, "thinking": bool(enable_thinking)}
+            if native_family == "gemma3":
+                tokenize_kwargs["image"] = image[:1] if image is not None else None
+            else:
+                images = []
+                if image is not None:
+                    if image.dim() == 4 and image.shape[0] > 1:
+                        print(f"[QwenVL] IMAGE input contains {image.shape[0]} items; using the first item only. Use the video input for multi-frame analysis.")
+                    images.append(image[:1] if image.dim() == 4 else image)
+                if video is not None:
+                    frame_indexes = list(range(video.shape[0]))
+                    if len(frame_indexes) > frame_count:
+                        frame_indexes = np.linspace(0, len(frame_indexes) - 1, frame_count, dtype=int).tolist()
+                    images.extend(video[index:index + 1] for index in frame_indexes)
+                tokenize_kwargs["images"] = images
+
+            throw_exception_if_processing_interrupted()
+            tokens = self.model.tokenize(prompt_text, **tokenize_kwargs)
+            output_tokens = self.model.generate(
+                tokens,
+                do_sample=True,
+                max_length=max_tokens,
+                temperature=temperature,
+                top_k=50,
+                top_p=top_p,
+                min_p=0.0,
+                repetition_penalty=repetition_penalty,
+                seed=seed,
+                presence_penalty=0.0,
+            )
+            throw_exception_if_processing_interrupted()
+            raw_text = self.model.decode(output_tokens).strip()
+            if stream_to_terminal:
+                print("[QwenVL] ComfyUI native generation completed (live token streaming is unavailable):")
+                print(raw_text)
+            return raw_text, raw_text
+
         # Memory optimization: clear cache before generation
         ensure_cuda_vram_headroom("QwenVL", min_free_gb=1.0, min_free_ratio=0.08)
         supports_soft_think = getattr(self, "supports_qwen_soft_think", False)
@@ -1931,6 +2019,7 @@ class QwenVLBase:
                 model_name=model_name,
                 stream_to_terminal=stream_to_terminal,
                 enable_thinking=enable_thinking,
+                seed=seed,
             )
             
             # Cache the generated text
