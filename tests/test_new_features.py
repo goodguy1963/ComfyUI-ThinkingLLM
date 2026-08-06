@@ -543,6 +543,36 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertNotIn("Example:", vision_prompt)
         self.assertNotIn("Examples:", text_prompt)
 
+    def test_minimax_h3_preset_is_available_for_vision_and_prompt_enhancers(self):
+        label = "🎬 MiniMax H3 Multimodal Video"
+        data = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
+
+        self.assertIn(label, data["_preset_prompts"])
+        vision_prompt = data["qwenvl"][label]
+        text_prompt = data["qwen_text"]["styles"][label]["system_prompt"]
+        for required in ("T2VA", "I2VA", "FL2VA", "L2VA", "subject_definitions", "retention_analysis"):
+            self.assertIn(required, vision_prompt)
+        for required in ("integrated_multimodal_description", "overall_soundscape", "non_diegetic_music"):
+            self.assertIn(required, vision_prompt)
+            self.assertIn(required, text_prompt)
+
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            package = load_thinkingllm_loader_subset(
+                [
+                    "AILab_QwenVL.py",
+                    "AILab_QwenVL_GGUF.py",
+                    "AILab_QwenVL_PromptEnhancer.py",
+                    "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                ]
+            )
+        for node_name, widget_name in {
+            "ThinkingLLM_QwenVL": "preset_prompt",
+            "ThinkingLLM_QwenVL_GGUF": "preset_prompt",
+            "ThinkingLLM_QwenVL_PromptEnhancer": "enhancement_style",
+            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": "preset_system_prompt",
+        }.items():
+            self.assertIn(label, package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0])
+
     def test_custom_prompt_image_no_preset_alias_is_available_for_saved_workflows(self):
         label = "💬 Custom prompt + image (no preset)"
         data = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
