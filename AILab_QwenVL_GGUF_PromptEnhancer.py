@@ -50,6 +50,7 @@ from AILab_QwenVL import (
     estimate_qwen_text_tokens,
     get_cache_key,
     get_alternative_cache_key,
+    log_llm_input,
     save_prompt_cache,
     get_node_saved_prompt,
     get_node_saved_prompt_with_seed,
@@ -739,6 +740,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         initial_stage_label="INITIAL GENERATION",
         enable_thinking=True,
         auto_finalization_retry=False,
+        preset_name="",
     ):
         """Returns (cleaned_prompt, raw_trace) tuple."""
         stream_display = TerminalStreamDisplay("QwenVL GGUF", suppress_planning=True, compact=True) if stream_to_terminal else None
@@ -776,6 +778,13 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 {"role": "system", "content": system},
                 {"role": "user", "content": effective_user_prompt},
             ]
+            log_llm_input(
+                "QwenVL PromptEnhancer GGUF",
+                stage_label,
+                preset_name,
+                effective_user_prompt,
+                system_text=system,
+            )
             full_text = ""
             stage_started_at = time.monotonic()
             last_status_at = stage_started_at
@@ -972,12 +981,12 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         # Auto-retrieve saved prompt when seed is fixed (no keep_last_prompt needed)
         saved_prompt = get_node_saved_prompt_with_seed(node_class, unique_id, extra_pnginfo, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
         if saved_prompt and not stream_tokens_to_terminal:
-            print(f"[QwenVL PromptEnhancer GGUF] Fixed seed {seed} matched — using per-node prompt: {saved_prompt[:50]}...")
+            print(f"[QwenVL PromptEnhancer GGUF] Preset {preset_system_prompt}: fixed seed {seed} matched; no LLM call was made.")
             return (saved_prompt, "")
         if saved_prompt and stream_tokens_to_terminal:
             pass
         if keep_last_prompt:
-            print(f"[QwenVL PromptEnhancer GGUF] Keep last prompt enabled but no saved prompt found — returning empty")
+            print(f"[QwenVL PromptEnhancer GGUF] Preset {preset_system_prompt}: no saved prompt found; no LLM call was made.")
             return ("", "")
 
         # Always generate unless keep_last_prompt was requested
@@ -998,7 +1007,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         if cache_key in PROMPT_CACHE and not stream_tokens_to_terminal:
             cached_text = PROMPT_CACHE[cache_key].get("text", "")
             if cached_text:
-                print(f"[QwenVL PromptEnhancer GGUF] Using cached prompt for seed {seed}: {cache_key[:8]}...")
+                print(f"[QwenVL PromptEnhancer GGUF] Preset {preset_system_prompt}: cache hit for seed {seed}; no LLM call was made.")
                 return (cached_text.strip(), "")
         if stream_tokens_to_terminal and cache_key in PROMPT_CACHE:
             cached_text = PROMPT_CACHE[cache_key].get("text", "")
@@ -1050,6 +1059,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             initial_stage_label="INITIAL GENERATION",
             enable_thinking=effective_thinking,
             auto_finalization_retry=auto_finalization_retry,
+            preset_name=preset_system_prompt,
         )
         full_raw_trace = raw_trace
         if english_output:
@@ -1069,6 +1079,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 initial_stage_label="TRANSLATION STAGE",
                 enable_thinking=effective_thinking,
                 auto_finalization_retry=auto_finalization_retry,
+                preset_name=preset_system_prompt,
             )
             full_raw_trace = f"{raw_trace}\n\n{trans_trace}"
             final = clean_model_output(translated, OutputCleanConfig(mode="prompt")) or translated.strip()

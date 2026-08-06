@@ -461,6 +461,31 @@ def apply_qwen_soft_thinking_directive(prompt_text, enable_thinking, supports_so
     lines.append("/think" if enable_thinking else "/no_think")
     return "\n".join(lines).strip()
 
+
+def log_llm_input(
+    backend: str,
+    stage: str,
+    preset_name: str,
+    user_text: str,
+    *,
+    system_text: str = "",
+    formatted_text: str | None = None,
+    media: dict[str, int] | None = None,
+) -> None:
+    """Print the complete text input sent to an LLM without dumping media payloads."""
+    print(f"\n[{backend}] LLM INPUT")
+    print(f"Stage: {stage}")
+    print(f"Preset: {preset_name or '(none)'}")
+    print("Media: " + (", ".join(f"{kind}={count}" for kind, count in (media or {}).items()) or "none"))
+    print("--- SYSTEM ---")
+    print(system_text or "(none)")
+    print("--- USER ---")
+    print(user_text or "(empty)")
+    if formatted_text is not None:
+        print("--- FORMATTED CHAT TEMPLATE ---")
+        print(formatted_text)
+    print("--- END LLM INPUT ---")
+
 def get_cache_key(model_name, preset_prompt, custom_prompt, image_hash=None, video_hash=None, seed=None, max_tokens=None, temperature=None, top_p=None, repetition_penalty=None, enable_thinking=None):
     """Generate cache key from inputs including all generation parameters.
 
@@ -1722,6 +1747,7 @@ class QwenVLBase:
         stream_to_terminal=False,
         enable_thinking=True,
         seed=0,
+        preset_name="",
     ):
         model_info = HF_ALL_MODELS.get(model_name, {})
         native_family = model_info.get("native_family")
@@ -1748,6 +1774,16 @@ class QwenVLBase:
                 tokenize_kwargs["images"] = images
 
             throw_exception_if_processing_interrupted()
+            log_llm_input(
+                "QwenVL ComfyUI Native",
+                "INITIAL GENERATION",
+                preset_name,
+                prompt_text,
+                media={
+                    "image": 1 if image is not None else 0,
+                    "video_frames": max(0, len(tokenize_kwargs.get("images", [])) - (1 if image is not None else 0)),
+                },
+            )
             tokens = self.model.tokenize(prompt_text, **tokenize_kwargs)
             output_tokens = self.model.generate(
                 tokens,
@@ -1809,10 +1845,13 @@ class QwenVLBase:
             video_frames = [frame for item in conversation[0]["content"] if item["type"] == "video" for frame in item["video"]]
             videos = [video_frames] if video_frames else None
             processed = self.processor(text=chat, images=images or None, videos=videos, return_tensors="pt")
-            return effective_prompt_text, processed
+            return effective_prompt_text, chat, processed, {
+                "image": len(images),
+                "video_frames": len(video_frames),
+            }
 
         requested_thinking = bool(enable_thinking)
-        _, processed = _build_processed(requested_thinking)
+        effective_prompt_text, chat, processed, media = _build_processed(requested_thinking)
         input_ids = processed.get("input_ids")
         prompt_tokens = int(input_ids.shape[-1]) if torch.is_tensor(input_ids) else 0
         effective_thinking = resolve_qwen_thinking_mode(
@@ -1824,7 +1863,7 @@ class QwenVLBase:
             quiet=stream_to_terminal,
         )
         if effective_thinking != requested_thinking:
-            _, processed = _build_processed(effective_thinking)
+            effective_prompt_text, chat, processed, media = _build_processed(effective_thinking)
         if supports_soft_think:
             directive = "/think" if effective_thinking else "/no_think"
             print(f"[QwenVL] Qwen3 detected: Thinking {'enabled' if effective_thinking else 'disabled'} via chat template and {directive}.")
@@ -1855,6 +1894,15 @@ class QwenVLBase:
                 print("[QwenVL] Qwen3.5 detected: Forcing top_k=20 for recommended tuning.")
         else:
             kwargs["do_sample"] = False
+
+        log_llm_input(
+            "QwenVL HF",
+            "INITIAL GENERATION",
+            preset_name,
+            effective_prompt_text,
+            formatted_text=chat,
+            media=media,
+        )
             
         # Optional: staged readable terminal streaming
         if stream_to_terminal:
@@ -1929,7 +1977,7 @@ class QwenVLBase:
         cleaned_text = raw_text  # generate() returns raw; caller cleans if needed
         return cleaned_text, raw_text
 
-    def run(self, model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt=False, unique_id=None, extra_pnginfo=None, node_class="QwenVL", stream_to_terminal=False, enable_thinking=True, hf_token: str | None = None, mask=None):
+    def run(self, model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt=False, unique_id=None, extra_pnginfo=None, node_class="QwenVL", stream_to_terminal=False, enable_thinking=True, hf_token: str | None = None, mask=None, llm_input_preset_name: str | None = None):
         torch.manual_seed(seed)
         image, mask_hash = apply_mask_highlight(image, mask)
         image_hash = get_image_hash(image)
@@ -1957,14 +2005,14 @@ class QwenVLBase:
         # Auto-retrieve saved prompt when seed is fixed
         saved = get_node_saved_prompt_with_seed(node_class, unique_id, extra_pnginfo, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
         if saved and not stream_to_terminal:
-            print(f"[QwenVL] Fixed seed {seed} matched — using per-node prompt: {saved[:50]}...")
+            print(f"[QwenVL] Preset {llm_input_preset_name or preset_prompt}: fixed seed {seed} matched; no LLM call was made.")
             return (saved,)
         if saved and stream_to_terminal:
             pass
         if keep_last_prompt:
             print(f"[QwenVL] Keep last prompt enabled — looking up per-node state")
             if saved:
-                print(f"[QwenVL] Using per-node prompt: {saved[:50]}...")
+                print(f"[QwenVL] Preset {llm_input_preset_name or preset_prompt}: using saved prompt; no LLM call was made.")
                 return (saved,)
             else:
                 print(f"[QwenVL] No per-node prompt found, returning empty")
@@ -1983,7 +2031,7 @@ class QwenVLBase:
         if cache_key in PROMPT_CACHE:
             cached_text = PROMPT_CACHE[cache_key].get("text", "")
             if cached_text:
-                print(f"[QwenVL] Using cached prompt for seed {seed}: {cache_key[:8]}...")
+                print(f"[QwenVL] Preset {llm_input_preset_name or preset_prompt}: cache hit for seed {seed}; no LLM call was made.")
                 return (cached_text,)
         
         if custom_prompt and custom_prompt.strip():
@@ -2020,6 +2068,7 @@ class QwenVLBase:
                 stream_to_terminal=stream_to_terminal,
                 enable_thinking=enable_thinking,
                 seed=seed,
+                preset_name=llm_input_preset_name or preset_prompt,
             )
             
             # Cache the generated text

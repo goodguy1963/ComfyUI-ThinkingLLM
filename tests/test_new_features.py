@@ -181,6 +181,7 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             get_alternative_cache_key=lambda *args, **kwargs: "alt-cache-key",
             get_image_hash=lambda *args, **kwargs: "image-hash",
             get_video_hash=lambda *args, **kwargs: "video-hash",
+            log_llm_input=lambda *args, **kwargs: None,
             save_prompt_cache=lambda *args, **kwargs: None,
             get_node_saved_prompt=lambda *args, **kwargs: None,
             get_node_saved_prompt_with_seed=lambda *args, **kwargs: None,
@@ -543,18 +544,20 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertNotIn("Example:", vision_prompt)
         self.assertNotIn("Examples:", text_prompt)
 
-    def test_minimax_h3_preset_is_available_for_vision_and_prompt_enhancers(self):
-        label = "🎬 MiniMax H3 Multimodal Video"
-        data = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
+    def test_minimax_h3_presets_are_split_by_input_mode(self):
+        data = json.loads((PKG / "AILab_System_Prompts.json").read_text(encoding="utf-8"))
+        text_label = "🎬 MiniMax H3 Text-to-Video"
+        reference_label = "🖼️ MiniMax H3 Reference-to-Video"
 
-        self.assertIn(label, data["_preset_prompts"])
-        vision_prompt = data["qwenvl"][label]
-        text_prompt = data["qwen_text"]["styles"][label]["system_prompt"]
-        for required in ("T2VA", "I2VA", "FL2VA", "L2VA", "subject_definitions", "retention_analysis"):
-            self.assertIn(required, vision_prompt)
-        for required in ("integrated_multimodal_description", "overall_soundscape", "non_diegetic_music"):
-            self.assertIn(required, vision_prompt)
-            self.assertIn(required, text_prompt)
+        self.assertNotIn("🎬 MiniMax H3 Multimodal Video", data["_preset_prompts"])
+        self.assertIn(text_label, data["_preset_prompts"])
+        self.assertIn(reference_label, data["_preset_prompts"])
+        self.assertIn("integrated_multimodal_description", data["qwenvl"][text_label])
+        self.assertNotIn("subject_definitions", data["qwenvl"][text_label])
+        self.assertIn("subject_definitions", data["qwenvl"][reference_label])
+        self.assertIn("retention_analysis", data["qwenvl"][reference_label])
+        self.assertIn(text_label, data["qwen_text"]["styles"])
+        self.assertNotIn(reference_label, data["qwen_text"]["styles"])
 
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             package = load_thinkingllm_loader_subset(
@@ -565,13 +568,47 @@ class TestModelRecommendations(unittest.TestCase):
                     "AILab_QwenVL_GGUF_PromptEnhancer.py",
                 ]
             )
-        for node_name, widget_name in {
-            "ThinkingLLM_QwenVL": "preset_prompt",
-            "ThinkingLLM_QwenVL_GGUF": "preset_prompt",
-            "ThinkingLLM_QwenVL_PromptEnhancer": "enhancement_style",
-            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": "preset_system_prompt",
-        }.items():
-            self.assertIn(label, package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0])
+
+        for node_name in ("ThinkingLLM_QwenVL", "ThinkingLLM_QwenVL_Advanced", "ThinkingLLM_QwenVL_GGUF", "ThinkingLLM_QwenVL_GGUF_Advanced"):
+            values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"]["preset_prompt"][0]
+            self.assertIn(text_label, values)
+            self.assertIn(reference_label, values)
+        for node_name, widget_name in (("ThinkingLLM_QwenVL_PromptEnhancer", "enhancement_style"), ("ThinkingLLM_QwenVL_GGUF_PromptEnhancer", "preset_system_prompt")):
+            values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0]
+            self.assertIn(text_label, values)
+            self.assertNotIn(reference_label, values)
+
+    def test_llm_input_logging_is_complete_and_shared(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_input_logging_test")
+
+        long_tail = "END-OF-UNTRUNCATED-PROMPT"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            module.log_llm_input(
+                "Backend",
+                "FINALIZATION ATTEMPT 2/3",
+                "Preset Name",
+                f"user text {long_tail}",
+                system_text="system text",
+                formatted_text="<chat>formatted text</chat>",
+                media={"image": 2, "audio": 1},
+            )
+        logged = output.getvalue()
+        self.assertIn("Preset: Preset Name", logged)
+        self.assertIn("Stage: FINALIZATION ATTEMPT 2/3", logged)
+        self.assertIn("system text", logged)
+        self.assertIn(long_tail, logged)
+        self.assertIn("<chat>formatted text</chat>", logged)
+        self.assertIn("image=2, audio=1", logged)
+        self.assertNotIn("data:image", logged)
+        self.assertNotIn("base64", logged.lower())
+
+        for filename in ("AILab_QwenVL.py", "AILab_QwenVL_GGUF.py", "AILab_QwenVL_PromptEnhancer.py", "AILab_QwenVL_GGUF_PromptEnhancer.py"):
+            with self.subTest(filename=filename):
+                source = read_source(filename)
+                self.assertIn("log_llm_input(", source)
+                self.assertIn("no LLM call was made", source)
 
     def test_custom_prompt_image_no_preset_alias_is_available_for_saved_workflows(self):
         label = "💬 Custom prompt + image (no preset)"
