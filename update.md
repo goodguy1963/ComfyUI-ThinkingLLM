@@ -1,5 +1,19 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.20 (2026/08/06) - Shared ComfyUI Text Encoders
+
+### 2.3.20 Changes
+
+- Added automatic discovery of compatible checkpoints in `ComfyUI/models/text_encoders`.
+- Added native ComfyUI loading for Qwen3-VL 4B/8B and Gemma 3 12B without duplicated model files.
+- Added clear errors for unsupported beam and Gemma video inputs.
+- Kept incomplete MiniMax H3/Qwen3-VL 32B conditioning checkpoints out of the text-generation selector.
+
+### 2.3.20 Validation
+
+- Added regression coverage for discovery, native loading, generation, deterministic seeds, and MiniMax H3 exclusion.
+- All 99 isolated regression tests pass.
+
 ## Version 2.3.19 (2026/08/06) - MiniMax H3 Prompt Preset
 
 ### 2.3.19 Changes

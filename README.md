@@ -112,6 +112,15 @@ The HF path is the most straightforward option for Windows and Linux when you wa
 
 HF tokenizer note: some Gemma and Qwen variants need `sentencepiece` or `tiktoken` available in the ComfyUI Python environment. ThinkingLLM now declares those dependencies and will attempt to install them automatically if a tokenizer backend is missing at first load.
 
+#### Shared ComfyUI text encoders
+
+Compatible single-file checkpoints already in `ComfyUI/models/text_encoders` appear in the model selector with a `[ComfyUI]` prefix. ThinkingLLM loads them through ComfyUI, so it does not download or duplicate a Transformers snapshot.
+
+- Qwen3-VL 4B and 8B `.safetensors`, including `qwen3vl_8b_fp8_scaled.safetensors`
+- Gemma 3 12B `.safetensors`, including `gemma-3-12b-it-heretic-v2_int8.safetensors`
+
+The MiniMax H3/Qwen3-VL 32B conditioning checkpoint is intentionally excluded because it is not a complete text-generation model. The valid SafeTensors extension is `.safetensors` (plural). ComfyUI-native generation supports one-beam sampling; terminal output is printed after generation rather than streamed token by token.
+
 ### GGUF / llama.cpp nodes
 
 - `ThinkingLLM (GGUF)`
