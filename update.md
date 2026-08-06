@@ -1,5 +1,20 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.22 (2026/08/06) - Community Model Catalog Fix
+
+### 2.3.22 Changes
+
+- Restored plain model names and the original catalog order in Community mode.
+- Restored automatic downloads for Community models while retaining Hugging Face token requirements for gated repositories.
+- Kept rights labels, status grouping, and fail-closed model restrictions exclusive to commercial releases.
+- Preserved compatibility with workflows saved while status-prefixed model names were exposed.
+- Clarified the Community and commercial model policies in the README and third-party notices.
+
+### 2.3.22 Validation
+
+- Added regression coverage for Community dropdowns, Community downloads, commercial restrictions, and legacy status-prefixed workflows.
+- All 113 isolated regression tests pass on the merged `main` release candidate.
+
 ## Version 2.3.21 (2026/08/06) - Commercial Model Catalog
 
 ### 2.3.21 Changes
