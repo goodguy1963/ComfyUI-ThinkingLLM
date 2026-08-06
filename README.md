@@ -139,13 +139,15 @@ The GGUF path requires a multimodal-capable `llama-cpp-python` build. The normal
 
 ### MiniMax H3 prompt preset
 
-Select `🎬 MiniMax H3 Multimodal Video` to turn a short idea and optional visual input into MiniMax H3's native structured audio-video prompt format. Vision nodes support text-to-video, first-frame, first-and-last-frame, last-frame, and full-reference prompting; text-only Prompt Enhancer nodes emit the T2VA format. The preset keeps timed shots, camera motion, dialogue, soundscape, music, keyframe alignment, and reference-retention fields in the structure expected by H3.
+Select `🎬 MiniMax H3 Text-to-Video` for text and keyframe prompting or `🖼️ MiniMax H3 Reference-to-Video` for full-reference generation. Vision nodes support text-to-video, first-frame, first-and-last-frame, last-frame, and full-reference prompting; text-only Prompt Enhancer nodes emit the T2VA format. The presets keep timed shots, camera motion, dialogue, soundscape, music, keyframe alignment, and reference-retention fields in the structure expected by H3.
 
 See the official [MiniMax H3 ComfyUI workflows](https://docs.comfy.org/tutorials/video/minimax/minimax-h3), [base prompt guide](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md), and [full-reference prompt guide](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md).
 
 ## Supported models
 
 ThinkingLLM supports these model families out of the box, with pre-configured entries in `hf_models.json` and `gguf_models.json`.
+
+Model dropdowns group entries by rights status: `✅ Commercial` is reviewed for the locked commercial build, `🔑 External / gated` requires the model owner's Hugging Face access terms when a local copy is absent, `📁 Local / user-supplied` is never downloaded, `⚠ Rights unclear` is local-only, and `🚫 Non-commercial` is local-only in the Community version and rejected commercially. Displaying an external or unclear model is not a commercial clearance. Comfy Rail does not ship or automatically download unclear weights.
 
 ### Qwen — Vision-language (HF)
 - Qwen3.5 4B / 9B

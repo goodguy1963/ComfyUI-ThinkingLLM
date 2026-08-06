@@ -713,6 +713,8 @@ __all__ = [
     'flash_attn_available', 'normalize_device_choice',
     'load_model_configs',
     'HF_VL_MODELS', 'HF_TEXT_MODELS', 'HF_ALL_MODELS',
+    'model_catalog_label', 'model_catalog_options', 'resolve_model_catalog_name',
+    'normalize_commercial_status', 'enforce_model_access',
     'SYSTEM_PROMPTS', 'PRESET_PROMPTS', 'TOOLTIPS',
     'Quantization', 'ATTENTION_MODES',
     'NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS',
@@ -724,11 +726,20 @@ __all__ = [
 import folder_paths
 
 NODE_DIR = Path(__file__).parent
-CONFIG_PATH = NODE_DIR / "hf_models.json"
+COMMERCIAL_RELEASE = os.environ.get("THINKINGLLM_COMMERCIAL_RELEASE") == "1"
+CONFIG_PATH = NODE_DIR / ("hf_models.commercial.json" if COMMERCIAL_RELEASE else "hf_models.json")
 SYSTEM_PROMPTS_PATH = NODE_DIR / "AILab_System_Prompts.json"
 HF_VL_MODELS: dict[str, dict] = {}
 HF_TEXT_MODELS: dict[str, dict] = {}
 HF_ALL_MODELS: dict[str, dict] = {}
+VALID_COMMERCIAL_STATUSES = {"cleared", "external_gated", "unclear", "noncommercial"}
+MODEL_STATUS_PRESENTATION = {
+    "cleared": (0, "✅ Commercial | "),
+    "external_gated": (1, "🔑 External / gated | "),
+    "local": (2, "📁 Local / user-supplied | "),
+    "unclear": (3, "⚠ Rights unclear | "),
+    "noncommercial": (4, "🚫 Non-commercial | "),
+}
 SYSTEM_PROMPTS = {}
 NO_PRESET_PROMPT = "🚫 No preset (image-only)"
 PRESET_PROMPTS: list[str] = [NO_PRESET_PROMPT, "Describe this image in detail."]
@@ -767,6 +778,77 @@ def _clean_hf_token(hf_token: str | None) -> str | None:
     return next(_iter_hf_token_candidates(hf_token), None)
 
 
+def normalize_commercial_status(info: dict | None) -> str:
+    info = info if isinstance(info, dict) else {}
+    if info.get("is_local"):
+        return "local"
+    status = str(info.get("commercial_status") or "unclear").strip().lower()
+    if status == "local":
+        return "local"
+    return status if status in VALID_COMMERCIAL_STATUSES else "unclear"
+
+
+def model_catalog_label(name: str, info: dict | None) -> str:
+    return f"{MODEL_STATUS_PRESENTATION[normalize_commercial_status(info)][1]}{name}"
+
+
+def model_catalog_options(models: dict[str, dict], predicate=None) -> list[str]:
+    entries = (
+        (name, info)
+        for name, info in models.items()
+        if predicate is None or predicate(name, info or {})
+    )
+    return [
+        model_catalog_label(name, info)
+        for name, info in sorted(
+            entries,
+            key=lambda item: (MODEL_STATUS_PRESENTATION[normalize_commercial_status(item[1])][0], item[0].casefold()),
+        )
+    ]
+
+
+def resolve_model_catalog_name(models: dict[str, dict], selected: str) -> str:
+    if selected in models:
+        return selected
+    for name, info in models.items():
+        if selected == model_catalog_label(name, info):
+            return name
+    return selected
+
+
+def enforce_model_access(info: dict | None, model_name: str, *, local_exists: bool, hf_token: str | None = None) -> None:
+    status = normalize_commercial_status(info)
+    if COMMERCIAL_RELEASE and status != "cleared":
+        raise PermissionError(f"[QwenVL] Commercial mode rejects model '{model_name}' with status '{status}'.")
+    if local_exists:
+        if status in {"unclear", "noncommercial"}:
+            print(
+                f"[QwenVL] ⚠ Model '{model_name}' has status '{status}' and is being loaded from local, "
+                "user-supplied files. Verify its license before use."
+            )
+        return
+    if status == "external_gated":
+        if not _clean_hf_token(hf_token):
+            raise PermissionError(
+                f"[QwenVL] Cannot download {model_name}: no Hugging Face access token was supplied. "
+                "Accept the model's access terms on Hugging Face, then add a read token to the hf_token field "
+                "or set the HF_TOKEN environment variable."
+            )
+        return
+    if status == "unclear":
+        raise PermissionError(
+            f"[QwenVL] Automatic download blocked for '{model_name}': commercial rights are unclear. "
+            "Supply reviewed local files if you are authorized to use them."
+        )
+    if status == "noncommercial":
+        raise PermissionError(
+            f"[QwenVL] Automatic download blocked for non-commercial model '{model_name}'. "
+            "Community mode accepts only an existing local, user-supplied copy."
+        )
+    if status == "local":
+        raise FileNotFoundError(f"[QwenVL] Local user-supplied model not found: {model_name}")
+
+
 def _redact_hf_token(text: str, hf_token: str | None) -> str:
     redacted = str(text)
     for token in _iter_hf_token_candidates(hf_token):
@@ -795,8 +877,9 @@ def _hf_download_error_message(exc: Exception, *, repo_id: str, hf_token: str | 
             )
         else:
             message += (
-                f"\n[QwenVL] Hugging Face access hint for {repo_id}: this model may be private or gated. "
-                "Paste a read token into the hf_token field for this run, or set up access on Hugging Face first."
+                f"\n[QwenVL] Cannot download {repo_id}: no Hugging Face access token was supplied. "
+                "Accept the model's access terms on Hugging Face, then add a read token to the hf_token field "
+                "or set the HF_TOKEN environment variable."
             )
     return message
 
@@ -865,6 +948,9 @@ def load_model_configs():
         else:
             HF_VL_MODELS = {k: v for k, v in data.items() if not k.startswith("_")}
             HF_TEXT_MODELS = {}
+        if COMMERCIAL_RELEASE:
+            HF_VL_MODELS = {name: info for name, info in HF_VL_MODELS.items() if normalize_commercial_status(info) == "cleared"}
+            HF_TEXT_MODELS = {name: info for name, info in HF_TEXT_MODELS.items() if normalize_commercial_status(info) == "cleared"}
         SYSTEM_PROMPTS = data.get("_system_prompts", {})
         PRESET_PROMPTS = data.get("_preset_prompts", PRESET_PROMPTS)
     except Exception as exc:
@@ -892,7 +978,7 @@ def load_model_configs():
     if isinstance(SYSTEM_PROMPTS, dict):
         SYSTEM_PROMPTS.setdefault(NO_PRESET_PROMPT, "")
     custom = NODE_DIR / "custom_models.json"
-    if custom.exists():
+    if custom.exists() and not COMMERCIAL_RELEASE:
         try:
             with open(custom, "r", encoding="utf-8") as fh:
                 data = json.load(fh) or {}
@@ -913,8 +999,9 @@ def load_model_configs():
     HF_ALL_MODELS = dict(HF_VL_MODELS)
     HF_ALL_MODELS.update(HF_TEXT_MODELS)
 
-    # Scan local models directory for HF models not in JSON config
-    _scan_local_hf_models()
+    # Commercial releases expose only the two entries in the reviewed catalog.
+    if not COMMERCIAL_RELEASE:
+        _scan_local_hf_models()
 
 
 def _scan_local_hf_models():
@@ -962,6 +1049,7 @@ def _scan_local_hf_models():
                     "local_path": str(entry),
                     "repo_id": None,
                     "is_local": True,
+                    "commercial_status": "local",
                     "quantized": False,
                 }
                 HF_VL_MODELS[display] = model_info
@@ -989,6 +1077,7 @@ def _scan_local_hf_models():
             "comfy_text_encoder": filename,
             "repo_id": None,
             "is_local": True,
+            "commercial_status": "local",
             "quantized": True,
             "native_family": family,
         }
@@ -1297,6 +1386,8 @@ def _model_snapshot_has_required_files(target: Path, require_processor: bool = F
 
 
 def _download_model_snapshot(repo_id: str, target: Path, *, force_clean_target: bool = False, node_id=None, progress_label: str | None = None, hf_token: str | None = None) -> None:
+    if COMMERCIAL_RELEASE:
+        raise RuntimeError("[QwenVL] Commercial release mode only permits preinstalled, hash-locked models.")
     reporter = _DownloadProgressReporter(node_id=node_id, label=progress_label or "QwenVL HF Download", repo_id=repo_id)
     token_for_download = _clean_hf_token(hf_token)
     download_kwargs = {}
@@ -1332,6 +1423,8 @@ def download_hf_file_to_path(repo_ids: list[str], filename: str, target_path: Pa
     if target_path.exists():
         print(f"[QwenVL] Using cached file: {target_path}")
         return
+    if COMMERCIAL_RELEASE:
+        raise RuntimeError("[QwenVL] Commercial release mode only permits preinstalled, hash-locked models.")
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     last_exc: Exception | None = None
@@ -1407,6 +1500,7 @@ def download_hf_file_to_path(repo_ids: list[str], filename: str, target_path: Pa
 
 
 def ensure_model(model_name, require_processor=False, node_id=None, progress_label: str | None = None, hf_token: str | None = None):
+    model_name = resolve_model_catalog_name(HF_ALL_MODELS, model_name)
     info = HF_ALL_MODELS.get(model_name)
     if not info:
         raise ValueError(f"Model '{model_name}' not in config")
@@ -1416,12 +1510,24 @@ def ensure_model(model_name, require_processor=False, node_id=None, progress_lab
     if local_path:
         target = Path(local_path)
         if target.exists() and target.is_dir():
+            enforce_model_access(info, model_name, local_exists=True, hf_token=hf_token)
             return str(target)
+        enforce_model_access(info, model_name, local_exists=False, hf_token=hf_token)
         raise FileNotFoundError(f"[QwenVL] Local HF model directory not found: {target}")
 
     repo_id = info.get("repo_id")
     if not repo_id:
         raise ValueError(f"Model '{model_name}' has no repo_id or local_path")
+
+    if COMMERCIAL_RELEASE:
+        enforce_model_access(info, model_name, local_exists=False, hf_token=hf_token)
+        target = Path(folder_paths.models_dir) / "LLM" / repo_id.split("/")[-1]
+        if _model_snapshot_has_required_files(target, require_processor=require_processor):
+            enforce_model_access(info, model_name, local_exists=True, hf_token=hf_token)
+            return str(target)
+        raise FileNotFoundError(
+            f"[QwenVL] Locked commercial model is missing or incomplete: {target}"
+        )
 
     # Use ComfyUI's multi-path system if available
     llm_paths = folder_paths.get_folder_paths("LLM") if "LLM" in folder_paths.folder_names_and_paths else []
@@ -1437,7 +1543,10 @@ def ensure_model(model_name, require_processor=False, node_id=None, progress_lab
     # Only trust an existing snapshot if it also contains the metadata needed
     # by the selected backend. This avoids reusing stale or partial downloads.
     if _model_snapshot_has_required_files(target, require_processor=require_processor):
+        enforce_model_access(info, model_name, local_exists=True, hf_token=hf_token)
         return str(target)
+
+    enforce_model_access(info, repo_id, local_exists=False, hf_token=hf_token)
 
     if target.exists() and target.is_dir():
         print(f"[QwenVL] Existing model snapshot is incomplete, refreshing: {target}")
@@ -1572,6 +1681,7 @@ class QwenVLBase:
         unique_id=None,
         hf_token: str | None = None,
     ):
+        model_name = resolve_model_catalog_name(HF_ALL_MODELS, model_name)
         model_info = HF_ALL_MODELS.get(model_name, {})
         comfy_filename = model_info.get("comfy_text_encoder")
         if comfy_filename:
@@ -1662,6 +1772,7 @@ class QwenVLBase:
             "device_map": "auto" if device != "cpu" and torch.cuda.is_available() else "cpu",
             "dtype": dtype or torch.float16,
             "attn_implementation": actual_attn_impl,
+            "local_files_only": COMMERCIAL_RELEASE,
             "use_safetensors": True,
             "low_cpu_mem_usage": True,
         }
@@ -1705,8 +1816,16 @@ class QwenVLBase:
                 print("[QwenVL] torch.compile enabled")
             except Exception as exc:
                 print(f"[QwenVL] torch.compile skipped: {exc}")
-        self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        self.processor = AutoProcessor.from_pretrained(
+            model_path,
+            local_files_only=COMMERCIAL_RELEASE,
+            trust_remote_code=not COMMERCIAL_RELEASE,
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            local_files_only=COMMERCIAL_RELEASE,
+            trust_remote_code=not COMMERCIAL_RELEASE,
+        )
         # Detect architecture from config.json instead of relying on model name
         hf_model_type = read_hf_model_type(model_path)
         self.hf_model_type = hf_model_type
@@ -1978,6 +2097,7 @@ class QwenVLBase:
         return cleaned_text, raw_text
 
     def run(self, model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt=False, unique_id=None, extra_pnginfo=None, node_class="QwenVL", stream_to_terminal=False, enable_thinking=True, hf_token: str | None = None, mask=None, llm_input_preset_name: str | None = None):
+        model_name = resolve_model_catalog_name(HF_ALL_MODELS, model_name)
         torch.manual_seed(seed)
         image, mask_hash = apply_mask_highlight(image, mask)
         image_hash = get_image_hash(image)
@@ -2098,8 +2218,9 @@ class QwenVLBase:
 class ThinkingLLM_QwenVL(QwenVLBase):
     @classmethod
     def INPUT_TYPES(cls):
-        models = list(HF_VL_MODELS.keys())
+        models = model_catalog_options(HF_VL_MODELS)
         default_model = _default_model_from_config(HF_VL_MODELS, "Qwen3-VL-4B-Instruct")
+        default_model = model_catalog_label(default_model, HF_VL_MODELS.get(default_model))
         prompts = PRESET_PROMPTS or [NO_PRESET_PROMPT, "Describe this image in detail."]
         preferred_prompt = "🖼️ Detailed Description"
         default_prompt = preferred_prompt if preferred_prompt in prompts else prompts[0]
@@ -2147,8 +2268,9 @@ class ThinkingLLM_QwenVL(QwenVLBase):
 class ThinkingLLM_QwenVL_Advanced(QwenVLBase):
     @classmethod
     def INPUT_TYPES(cls):
-        models = list(HF_VL_MODELS.keys())
+        models = model_catalog_options(HF_VL_MODELS)
         default_model = _default_model_from_config(HF_VL_MODELS, "Qwen3-VL-4B-Instruct")
+        default_model = model_catalog_label(default_model, HF_VL_MODELS.get(default_model))
         prompts = PRESET_PROMPTS or [NO_PRESET_PROMPT, "Describe this image in detail."]
         preferred_prompt = "🖼️ Detailed Description"
         default_prompt = preferred_prompt if preferred_prompt in prompts else prompts[0]

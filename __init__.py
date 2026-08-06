@@ -19,7 +19,15 @@ sys.path.insert(0, current_dir)
 
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
-WEB_DIRECTORY = "./web"
+COMMERCIAL_RELEASE = os.environ.get("THINKINGLLM_COMMERCIAL_RELEASE") == "1"
+WEB_DIRECTORY = None if COMMERCIAL_RELEASE else "./web"
+COMMERCIAL_MODULES = {
+    "AILab_OutputCleaner",
+    "AILab_QwenVL",
+    "AILab_QwenVL_PromptEnhancer",
+    "AILab_StreamDisplay",
+}
+COMMERCIAL_NODE_MODULES = {"story_split_node", "vram_cleanup"}
 
 LEGACY_NODE_REPLACEMENTS = {
     "AILab_QwenVL": "ThinkingLLM_QwenVL",
@@ -29,6 +37,10 @@ LEGACY_NODE_REPLACEMENTS = {
     "AILab_QwenVL_PromptEnhancer": "ThinkingLLM_QwenVL_PromptEnhancer",
     "AILab_QwenVL_GGUF_PromptEnhancer": "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
 }
+if COMMERCIAL_RELEASE:
+    LEGACY_NODE_REPLACEMENTS = {
+        old: new for old, new in LEGACY_NODE_REPLACEMENTS.items() if "GGUF" not in old
+    }
 
 def load_modules_from_directory(directory):
     for file in os.listdir(directory):
@@ -37,6 +49,14 @@ def load_modules_from_directory(directory):
             module_name = os.path.basename(file)[:-3]
             if module_name == os.path.basename(__file__)[:-3]:
                 continue
+            if COMMERCIAL_RELEASE:
+                allowed = (
+                    COMMERCIAL_MODULES
+                    if os.path.abspath(directory) == os.path.abspath(current_dir)
+                    else COMMERCIAL_NODE_MODULES
+                )
+                if module_name not in allowed:
+                    continue
 
             try:
                 spec = importlib.util.spec_from_file_location(module_name, file_path)

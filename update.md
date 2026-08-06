@@ -1,5 +1,19 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.21 (2026/08/06) - Commercial Model Catalog
+
+### 2.3.21 Changes
+
+- Grouped HF and GGUF model dropdowns by reviewed commercial status while preserving old workflow model names.
+- Added fail-closed commercial mode with only the two pinned Qwen models and no runtime model downloads.
+- Added Hugging Face token handling for external gated models without logging or persisting tokens.
+- Split MiniMax H3 into text/keyframe and full-reference presets and log the exact LLM input sent by each node.
+
+### 2.3.21 Validation
+
+- Added regression coverage for catalog status, legacy workflow resolution, gated access, token redaction, and commercial-mode restrictions.
+- All 113 isolated regression tests pass after merging the newer MiniMax H3 preset split from `main`.
+
 ## Version 2.3.20 (2026/08/06) - Shared ComfyUI Text Encoders
 
 ### 2.3.20 Changes

@@ -51,6 +51,9 @@ from AILab_QwenVL import (
     get_cache_key,
     get_alternative_cache_key,
     log_llm_input,
+    model_catalog_options,
+    resolve_model_catalog_name,
+    enforce_model_access,
     save_prompt_cache,
     get_node_saved_prompt,
     get_node_saved_prompt_with_seed,
@@ -376,6 +379,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 local_models[display] = {
                     "filename": str(gguf_file),
                     "is_local": True,
+                    "commercial_status": "local",
                     "repo_id": None,
                     "alt_repo_ids": [],
                     "author": None,
@@ -442,6 +446,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                     entry = dict(defaults)
                     entry.update(
                         {
+                            "commercial_status": repo.get("commercial_status", "unclear"),
                             "author": author,
                             "repo_dirname": repo_name,
                             "repo_id": repo_id,
@@ -468,7 +473,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         preferred_style = "📝 Enhance"
         default_style = preferred_style if preferred_style in styles else (styles[0] if styles else "📝 Enhance")
         temp = cls.load_gguf_models()
-        model_keys = sorted(list((temp.get("models") or {}).keys())) or ["(no GGUF models found)"]
+        model_keys = model_catalog_options(temp.get("models") or {}) or ["(no GGUF models found)"]
         default_model = model_keys[0]
         return {
             "required": {
@@ -552,6 +557,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
 
     def _resolve_model_path(self, model_name):
         models = self.gguf_models.get("models") or {}
+        model_name = resolve_model_catalog_name(models, model_name)
         entry = models.get(model_name) or {}
 
         # Back-compat: allow workflows to pass a filename instead of a catalog key.
@@ -601,13 +607,9 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         return base_dir / model_name
 
     def _maybe_download_model(self, model_name, resolved, unique_id=None, hf_token: str | None = None):
-        if resolved.exists():
-            return
-        # Local models should already exist on disk — don't attempt download
         models = self.gguf_models.get("models") or {}
+        model_name = resolve_model_catalog_name(models, model_name)
         entry = models.get(model_name) or {}
-        if entry.get("is_local"):
-            raise FileNotFoundError(f"[QwenVL] Local GGUF model not found: {resolved}")
         if not entry:
             wanted = _model_name_to_filename_candidates(model_name)
             for candidate in models.values():
@@ -615,6 +617,10 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 if filename and Path(filename).name in wanted:
                     entry = candidate
                     break
+        if resolved.exists():
+            enforce_model_access(entry, model_name, local_exists=True, hf_token=hf_token)
+            return
+        enforce_model_access(entry, entry.get("repo_id") or model_name, local_exists=False, hf_token=hf_token)
 
         repo_ids = [rid for rid in (entry.get("alt_repo_ids") or []) + [entry.get("repo_id")] if rid]
         filename = entry.get("filename") or resolved.name
@@ -644,6 +650,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             raise FileNotFoundError(f"[QwenVL] GGUF model not found after download: {resolved} (tried: {', '.join(attempted)})")
 
     def _load_model(self, model_name, device, enable_thinking=True, unique_id=None, hf_token: str | None = None, context_length_override: int | None = None, quiet: bool = False):
+        model_name = resolve_model_catalog_name(self.gguf_models.get("models") or {}, model_name)
         Llama = self._load_backend()
         resolved = self._resolve_model_path(model_name)
         self._maybe_download_model(model_name, resolved, unique_id=unique_id, hf_token=hf_token)
@@ -962,6 +969,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         auto_finalization_retry=False,
         hf_token="",
     ):
+        model_name = resolve_model_catalog_name(self.gguf_models.get("models") or {}, model_name)
         node_class = "ThinkingLLM_QwenVL_GGUF_PromptEnhancer"
         input_signature = build_node_input_signature(
             model_name=model_name,
