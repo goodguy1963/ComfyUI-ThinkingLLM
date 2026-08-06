@@ -12,17 +12,17 @@ The repository history begins with root commit
 upstream revisions used for the inherited files. The inherited source remains
 under GPL-3.0; this notice does not replace its copyright notices.
 
-The Comfy Rail commercial release applies a recorded patch to upstream commit
-`e9e3631797b0444dd5a03fc92a5aa39dc2b1fbdb`. That patch limits the runtime to
-the locally installed, release-locked Apache-2.0 models below and disables
-runtime downloads, runtime package installation, remote model code, GGUF, and
-Whisper registration:
+The Comfy Rail commercial release pins an exact commit from this repository,
+recorded in Comfy Rail's custom-node lock. Commercial release mode limits the
+runtime to the locally installed, release-locked Apache-2.0 models below and
+disables runtime downloads, runtime package installation, remote model code,
+GGUF, and Whisper registration:
 
 - `Qwen/Qwen3-4B-Instruct-2507` at `cdbee75f17c01a7cc42f958dc650907174af0554`
 - `Qwen/Qwen3-VL-4B-Instruct` at `ebb281ec70b05090aa6165b016eac8ec08e71b17`
 
-The original GPL-3.0 source, this patch, and the resulting modified source must
-be provided together with distributed commercial images.
+The exact GPL-3.0 source and its modification notices must be provided together
+with distributed commercial images.
 
 Catalog status labels are operational safeguards, not legal advice or a model
 license grant. External/gated models remain subject to their Hugging Face access
