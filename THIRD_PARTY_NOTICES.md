@@ -27,5 +27,5 @@ with distributed commercial images.
 Catalog status labels are operational safeguards, not legal advice or a model
 license grant. External/gated models remain subject to their Hugging Face access
 terms, and rights-unclear weights are neither shipped nor automatically fetched
-by Comfy Rail. Only catalog entries marked `cleared`, pinned by full revision and
+by commercial Comfy Rail releases. Only catalog entries marked `cleared`, pinned by full revision and
 component ID, are eligible for the locked commercial runtime.

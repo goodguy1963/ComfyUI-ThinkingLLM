@@ -789,63 +789,49 @@ def normalize_commercial_status(info: dict | None) -> str:
 
 
 def model_catalog_label(name: str, info: dict | None) -> str:
+    if not COMMERCIAL_RELEASE:
+        return name
     return f"{MODEL_STATUS_PRESENTATION[normalize_commercial_status(info)][1]}{name}"
 
 
 def model_catalog_options(models: dict[str, dict], predicate=None) -> list[str]:
-    entries = (
+    entries = [
         (name, info)
         for name, info in models.items()
         if predicate is None or predicate(name, info or {})
-    )
-    return [
-        model_catalog_label(name, info)
-        for name, info in sorted(
-            entries,
-            key=lambda item: (MODEL_STATUS_PRESENTATION[normalize_commercial_status(item[1])][0], item[0].casefold()),
-        )
     ]
+    if COMMERCIAL_RELEASE:
+        entries.sort(
+            key=lambda item: (
+                MODEL_STATUS_PRESENTATION[normalize_commercial_status(item[1])][0],
+                item[0].casefold(),
+            ),
+        )
+    return [model_catalog_label(name, info) for name, info in entries]
 
 
 def resolve_model_catalog_name(models: dict[str, dict], selected: str) -> str:
     if selected in models:
         return selected
     for name, info in models.items():
-        if selected == model_catalog_label(name, info):
+        if selected == f"{MODEL_STATUS_PRESENTATION[normalize_commercial_status(info)][1]}{name}":
             return name
     return selected
 
 
 def enforce_model_access(info: dict | None, model_name: str, *, local_exists: bool, hf_token: str | None = None) -> None:
     status = normalize_commercial_status(info)
-    if COMMERCIAL_RELEASE and status != "cleared":
+    if COMMERCIAL_RELEASE:
+        if status == "cleared":
+            return
         raise PermissionError(f"[QwenVL] Commercial mode rejects model '{model_name}' with status '{status}'.")
-    if local_exists:
-        if status in {"unclear", "noncommercial"}:
-            print(
-                f"[QwenVL] ⚠ Model '{model_name}' has status '{status}' and is being loaded from local, "
-                "user-supplied files. Verify its license before use."
-            )
-        return
-    if status == "external_gated":
-        if not _clean_hf_token(hf_token):
-            raise PermissionError(
-                f"[QwenVL] Cannot download {model_name}: no Hugging Face access token was supplied. "
-                "Accept the model's access terms on Hugging Face, then add a read token to the hf_token field "
-                "or set the HF_TOKEN environment variable."
-            )
-        return
-    if status == "unclear":
+    if not local_exists and status == "external_gated" and not _clean_hf_token(hf_token):
         raise PermissionError(
-            f"[QwenVL] Automatic download blocked for '{model_name}': commercial rights are unclear. "
-            "Supply reviewed local files if you are authorized to use them."
+            f"[QwenVL] Cannot download {model_name}: no Hugging Face access token was supplied. "
+            "Accept the model's access terms on Hugging Face, then add a read token to the hf_token field "
+            "or set the HF_TOKEN environment variable."
         )
-    if status == "noncommercial":
-        raise PermissionError(
-            f"[QwenVL] Automatic download blocked for non-commercial model '{model_name}'. "
-            "Community mode accepts only an existing local, user-supplied copy."
-        )
-    if status == "local":
+    if not local_exists and status == "local":
         raise FileNotFoundError(f"[QwenVL] Local user-supplied model not found: {model_name}")
 
 

@@ -147,7 +147,7 @@ See the official [MiniMax H3 ComfyUI workflows](https://docs.comfy.org/tutorials
 
 ThinkingLLM supports these model families out of the box, with pre-configured entries in `hf_models.json` and `gguf_models.json`.
 
-Model dropdowns group entries by rights status: `✅ Commercial` is reviewed for the locked commercial build, `🔑 External / gated` requires the model owner's Hugging Face access terms when a local copy is absent, `📁 Local / user-supplied` is never downloaded, `⚠ Rights unclear` is local-only, and `🚫 Non-commercial` is local-only in the Community version and rejected commercially. Displaying an external or unclear model is not a commercial clearance. Comfy Rail does not ship or automatically download unclear weights.
+Commercial-release model dropdowns group entries by rights status and accept only reviewed, locked models. Community dropdowns keep their normal model names and download behavior; gated Hugging Face repositories still require the model owner's access terms and a read token.
 
 ### Qwen — Vision-language (HF)
 - Qwen3.5 4B / 9B

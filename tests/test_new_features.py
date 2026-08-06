@@ -475,7 +475,7 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", entry["revision"]) for entry in entries))
         self.assertTrue(all(entry["commercial_status"] == "cleared" for entry in entries))
 
-    def test_model_status_dropdown_order_and_legacy_resolution(self):
+    def test_model_status_dropdowns_are_commercial_only_and_legacy_labels_resolve(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_model_status_ui_test")
         catalog = {
@@ -487,17 +487,18 @@ class TestModelRecommendations(unittest.TestCase):
             "invalid": {"commercial_status": "not-a-status"},
         }
 
-        options = module.model_catalog_options(catalog)
-
-        self.assertEqual(["✅", "🔑", "📁", "⚠", "⚠", "🚫"], [option.split()[0] for option in options])
+        self.assertEqual(list(catalog), module.model_catalog_options(catalog))
+        with mock.patch.object(module, "COMMERCIAL_RELEASE", True):
+            options = module.model_catalog_options(catalog)
+            self.assertEqual(["✅", "🔑", "📁", "⚠", "⚠", "🚫"], [option.split()[0] for option in options])
         for raw_name, entry in catalog.items():
-            decorated = module.model_catalog_label(raw_name, entry)
+            decorated = f"{module.MODEL_STATUS_PRESENTATION[module.normalize_commercial_status(entry)][1]}{raw_name}"
             self.assertEqual(raw_name, module.resolve_model_catalog_name(catalog, raw_name))
             self.assertEqual(raw_name, module.resolve_model_catalog_name(catalog, decorated))
         self.assertEqual("unclear", module.normalize_commercial_status({}))
         self.assertEqual("unclear", module.normalize_commercial_status({"commercial_status": "invalid"}))
 
-    def test_hf_and_gguf_nodes_expose_only_prefixed_selectable_models(self):
+    def test_community_hf_and_gguf_nodes_expose_plain_model_names(self):
         package = load_thinkingllm_loader_subset([
             "AILab_QwenVL.py",
             "AILab_QwenVL_GGUF.py",
@@ -505,7 +506,6 @@ class TestModelRecommendations(unittest.TestCase):
             "AILab_QwenVL_GGUF_PromptEnhancer.py",
         ])
         prefixes = ["✅ Commercial | ", "🔑 External / gated | ", "📁 Local / user-supplied | ", "⚠ Rights unclear | ", "🚫 Non-commercial | "]
-        order = {prefix: index for index, prefix in enumerate(prefixes)}
         node_names = (
             "ThinkingLLM_QwenVL",
             "ThinkingLLM_QwenVL_Advanced",
@@ -519,9 +519,7 @@ class TestModelRecommendations(unittest.TestCase):
         for node_name in node_names:
             with self.subTest(node_name=node_name):
                 options = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"]["model_name"][0]
-                option_order = [next(order[prefix] for prefix in prefixes if option.startswith(prefix)) for option in options]
-                self.assertEqual(option_order, sorted(option_order))
-                self.assertTrue(all(option not in prefixes for option in options))
+                self.assertTrue(all(not option.startswith(tuple(prefixes)) for option in options))
 
     def test_commercial_mode_disables_mutable_runtime_behaviour(self):
         init_source = read_source("__init__.py")
@@ -848,7 +846,7 @@ class TestModelRecommendations(unittest.TestCase):
             package = load_thinkingllm_loader_subset(["AILab_QwenVL.py"])
         required = package.NODE_CLASS_MAPPINGS["ThinkingLLM_QwenVL"].INPUT_TYPES()["required"]
         _, meta = required["model_name"]
-        self.assertEqual(meta["default"], "⚠ Rights unclear | Qwen3-VL-4B-Instruct-Abliterated [DL: 7.5GB, VRAM: 6.0GB]")
+        self.assertEqual(meta["default"], "Qwen3-VL-4B-Instruct-Abliterated [DL: 7.5GB, VRAM: 6.0GB]")
 
     def test_appearance_js_loads_recommendation_widget(self):
         source = read_source("web/js/appearance.js")
@@ -1087,7 +1085,7 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
                 self.assertIn('"hf_token": ("STRING"', source)
                 self.assertRegex(source, r'"hf_token": \("STRING", \{[^\n]+"tooltip"')
 
-    def test_status_access_policy_blocks_network_and_warns_for_local_restricted_models(self):
+    def test_community_access_policy_only_requires_auth_for_gated_models(self):
         module = self._load_qwenvl_with_stubs()
         gated = {"commercial_status": "external_gated"}
 
@@ -1099,12 +1097,8 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
 
         for status in ("unclear", "noncommercial"):
             with self.subTest(status=status):
-                with self.assertRaisesRegex(PermissionError, "Automatic download blocked"):
-                    module.enforce_model_access({"commercial_status": status}, "example/model", local_exists=False)
-                output = io.StringIO()
-                with contextlib.redirect_stdout(output):
-                    module.enforce_model_access({"commercial_status": status}, "example/model", local_exists=True)
-                self.assertIn("Verify its license", output.getvalue())
+                module.enforce_model_access({"commercial_status": status}, "example/model", local_exists=False)
+                module.enforce_model_access({"commercial_status": status}, "example/model", local_exists=True)
 
     def test_commercial_mode_rejects_every_status_except_cleared(self):
         module = self._load_qwenvl_with_stubs()
