@@ -242,6 +242,10 @@ For local GGUF models, keep the matching mmproj file beside the model file.
 - Flash Attention support is best on Linux. The nodes fall back when it is unavailable.
 - The thinking toggle works best with Qwen3.5 and Qwen3 style models. Other architectures may ignore the steering.
 
+## Production deployment
+
+This repository provides ComfyUI nodes, not a complete production runtime. If you plan to expose a workflow through an API on RunPod Serverless, review the dependency, validation, testing, and rollback requirements in the [ComfyUI on RunPod production-readiness checklist](https://comfyrail.dev/production-readiness).
+
 ## FAQ
 
 **Why does the node sometimes answer quickly and sometimes take longer?**
