@@ -26,15 +26,19 @@ def _load_system_prompt_presets() -> tuple[list[str], dict[str, str]]:
         for name, prompt in system_prompts.items()
         if isinstance(prompt, str)
     }
+    system_prompts.setdefault(NO_PRESET_PROMPT, "")
 
     raw_presets = data.get("_preset_prompts") or []
-    preset_prompts = [str(name) for name in raw_presets if isinstance(name, str)]
+    preset_prompts = [
+        name
+        for name in raw_presets
+        if isinstance(name, str) and name in system_prompts
+    ]
     if not preset_prompts:
         preset_prompts = list(system_prompts)
     if NO_PRESET_PROMPT not in preset_prompts:
         preset_prompts.insert(0, NO_PRESET_PROMPT)
 
-    system_prompts.setdefault(NO_PRESET_PROMPT, "")
     return preset_prompts, system_prompts
 
 
@@ -65,8 +69,7 @@ class ThinkingLLMSystemPromptPreset:
 
     def get_system_prompt(self, preset_prompt: str):
         _, system_prompts = _load_system_prompt_presets()
-        # Match the existing ThinkingLLM node's compatibility fallback.
-        return (system_prompts.get(preset_prompt, preset_prompt),)
+        return (system_prompts.get(preset_prompt, ""),)
 
 
 NODE_CLASS_MAPPINGS = {

@@ -203,9 +203,17 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
     }
 
 
-def load_thinkingllm_loader_subset(module_filenames: list[str]):
+def load_thinkingllm_loader_subset(
+    module_filenames: list[str],
+    node_filenames: list[str] | None = None,
+):
     package_name = "thinkingllm_loader_smoke"
-    tracked_names = [package_name, *[Path(filename).stem for filename in module_filenames]]
+    node_filenames = node_filenames or []
+    tracked_names = [
+        package_name,
+        *[Path(filename).stem for filename in module_filenames],
+        *[Path(filename).stem for filename in node_filenames],
+    ]
     previous_modules = {
         name: sys.modules[name]
         for name in tracked_names
@@ -220,7 +228,7 @@ def load_thinkingllm_loader_subset(module_filenames: list[str]):
         if resolved == pkg_path:
             return ["__init__.py", *module_filenames]
         if resolved == nodes_path:
-            return []
+            return node_filenames
         return real_listdir(path)
 
     try:
@@ -529,7 +537,16 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertIn('os.environ.get("THINKINGLLM_COMMERCIAL_RELEASE") == "1"', init_source)
         self.assertIn('WEB_DIRECTORY = None if COMMERCIAL_RELEASE else "./web"', init_source)
         self.assertNotIn('"AILab_QwenVL_GGUF"', re.search(r"COMMERCIAL_MODULES = \{.*?\}", init_source, re.DOTALL).group(0))
-        self.assertIn('COMMERCIAL_NODE_MODULES = {"story_split_node", "vram_cleanup"}', init_source)
+        commercial_node_modules = re.search(
+            r"COMMERCIAL_NODE_MODULES\s*=\s*(\{.*?\})",
+            init_source,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(commercial_node_modules)
+        self.assertEqual(
+            ast.literal_eval(commercial_node_modules.group(1)),
+            {"story_split_node", "system_prompt_preset", "vram_cleanup"},
+        )
         self.assertIn("only permits preinstalled, hash-locked models", hf_source)
         self.assertIn("if custom.exists() and not COMMERCIAL_RELEASE", hf_source)
         self.assertIn("if not COMMERCIAL_RELEASE:\n        _scan_local_hf_models()", hf_source)
@@ -843,7 +860,10 @@ class TestModelRecommendations(unittest.TestCase):
         node_cls = module.NODE_CLASS_MAPPINGS[node_name]
         combo = node_cls.INPUT_TYPES()["required"]["preset_prompt"][0]
 
-        self.assertEqual(combo, data["_preset_prompts"])
+        expected_presets = [
+            name for name in data["_preset_prompts"] if name in data["qwenvl"]
+        ]
+        self.assertEqual(combo, expected_presets)
         self.assertEqual(node_cls.RETURN_TYPES, ("STRING",))
         self.assertEqual(node_cls.RETURN_NAMES, ("system_prompt",))
         self.assertEqual(
@@ -857,15 +877,40 @@ class TestModelRecommendations(unittest.TestCase):
 
         legacy_preset = "🍿 Wan 2.2 NSFW T2V Timeline (3s)"
         self.assertNotIn(legacy_preset, data["qwenvl"])
+        self.assertNotIn(legacy_preset, combo)
         self.assertEqual(
             node_cls().get_system_prompt(legacy_preset),
-            (legacy_preset,),
+            ("",),
         )
+
+    def test_standalone_system_prompt_preset_node_is_registered_by_all_loaders(self):
+        node_name = "ThinkingLLM_SystemPromptPreset"
+        node_files = ["system_prompt_preset.py"]
+
+        community_package = load_thinkingllm_loader_subset([], node_files)
+        self.assertIn(node_name, community_package.NODE_CLASS_MAPPINGS)
+
+        with mock.patch.dict(os.environ, {"THINKINGLLM_COMMERCIAL_RELEASE": "1"}):
+            commercial_package = load_thinkingllm_loader_subset([], node_files)
+        self.assertIn(node_name, commercial_package.NODE_CLASS_MAPPINGS)
 
     def test_appearance_js_hooks_preset_dropdown_tooltips(self):
         source = read_source("web/js/appearance.js")
         self.assertIn("preset_tooltips.json", source)
         self.assertIn("hookPresetTooltipPreviews(node)", source)
+        self.assertIn("PRESET_TOOLTIP_NODE_NAMES.has(node.comfyClass)", source)
+        inference_nodes = re.search(
+            r"const THINKINGLLM_NODE_NAMES = new Set\(\[(.*?)\]\);",
+            source,
+            re.DOTALL,
+        ).group(1)
+        tooltip_nodes = re.search(
+            r"const PRESET_TOOLTIP_NODE_NAMES = new Set\(\[(.*?)\]\);",
+            source,
+            re.DOTALL,
+        ).group(1)
+        self.assertNotIn("ThinkingLLM_SystemPromptPreset", inference_nodes)
+        self.assertIn("ThinkingLLM_SystemPromptPreset", tooltip_nodes)
         for widget_name in ["preset_prompt", "enhancement_style", "preset_system_prompt"]:
             with self.subTest(widget_name=widget_name):
                 self.assertIn(f'"{widget_name}"', source)
@@ -913,6 +958,7 @@ class TestModelRecommendations(unittest.TestCase):
             "ThinkingLLM_Gemma4_Audio_GGUF",
             "ThinkingLLM_Whisper_ASR",
             "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+            "ThinkingLLM_SystemPromptPreset",
             "VRAMCleanup",
             "StorySplitNode",
         ]

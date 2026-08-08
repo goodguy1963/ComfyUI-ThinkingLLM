@@ -23,6 +23,7 @@ const NODE_COLORS = {
     "ThinkingLLM_Gemma4_Audio_GGUF": "QwenVLGGUF",
     "ThinkingLLM_Whisper_ASR": "QwenVLGGUF",
     "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": "Enhancer",
+    "ThinkingLLM_SystemPromptPreset": "Tools",
     "AILab_QwenVL_PromptLibrary": "Tools",
     "VRAMCleanup": "Tools",
     "StorySplitNode": "Tools",
@@ -43,6 +44,11 @@ const THINKINGLLM_NODE_NAMES = new Set([
     "ThinkingLLM_Gemma4_Audio_GGUF",
     "ThinkingLLM_Whisper_ASR",
     "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+]);
+
+const PRESET_TOOLTIP_NODE_NAMES = new Set([
+    ...THINKINGLLM_NODE_NAMES,
+    "ThinkingLLM_SystemPromptPreset",
 ]);
 
 const AUDIO_CAPABLE_NODE_NAMES = new Set([
@@ -406,7 +412,7 @@ function updatePresetTooltip(widget, promptMap) {
 }
 
 function hookPresetTooltipPreviews(node) {
-    if (!THINKINGLLM_NODE_NAMES.has(node.comfyClass) || node._thinkingllmPresetTooltipsHooked) {
+    if (!PRESET_TOOLTIP_NODE_NAMES.has(node.comfyClass) || node._thinkingllmPresetTooltipsHooked) {
         return;
     }
     node._thinkingllmPresetTooltipsHooked = true;
