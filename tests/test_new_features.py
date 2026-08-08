@@ -833,6 +833,35 @@ class TestModelRecommendations(unittest.TestCase):
         }
         self.assertEqual(tooltip_payload, expected)
 
+    def test_standalone_system_prompt_preset_node(self):
+        data = json.loads((PKG / "AILab_System_Prompts.json").read_text(encoding="utf-8"))
+        module = load_module_from_file(
+            "nodes/system_prompt_preset.py",
+            "thinkingllm_system_prompt_preset_test",
+        )
+        node_name = "ThinkingLLM_SystemPromptPreset"
+        node_cls = module.NODE_CLASS_MAPPINGS[node_name]
+        combo = node_cls.INPUT_TYPES()["required"]["preset_prompt"][0]
+
+        self.assertEqual(combo, data["_preset_prompts"])
+        self.assertEqual(node_cls.RETURN_TYPES, ("STRING",))
+        self.assertEqual(node_cls.RETURN_NAMES, ("system_prompt",))
+        self.assertEqual(
+            node_cls().get_system_prompt("🖼️ Detailed Description"),
+            (data["qwenvl"]["🖼️ Detailed Description"],),
+        )
+        self.assertEqual(
+            node_cls().get_system_prompt(module.NO_PRESET_PROMPT),
+            ("",),
+        )
+
+        legacy_preset = "🍿 Wan 2.2 NSFW T2V Timeline (3s)"
+        self.assertNotIn(legacy_preset, data["qwenvl"])
+        self.assertEqual(
+            node_cls().get_system_prompt(legacy_preset),
+            (legacy_preset,),
+        )
+
     def test_appearance_js_hooks_preset_dropdown_tooltips(self):
         source = read_source("web/js/appearance.js")
         self.assertIn("preset_tooltips.json", source)
