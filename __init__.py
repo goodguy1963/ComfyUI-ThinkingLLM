@@ -27,7 +27,11 @@ COMMERCIAL_MODULES = {
     "AILab_QwenVL_PromptEnhancer",
     "AILab_StreamDisplay",
 }
-COMMERCIAL_NODE_MODULES = {"story_split_node", "vram_cleanup"}
+COMMERCIAL_NODE_MODULES = {
+    "story_split_node",
+    "system_prompt_preset",
+    "vram_cleanup",
+}
 
 LEGACY_NODE_REPLACEMENTS = {
     "AILab_QwenVL": "ThinkingLLM_QwenVL",
