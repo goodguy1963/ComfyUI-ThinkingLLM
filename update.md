@@ -1,5 +1,19 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.23 (2026/08/08) - MiniMax H3 Reference Prompt Guard
+
+### 2.3.23 Changes
+
+- Required an explicit target-video prompt and reference-role assignment for MiniMax H3 Reference-to-Video generation.
+- Applied the same validation to Hugging Face, ComfyUI-native, and GGUF vision nodes.
+- Rejected empty ComfyUI-native model generations before they can be cached or saved as blank output.
+- Documented the correct Text-to-Video versus Reference-to-Video selection and recommended direct-generation settings.
+
+### 2.3.23 Validation
+
+- Added regression coverage for missing Reference-to-Video target prompts and empty native model output.
+- All 114 isolated regression tests pass.
+
 ## Version 2.3.22 (2026/08/06) - Community Model Catalog Fix
 
 ### 2.3.22 Changes
