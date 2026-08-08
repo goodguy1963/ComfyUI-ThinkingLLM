@@ -195,6 +195,7 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             resolve_qwen_thinking_mode=lambda *args, **kwargs: False,
             resolve_qwen_context_window=lambda *args, **kwargs: 0,
             set_node_saved_prompt=lambda *args, **kwargs: None,
+            validate_minimax_reference_request=lambda *args, **kwargs: None,
             load_node_prompt_state=lambda *args, **kwargs: None,
             QwenVLBase=qwen_base,
             Quantization=_StubQuantization,
@@ -664,6 +665,23 @@ class TestModelRecommendations(unittest.TestCase):
             self.assertIn(text_label, values)
             self.assertNotIn(reference_label, values)
 
+    def test_minimax_reference_requires_a_custom_target_prompt(self):
+        stub_modules = build_loader_test_stubs()
+        stub_modules.pop("AILab_QwenVL", None)
+        with mock.patch.dict(sys.modules, stub_modules, clear=False):
+            module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_minimax_reference_validation_test")
+
+        with self.assertRaisesRegex(ValueError, "requires a custom prompt"):
+            module.validate_minimax_reference_request("🖼️ MiniMax H3 Reference-to-Video", "  ")
+
+        module.validate_minimax_reference_request("🖼️ MiniMax H3 Reference-to-Video", "Keep Picture 1 as the character identity.")
+        module.validate_minimax_reference_request("🎬 MiniMax H3 Text-to-Video", "")
+        for filename in ("AILab_QwenVL.py", "AILab_QwenVL_GGUF.py"):
+            self.assertIn(
+                "validate_minimax_reference_request(preset_prompt, custom_prompt)",
+                read_source(filename),
+            )
+
     def test_llm_input_logging_is_complete_and_shared(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_input_logging_test")
@@ -1016,6 +1034,7 @@ class TestSharedComfyUITextEncoders(unittest.TestCase):
             "clip_l.safetensors",
         ]
         calls = {}
+        calls["decoded_text"] = "native answer"
 
         class FakeClip:
             def tokenize(self, text, **kwargs):
@@ -1027,7 +1046,7 @@ class TestSharedComfyUITextEncoders(unittest.TestCase):
                 return [1, 2, 3]
 
             def decode(self, tokens):
-                return "native answer"
+                return calls["decoded_text"]
 
         def load_clip(**kwargs):
             calls["load"] = kwargs
@@ -1060,6 +1079,9 @@ class TestSharedComfyUITextEncoders(unittest.TestCase):
             self.assertEqual([str(PKG / "qwen3vl_8b_fp8_scaled.safetensors")], calls["load"]["ckpt_paths"])
             self.assertTrue(calls["tokenize"][1]["thinking"])
             self.assertEqual(7, calls["generate"][1]["seed"])
+            calls["decoded_text"] = "  "
+            with self.assertRaisesRegex(RuntimeError, "without producing text"):
+                node.generate("hello", None, None, 4, 32, 0.7, 0.9, 1, 1.1, model_name=qwen_name, seed=8)
             with self.assertRaisesRegex(ValueError, "not video"):
                 node.generate("hello", None, object(), 4, 32, 0.7, 0.9, 1, 1.1, model_name=gemma_name)
 

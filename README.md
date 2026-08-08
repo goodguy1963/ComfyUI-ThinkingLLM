@@ -141,6 +141,8 @@ The GGUF path requires a multimodal-capable `llama-cpp-python` build. The normal
 
 Select `🎬 MiniMax H3 Text-to-Video` for text and keyframe prompting or `🖼️ MiniMax H3 Reference-to-Video` for full-reference generation. Vision nodes support text-to-video, first-frame, first-and-last-frame, last-frame, and full-reference prompting; text-only Prompt Enhancer nodes emit the T2VA format. The presets keep timed shots, camera motion, dialogue, soundscape, music, keyframe alignment, and reference-retention fields in the structure expected by H3.
 
+Reference-to-Video requires a custom prompt that describes the target video and assigns each reference a role such as identity, style, motion, camera, or voice. To animate one image as the first frame, use Text-to-Video instead. For fast direct prompt generation, start with `enable_thinking=false` and `max_tokens=1024` for Text-to-Video or `max_tokens=1536` for Reference-to-Video; raise the limit only if a useful response is truncated.
+
 See the official [MiniMax H3 ComfyUI workflows](https://docs.comfy.org/tutorials/video/minimax/minimax-h3), [base prompt guide](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md), and [full-reference prompt guide](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md).
 
 ## Supported models

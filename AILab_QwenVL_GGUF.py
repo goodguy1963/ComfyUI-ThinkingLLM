@@ -72,6 +72,7 @@ from AILab_QwenVL import (
     get_node_saved_prompt_with_seed,
     resolve_qwen_thinking_mode,
     set_node_saved_prompt,
+    validate_minimax_reference_request,
     load_node_prompt_state,
     _make_node_state_key,
     NODE_PROMPT_STATE,
@@ -1961,6 +1962,7 @@ class QwenVLGGUFBase:
         hf_token="",
     ):
         model_name = resolve_model_catalog_name(GGUF_VL_CATALOG.get("models") or {}, model_name)
+        validate_minimax_reference_request(preset_prompt, custom_prompt)
         print(f"[QwenVL GGUF DEBUG] Starting run with seed={seed}")
         image, mask_hash = apply_mask_highlight(image, mask)
         image_hash = get_image_hash(image)

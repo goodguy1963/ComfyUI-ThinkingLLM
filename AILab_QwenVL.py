@@ -88,6 +88,7 @@ _QWEN_SOFT_SWITCHES = {"/think", "/no_think", "/nothink"}
 _STREAM_HEARTBEAT_INTERVAL_SECONDS = 3.0
 _DOWNLOAD_STATUS_INTERVAL_SECONDS = 0.25
 _HF_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
+MINIMAX_H3_REFERENCE_PRESET = "🖼️ MiniMax H3 Reference-to-Video"
 MASK_FOCUS_INSTRUCTION = (
     "The image has a mask highlight: the selected area is shown at normal brightness and the surrounding "
     "context is dimmed. Analyze and describe only the normal-brightness selected area. Use the dimmed "
@@ -462,6 +463,16 @@ def apply_qwen_soft_thinking_directive(prompt_text, enable_thinking, supports_so
     return "\n".join(lines).strip()
 
 
+def validate_minimax_reference_request(preset_prompt, custom_prompt):
+    """Require an explicit target and reference role for MiniMax H3 R2V prompting."""
+    if preset_prompt == MINIMAX_H3_REFERENCE_PRESET and not (custom_prompt or "").strip():
+        raise ValueError(
+            "[QwenVL] MiniMax H3 Reference-to-Video requires a custom prompt describing the target video "
+            "and how each reference should be used. To animate a single image as the first frame, use "
+            "MiniMax H3 Text-to-Video instead."
+        )
+
+
 def log_llm_input(
     backend: str,
     stage: str,
@@ -707,6 +718,7 @@ __all__ = [
     'get_cache_key', 'get_alternative_cache_key',
     'save_prompt_cache',
     'get_image_hash', 'get_video_hash', 'apply_mask_highlight', 'MASK_FOCUS_INSTRUCTION',
+    'MINIMAX_H3_REFERENCE_PRESET', 'validate_minimax_reference_request',
     'check_pytorch_memory', 'set_pytorch_memory_fraction',
     'get_device_info', 'tensor_to_pil', 'enforce_memory',
     'quantization_config', 'ensure_model', 'resolve_attention_mode',
@@ -1904,6 +1916,11 @@ class QwenVLBase:
             )
             throw_exception_if_processing_interrupted()
             raw_text = self.model.decode(output_tokens).strip()
+            if not raw_text:
+                raise RuntimeError(
+                    "[QwenVL] The model ended generation without producing text. Change the seed or add a more "
+                    "specific custom prompt; the empty result was not cached."
+                )
             if stream_to_terminal:
                 print("[QwenVL] ComfyUI native generation completed (live token streaming is unavailable):")
                 print(raw_text)
@@ -2084,6 +2101,7 @@ class QwenVLBase:
 
     def run(self, model_name, quantization, preset_prompt, custom_prompt, image, video, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt=False, unique_id=None, extra_pnginfo=None, node_class="QwenVL", stream_to_terminal=False, enable_thinking=True, hf_token: str | None = None, mask=None, llm_input_preset_name: str | None = None):
         model_name = resolve_model_catalog_name(HF_ALL_MODELS, model_name)
+        validate_minimax_reference_request(preset_prompt, custom_prompt)
         torch.manual_seed(seed)
         image, mask_hash = apply_mask_highlight(image, mask)
         image_hash = get_image_hash(image)
