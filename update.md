@@ -1,5 +1,19 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.3.24 (2026/08/08) - System Prompt Preset Utility
+
+### 2.3.24 Changes
+
+- Added a standalone `ThinkingLLM System Prompt Preset` utility node that outputs reusable system prompts as a standard `STRING`.
+- Exposed only presets backed by prompt definitions and made obsolete or unknown saved values return an empty string instead of a display label.
+- Registered the utility in both Community and commercial releases.
+- Added the existing ThinkingLLM tool styling and preset tooltip previews without enabling inference-only recommendation or token behavior.
+
+### 2.3.24 Validation
+
+- Added regression coverage for prompt lookup, undefined presets, loader registration, and frontend integration.
+- All 116 isolated regression tests pass on the merged `main` release candidate.
+
 ## Version 2.3.23 (2026/08/08) - MiniMax H3 Reference Prompt Guard
 
 ### 2.3.23 Changes
