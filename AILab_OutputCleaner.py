@@ -2,6 +2,8 @@ import json
 import re
 from dataclasses import dataclass
 
+OUTPUT_CLEANER_VERSION = 4
+
 
 @dataclass(frozen=True)
 class OutputCleanConfig:
@@ -27,13 +29,13 @@ _IM_TOKEN_RE = re.compile(
     r"(?i)<\|?im_(start|end)\|?>|<im_(start|end)>|<\|endoftext\|>",
 )
 _PLANNING_RE = re.compile(
-    r"(?is)\b("
+    r"(?im)^\s*(?:[-*]\s*)?(?:\*\*)?\s*(?:"
     r"final\s+plan\b|"
     r"final\s+check\b|"
-    r"i\s+(should|need|must|will|want|am\s+going\s+to|have\s+to)\b|"
+    r"i\s+(?:should|need|must|will|want|am\s+going\s+to|have\s+to)\b|"
     r"let's\b|"
-    r"first\b|next\b|then\b|"
-    r"wait\b|"
+    r"first\s*[,.:]|next\s*[,.:]|then\s*[,.:]|"
+    r"wait\s*[,.:]|"
     r"ready\s+to\s+write\b|"
     r"writing\s+the\s+prompt\b|"
     r"so\s+i\s+need\s+to\b|"
@@ -55,11 +57,12 @@ def clean_model_output(text: str, config: OutputCleanConfig | None = None) -> st
     if cfg.strip_think:
         cleaned = _THINK_BLOCK_RE.sub("", cleaned)
         cleaned = _THINK_CLOSE_RE.sub("", cleaned)
-        if _THINK_OPEN_RE.search(cleaned):
-            cleaned = _THINK_OPEN_RE.sub("", cleaned)
-            parts = re.split(r"\n\s*\n", cleaned, maxsplit=1)
-            if len(parts) == 2:
-                cleaned = parts[1]
+        unclosed_think = _THINK_OPEN_RE.search(cleaned)
+        if unclosed_think:
+            # When generation ends before </think>, no final answer exists.
+            # Prompt-shaped examples inside that unfinished reasoning must not
+            # be exposed as RESPONSE.
+            cleaned = cleaned[:unclosed_think.start()]
         cleaned = cleaned.strip()
 
     cleaned = _IM_TOKEN_RE.sub("", cleaned).strip()

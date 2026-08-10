@@ -20,38 +20,49 @@ import subprocess
 import sys
 from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer, BitsAndBytesConfig
 
-from AILab_OutputCleaner import OutputCleanConfig, clean_model_output, prompt_output_guard
+from AILab_OutputCleaner import OUTPUT_CLEANER_VERSION, OutputCleanConfig, clean_model_output, prompt_output_guard
 from AILab_StreamDisplay import TerminalStreamDisplay
 from comfy.model_management import throw_exception_if_processing_interrupted
 
-from AILab_QwenVL import (
+from thinkingllm_core.hf_models import (
     ATTENTION_MODES,
     HF_ALL_MODELS,
     HF_TEXT_MODELS,
     HF_VL_MODELS,
-    NODE_PROMPT_STATE,
-    PROMPT_CACHE,
+    TOOLTIPS,
+    Quantization,
     _default_model_from_config,
-    _make_node_state_key,
-    apply_qwen_soft_thinking_directive,
-    build_node_input_signature,
-    ensure_model,
     ensure_cuda_vram_headroom,
-    get_cache_key,
-    get_alternative_cache_key,
-    get_node_saved_prompt,
-    get_node_saved_prompt_with_seed,
-    log_llm_input,
+    ensure_model,
+)
+from thinkingllm_core.hf_runtime import QwenVLBase
+from thinkingllm_core.model_access import (
     model_catalog_label,
     model_catalog_options,
     resolve_model_catalog_name,
-    resolve_qwen_thinking_mode,
+)
+from thinkingllm_core.prompt_contracts import (
+    VIDEO_DURATION_INPUT,
+    apply_qwen_soft_thinking_directive,
+    apply_video_duration_context,
+    ensure_video_prompt_duration,
     resolve_qwen_context_window,
+    resolve_qwen_thinking_mode,
+    resolve_video_duration,
+    validate_minimax_source_duration,
+)
+from thinkingllm_core.prompt_state import (
+    NODE_PROMPT_STATE,
+    PROMPT_CACHE,
+    _make_node_state_key,
+    build_node_input_signature,
+    get_alternative_cache_key,
+    get_cache_key,
+    get_node_saved_prompt,
+    get_node_saved_prompt_with_seed,
+    log_llm_input,
     save_prompt_cache,
-    QwenVLBase,
-    Quantization,
     set_node_saved_prompt,
-    TOOLTIPS,
 )
 
 COMMERCIAL_RELEASE = os.environ.get("THINKINGLLM_COMMERCIAL_RELEASE") == "1"
@@ -188,8 +199,10 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Show clean wrapped generated tokens in the ComfyUI terminal. When enabled, fixed-seed prompt reuse is bypassed so a fresh streamed run can occur."}),
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Enable model reasoning/thinking when the backend supports it: True=allow thinking, False=force direct answer. Even when enabled, easy prompts may still get a direct answer, and this node automatically disables thinking when there is not enough output budget left for useful reasoning. Prompt enhancers still return a cleaned final prompt, so terminal reasoning may be hidden or empty."}),
                 "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": TOOLTIPS["hf_token"]}),
-            }
-            ,
+            },
+            "optional": {
+                "duration_seconds": VIDEO_DURATION_INPUT,
+            },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
                 "extra_pnginfo": "EXTRA_PNGINFO",
@@ -218,9 +231,17 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         extra_pnginfo=None,
         enable_thinking=True,
         hf_token="",
+        duration_seconds=5.0,
     ):
         model_name = resolve_model_catalog_name(HF_ALL_MODELS, model_name)
         node_class = "ThinkingLLM_QwenVL_PromptEnhancer"
+        resolved_duration = resolve_video_duration(enhancement_style, duration_seconds)
+        validate_minimax_source_duration(enhancement_style, duration_seconds, prompt_text)
+        effective_duration_seconds = resolved_duration["effective_seconds"] if resolved_duration else None
+        duration_signature = ({
+            "effective_duration_seconds": effective_duration_seconds,
+            "video_prompt_contract_version": resolved_duration.get("contract_version"),
+        } if resolved_duration else {})
         input_signature = build_node_input_signature(
             model_name=model_name,
             quantization=quantization,
@@ -231,10 +252,12 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             enhancement_style=enhancement_style,
             custom_system_prompt=custom_system_prompt,
             enable_thinking=bool(enable_thinking),
+            output_cleaner_version=OUTPUT_CLEANER_VERSION,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            **duration_signature,
         )
 
         # Auto-retrieve saved prompt when seed is fixed (no keep_last_prompt needed)
@@ -265,6 +288,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         user_prompt = prompt_text.strip() or "Describe a scene vividly."
         merged_prompt = f"{user_prompt}\n\n{base_instruction}".strip()
         if model_name in HF_TEXT_MODELS:
+            merged_prompt = apply_video_duration_context(merged_prompt, enhancement_style, duration_seconds)
             enhanced, enhanced_raw = self._invoke_text(
                 model_name,
                 quantization,
@@ -303,13 +327,19 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 enable_thinking=enable_thinking,
                 hf_token=hf_token,
                 preset_name=enhancement_style,
+                duration_seconds=duration_seconds,
             )
             hf_token = ""
             key = _make_node_state_key(node_class, unique_id, extra_pnginfo)
             entry = NODE_PROMPT_STATE.get(key, {})
             raw_trace = entry.get("raw_trace", "") if isinstance(entry, dict) else ""
 
-        final = enhanced.strip()
+        final = ensure_video_prompt_duration(
+            enhanced.strip(),
+            enhancement_style,
+            duration_seconds,
+            source_prompt_text=prompt_text,
+        )
 
         # Persist per-node for future keep_last_prompt=True
         set_node_saved_prompt(node_class, unique_id, extra_pnginfo, final, raw_trace=raw_trace, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
@@ -338,6 +368,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         enable_thinking=True,
         hf_token: str | None = None,
         preset_name="",
+        duration_seconds=5.0,
     ):
         output = self.run(
             model_name=model_name,
@@ -364,6 +395,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             enable_thinking=enable_thinking,
             hf_token=hf_token,
             llm_input_preset_name=preset_name,
+            duration_seconds=duration_seconds,
         )
         return output[0]
 

@@ -27,41 +27,51 @@ import torch
 from huggingface_hub import snapshot_download
 from AILab_LlamaCppInstaller import ensure_llama_cpp_backend
 
-from AILab_OutputCleaner import OutputCleanConfig, clean_model_output, prompt_output_guard
+from AILab_OutputCleaner import OUTPUT_CLEANER_VERSION, OutputCleanConfig, clean_model_output, prompt_output_guard
 from comfy.model_management import throw_exception_if_processing_interrupted
 from comfy.model_management import throw_exception_if_processing_interrupted
 
-# Import cache functions from main module
+# Import shared contracts directly; AILab_QwenVL remains a compatibility facade.
 import sys
 sys.path.append(str(Path(__file__).parent))
 from AILab_StreamDisplay import (
     StreamDegenerationError,
     StreamDegenerationGuard,
     TerminalStreamDisplay,
+    compose_streamed_model_output,
     extract_stream_token,
     strip_degenerate_repetition,
 )
-from AILab_QwenVL import (
-    PROMPT_CACHE,
-    apply_qwen_soft_thinking_directive,
-    build_node_input_signature,
+from thinkingllm_core.hf_models import ensure_cuda_vram_headroom
+from thinkingllm_core.model_access import (
     download_hf_file_to_path,
-    ensure_cuda_vram_headroom,
-    estimate_qwen_text_tokens,
-    get_cache_key,
-    get_alternative_cache_key,
-    log_llm_input,
+    enforce_model_access,
     model_catalog_options,
     resolve_model_catalog_name,
-    enforce_model_access,
-    save_prompt_cache,
+)
+from thinkingllm_core.prompt_contracts import (
+    VIDEO_DURATION_INPUT,
+    apply_qwen_soft_thinking_directive,
+    apply_video_duration_context,
+    ensure_video_prompt_duration,
+    estimate_qwen_text_tokens,
+    resolve_qwen_thinking_mode,
+    resolve_video_duration,
+    validate_minimax_source_duration,
+)
+from thinkingllm_core.prompt_state import (
+    PROMPT_CACHE,
+    _build_workflow_fingerprint,
+    _make_node_state_key,
+    build_node_input_signature,
+    get_alternative_cache_key,
+    get_cache_key,
     get_node_saved_prompt,
     get_node_saved_prompt_with_seed,
-    resolve_qwen_thinking_mode,
-    set_node_saved_prompt,
     load_node_prompt_state,
-    _make_node_state_key,
-    _build_workflow_fingerprint,
+    log_llm_input,
+    save_prompt_cache,
+    set_node_saved_prompt,
 )
 from AILab_QwenVL_GGUF import (
     construct_llama_safely,
@@ -83,7 +93,7 @@ GGUF_PROMPT_TOOLTIPS = {
     "temperature": "Sampling randomness. Lower is more stable; higher is more varied.",
     "top_p": "Nucleus sampling cutoff. Lower values restrict token choice; 0.9 is a balanced default.",
     "repetition_penalty": "Values above 1.0 reduce repeated phrases in the enhanced prompt.",
-    "english_output": "Ask the model to return the final enhanced prompt in English.",
+    "english_output": "Ask the model to return the final enhanced prompt in English. MiniMax H3 presets already require English and bypass the generic paragraph translation pass so their official field structure remains intact.",
     "device": "auto prefers GPU when available. If generation is unexpectedly slow, run tools/check_llama_backend.py to verify llama.cpp GPU offload.",
     "keep_model_loaded": "Keep the GGUF model in memory after generation so repeated prompt enhancement skips model loading.",
     "seed": "Sampling seed. Reusing it with identical inputs can reuse the saved prompt result.",
@@ -130,6 +140,10 @@ _QUANT_CANONICAL = {
 }
 
 _EMPTY_THINK_RE = re.compile(r"<think[^>]*>\s*</think>", flags=re.IGNORECASE | re.DOTALL)
+_LEADING_CLOSED_THINK_RE = re.compile(
+    r"^\s*(?:<think[^>]*>.*?</think>\s*)+",
+    flags=re.IGNORECASE | re.DOTALL,
+)
 _STREAM_HEARTBEAT_INTERVAL_SECONDS = 3.0
 _PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS = 3
 _STREAM_POLL_INTERVAL_SECONDS = 0.25
@@ -171,6 +185,64 @@ def _looks_like_prompt_planning(text: str) -> bool:
 
 def _prompt_output_is_usable(cleaned_text: str) -> bool:
     return bool(cleaned_text and not _looks_like_prompt_planning(cleaned_text))
+
+
+def _preset_output_is_usable(cleaned_text: str, preset_name: str) -> bool:
+    """Accept cleaned video output without imposing a second model schema gate."""
+    resolved = resolve_video_duration(preset_name, 5.0)
+    if resolved:
+        # OutputCleaner already removes completed thinking blocks and returns
+        # an empty string for unfinished ones. The target video model can
+        # tolerate minor field and formatting irregularities, so rejecting a
+        # non-empty final prompt here only creates false empty outputs.
+        return bool((cleaned_text or "").strip())
+    return _prompt_output_is_usable(cleaned_text)
+
+
+def _merge_assistant_prefill(content_text: str, assistant_prefill: str) -> str:
+    """Restore a chat-template prefill without duplicating a model-emitted field.
+
+    Some Qwen GGUF chat templates return a literal empty ``<think>`` block
+    before repeating the assistant prefill. Checking only the first visible
+    characters made us prepend the field a second time, so an otherwise valid
+    MiniMax result was rejected. Inspect the first final-answer text after any
+    closed leading think block and insert the prefill there only when missing.
+    """
+    content = (content_text or "").strip()
+    prefill = (assistant_prefill or "").strip()
+    if not content or not prefill:
+        return content
+
+    leading_think = _LEADING_CLOSED_THINK_RE.match(content)
+    answer_start = leading_think.end() if leading_think else 0
+    answer = content[answer_start:].lstrip()
+    if answer.casefold().startswith(prefill.casefold()):
+        return content
+
+    # An unfinished thinking block has no final answer to prefix.
+    if not leading_think and re.match(r"^\s*<think\b", content, flags=re.IGNORECASE):
+        return content
+
+    separator = "" if prefill.endswith((" ", "\n")) else " "
+    if leading_think:
+        return f"{content[:answer_start]}{prefill}{separator}{answer}"
+    return f"{prefill}{separator}{content}"
+
+
+def _video_assistant_prefill(preset_name: str) -> str:
+    """Start schema-only retries inside the target model's native format."""
+    resolved = resolve_video_duration(preset_name, 5.0)
+    if not resolved:
+        return ""
+    if resolved.get("provider") == "minimax_h3":
+        return (
+            "subject_definitions:"
+            if resolved.get("video_mode") == "ref2va"
+            else "integrated_multimodal_description:"
+        )
+    if resolved.get("provider") == "ltx_2_3":
+        return "A"
+    return ""
 
 
 def _maybe_emit_prompt_stream_heartbeat(stage_label: str, started_at: float, last_status_at: float, full_text: str) -> float:
@@ -495,6 +567,9 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 "auto_finalization_retry": ("BOOLEAN", {"default": False, "tooltip": GGUF_PROMPT_TOOLTIPS["auto_finalization_retry"]}),
                 "hf_token": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_PROMPT_TOOLTIPS["hf_token"]}),
             },
+            "optional": {
+                "duration_seconds": VIDEO_DURATION_INPUT,
+            },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
                 "extra_pnginfo": "EXTRA_PNGINFO",
@@ -711,10 +786,17 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         arch = read_gguf_architecture(resolved)
         self.gguf_arch = arch
         is_qwen = (arch and any(a in arch for a in ("qwen35", "qwen35moe", "qwen3", "qwen"))) or "qwen3.5-" in model_name.lower() or "qwen3-" in model_name.lower()
-        self.supports_qwen_soft_think = arch == "qwen3" if arch else "qwen3-" in model_name.lower()
+        self.supports_qwen_soft_think = (
+            bool(arch and (arch == "qwen3" or arch.startswith("qwen35")))
+            if arch
+            else ("qwen3-" in model_name.lower() or "qwen3.5-" in model_name.lower())
+        )
         if is_qwen:
             thinking_state = bool(enable_thinking)
-            kwargs["chat_template_kwargs"] = {"enable_thinking": thinking_state}
+            kwargs["chat_template_kwargs"] = {
+                "enable_thinking": thinking_state,
+                "thinking_mode": "enabled" if thinking_state else "disabled",
+            }
             state_label = "enabled" if thinking_state else "disabled"
             if not quiet:
                 print(f"[QwenVL] Qwen architecture detected (arch={arch}): Thinking {state_label} via chat template.")
@@ -752,6 +834,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         """Returns (cleaned_prompt, raw_trace) tuple."""
         stream_display = TerminalStreamDisplay("QwenVL GGUF", suppress_planning=True, compact=True) if stream_to_terminal else None
         supports_soft_think = getattr(self, "supports_qwen_soft_think", False)
+        is_video_preset = bool(resolve_video_duration(preset_name, 5.0))
         if supports_soft_think:
             directive = "/think" if enable_thinking else "/no_think"
             if not stream_to_terminal:
@@ -765,6 +848,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             stage_label: str,
             *,
             attempt_enable_thinking: bool | None = None,
+            assistant_prefill: str = "",
         ) -> str:
             current_enable_thinking = enable_thinking if attempt_enable_thinking is None else bool(attempt_enable_thinking)
             effective_user_prompt = apply_qwen_soft_thinking_directive(
@@ -785,6 +869,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 {"role": "system", "content": system},
                 {"role": "user", "content": effective_user_prompt},
             ]
+            if assistant_prefill:
+                messages.append({"role": "assistant", "content": assistant_prefill})
             log_llm_input(
                 "QwenVL PromptEnhancer GGUF",
                 stage_label,
@@ -793,6 +879,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 system_text=system,
             )
             full_text = ""
+            reasoning_text = ""
+            content_text = ""
             stage_started_at = time.monotonic()
             last_status_at = stage_started_at
             if stream_to_terminal:
@@ -822,6 +910,11 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                         "stop": ["<|im_end|>", "<|im_start|>"],
                         "stream": True,
                     }
+                    if supports_soft_think:
+                        completion_kwargs["chat_template_kwargs"] = {
+                            "enable_thinking": current_enable_thinking,
+                            "thinking_mode": "enabled" if current_enable_thinking else "disabled",
+                        }
                     completion_kwargs = _filter_kwargs_for_callable(getattr(llm, "create_chat_completion"), completion_kwargs)
                     response = llm.create_chat_completion(**completion_kwargs)
                     for chunk in response:
@@ -859,8 +952,10 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                         content_token = token.get("content", "")
                         display_token = reasoning_token + content_token
                         if reasoning_token:
+                            reasoning_text += reasoning_token
                             full_text += reasoning_token
                         if content_token:
+                            content_text += content_token
                             full_text += content_token
                         if display_token and stream_display is not None:
                             try:
@@ -892,18 +987,20 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 raise RuntimeError("[QwenVL] llama_cpp streaming returned empty response")
             if stopped_for_degenerate_stream:
                 print(f"[QwenVL GGUF] stopped repeated-token loop: {stopped_for_degenerate_stream}")
-            return strip_degenerate_repetition(full_text).strip()
+            if assistant_prefill and content_text.strip():
+                content_text = _merge_assistant_prefill(content_text, assistant_prefill)
+            separated_output = compose_streamed_model_output(reasoning_text, content_text)
+            return strip_degenerate_repetition(separated_output).strip()
 
         raw = _call(system_prompt, user_prompt, float(temperature), int(seed), initial_stage_label)
         cleaned = clean_model_output(raw, OutputCleanConfig(mode="prompt"))
         raw_trace_parts = [f"[{initial_stage_label}]\n{raw}"]
-        best_cleaned = cleaned.strip()
-        if _prompt_output_is_usable(best_cleaned):
+        best_cleaned = cleaned.strip() if _preset_output_is_usable(cleaned.strip(), preset_name) else ""
+        if best_cleaned:
             return best_cleaned, "\n\n".join(raw_trace_parts)
-        if not auto_finalization_retry:
-            return best_cleaned or "", "\n\n".join(raw_trace_parts)
+        if not (auto_finalization_retry or is_video_preset):
+            return "", "\n\n".join(raw_trace_parts)
 
-        current_raw = raw
         for attempt_number in range(2, _PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS + 1):
             if stream_to_terminal:
                 print(
@@ -912,16 +1009,15 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                     "— prior output was empty or reasoning-only"
                 )
             retry_system = (
-                "You are a professional photography prompt writer.\n"
-                "Output ONLY ONE final photography prompt paragraph.\n"
-                "No analysis, no planning steps, no first-person, and no <think>.\n"
-                "No bullet points, no headings, no JSON, no markdown, no quotes."
+                f"{system_prompt}\n\n"
+                "The prior response did not contain final prompt text. "
+                "Return the final output again using exactly the schema, field order, tags, and constraints above. "
+                "Do not collapse structured output into one paragraph. Do not include analysis or <think>."
             )
             retry_user = (
-                "Rewrite the following into the final prompt paragraph:\n\n"
-                f"{current_raw}\n"
+                "Return the final prompt for this original user request. Preserve supported user facts and verbatim dialogue:\n\n"
+                f"{user_prompt}\n"
             )
-            force_non_thinking = attempt_number == _PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS
             stage_label = f"FINALIZATION ATTEMPT {attempt_number}/{_PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS}"
             raw_retry = _call(
                 retry_system,
@@ -929,23 +1025,23 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 0.4,
                 int(seed) + 999 + attempt_number,
                 stage_label,
-                attempt_enable_thinking=False if force_non_thinking else enable_thinking,
+                attempt_enable_thinking=False,
+                assistant_prefill=_video_assistant_prefill(preset_name),
             )
             raw_trace_parts.append(f"[{stage_label}]\n{raw_retry}")
             cleaned_retry = clean_model_output(raw_retry, OutputCleanConfig(mode="prompt")).strip()
-            if cleaned_retry and len(cleaned_retry) >= len(best_cleaned):
+            retry_is_usable = _preset_output_is_usable(cleaned_retry, preset_name)
+            if retry_is_usable and len(cleaned_retry) >= len(best_cleaned):
                 best_cleaned = cleaned_retry
-            if _prompt_output_is_usable(cleaned_retry):
+            if retry_is_usable:
                 return cleaned_retry, "\n\n".join(raw_trace_parts)
-            current_raw = raw_retry
-
         if stream_to_terminal:
             print(
                 "[QwenVL PromptEnhancer GGUF] "
                 f"Finalization limit reached ({_PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS}/{_PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS}) "
                 "— returning the best cleaned prompt available"
             )
-        return best_cleaned or "", "\n\n".join(raw_trace_parts)
+        return best_cleaned, "\n\n".join(raw_trace_parts)
 
     def process(
         self,
@@ -968,22 +1064,34 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         enable_thinking=True,
         auto_finalization_retry=False,
         hf_token="",
+        duration_seconds=5.0,
     ):
         model_name = resolve_model_catalog_name(self.gguf_models.get("models") or {}, model_name)
         node_class = "ThinkingLLM_QwenVL_GGUF_PromptEnhancer"
+        resolved_duration = resolve_video_duration(preset_system_prompt, duration_seconds)
+        validate_minimax_source_duration(preset_system_prompt, duration_seconds, prompt_text)
+        is_minimax_preset = bool(resolved_duration and resolved_duration.get("provider") == "minimax_h3")
+        effective_english_output = bool(english_output and not is_minimax_preset)
+        effective_duration_seconds = resolved_duration["effective_seconds"] if resolved_duration else None
+        duration_signature = ({
+            "effective_duration_seconds": effective_duration_seconds,
+            "video_prompt_contract_version": resolved_duration.get("contract_version"),
+        } if resolved_duration else {})
         input_signature = build_node_input_signature(
             model_name=model_name,
             prompt_text=prompt_text,
             preset_system_prompt=preset_system_prompt,
             custom_system_prompt=custom_system_prompt,
-            english_output=bool(english_output),
+            english_output=effective_english_output,
             device=device,
             enable_thinking=bool(enable_thinking),
             auto_finalization_retry=bool(auto_finalization_retry),
+            output_cleaner_version=OUTPUT_CLEANER_VERSION,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            **duration_signature,
         )
 
         # Auto-retrieve saved prompt when seed is fixed (no keep_last_prompt needed)
@@ -1006,10 +1114,11 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             part for part in (
                 prompt_text.strip(),
                 custom_system_prompt.strip(),
-                f"english_output={bool(english_output)}",
+                f"english_output={effective_english_output}",
+                f"output_cleaner_version={OUTPUT_CLEANER_VERSION}",
             ) if part
         )
-        cache_key = get_cache_key(model_name, preset_system_prompt, cache_prompt, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking)
+        cache_key = get_cache_key(model_name, preset_system_prompt, cache_prompt, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking, effective_duration_seconds=effective_duration_seconds, video_prompt_contract_version=resolved_duration.get("contract_version") if resolved_duration else None)
 
         # Check cache first (only for random mode)
         if cache_key in PROMPT_CACHE and not stream_tokens_to_terminal:
@@ -1032,11 +1141,17 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 raise ValueError("custom_system_prompt is required when using Custom Only (no preset).")
             raise ValueError("system_prompt is empty; check AILab_System_Prompts.json or preset selection.")
         system_prompt = f"{system_prompt}\n\n{prompt_output_guard()}"
+        system_prompt = apply_video_duration_context(system_prompt, preset_system_prompt, duration_seconds)
         merged_prompt = prompt_text.strip() or "Describe a scene vividly."
         model_cfg = self.gguf_models["models"].get(model_name, {})
         context_window = model_cfg.get("context_length", 32768)
         estimated_prompt_tokens = estimate_qwen_text_tokens(system_prompt, merged_prompt)
         effective_context_window = _resolve_prompt_enhancer_context_length(context_window, estimated_prompt_tokens, max_tokens)
+        if resolved_duration:
+            effective_context_window = max(
+                effective_context_window,
+                min(int(context_window or 8192), 8192),
+            )
         effective_thinking = resolve_qwen_thinking_mode(
             enable_thinking,
             max_tokens,
@@ -1070,7 +1185,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             preset_name=preset_system_prompt,
         )
         full_raw_trace = raw_trace
-        if english_output:
+        if effective_english_output:
             translated, trans_trace = self._invoke_llama(
                 system_prompt=(
                     PROMPT_CONFIG.get("translation_prompt")
@@ -1090,9 +1205,15 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 preset_name=preset_system_prompt,
             )
             full_raw_trace = f"{raw_trace}\n\n{trans_trace}"
-            final = clean_model_output(translated, OutputCleanConfig(mode="prompt")) or translated.strip()
+            final = clean_model_output(translated, OutputCleanConfig(mode="prompt"))
         else:
-            final = clean_model_output(enhanced, OutputCleanConfig(mode="prompt")) or enhanced.strip()
+            final = clean_model_output(enhanced, OutputCleanConfig(mode="prompt"))
+        final = ensure_video_prompt_duration(
+            final,
+            preset_system_prompt,
+            duration_seconds,
+            source_prompt_text=prompt_text,
+        )
 
         # Cache the generated text
         PROMPT_CACHE[cache_key] = {
@@ -1102,7 +1223,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             "preset": preset_system_prompt,
             "seed": seed,
             "image_hash": None,
-            "video_hash": None
+            "video_hash": None,
+            **duration_signature,
         }
         save_prompt_cache()
 

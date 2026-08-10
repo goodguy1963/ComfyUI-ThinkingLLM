@@ -11,7 +11,7 @@ def set_sage_attention(model):
     Apply SageAttention patching to the model.
     Patches Qwen2Attention and Qwen3VLTextAttention modules to use SageAttention kernels.
     """
-    from AILab_QwenVL import sage_attn_available, get_sage_attention_config
+    from thinkingllm_core.hf_models import get_sage_attention_config, sage_attn_available
     
     if not sage_attn_available():
         raise ImportError("SageAttention library is not installed or GPU doesn't support it.")

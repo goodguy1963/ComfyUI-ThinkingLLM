@@ -35,6 +35,7 @@ from AILab_StreamDisplay import (
     StreamDegenerationError,
     StreamDegenerationGuard,
     TerminalStreamDisplay,
+    compose_streamed_model_output,
     extract_stream_token,
     strip_degenerate_repetition,
 )
@@ -47,39 +48,50 @@ from AILab_LlamaCppInstaller import (
 import comfy.model_management as comfy_model_management
 from comfy.model_management import throw_exception_if_processing_interrupted
 
-# Import cache functions from main module
+# Import shared contracts directly; AILab_QwenVL remains a compatibility facade.
 sys.path.append(str(Path(__file__).parent))
-from AILab_QwenVL import (
-    PROMPT_CACHE,
+from thinkingllm_core.hf_models import ensure_cuda_vram_headroom
+from thinkingllm_core.media import (
     MASK_FOCUS_INSTRUCTION,
     apply_mask_highlight,
-    apply_qwen_soft_thinking_directive,
-    build_node_input_signature,
-    download_hf_file_to_path,
-    ensure_cuda_vram_headroom,
-    estimate_qwen_text_tokens,
-    get_cache_key,
-    get_alternative_cache_key,
     get_image_hash,
     get_video_hash,
-    log_llm_input,
+)
+from thinkingllm_core.model_access import (
+    download_hf_file_to_path,
+    enforce_model_access,
     model_catalog_options,
     normalize_commercial_status,
     resolve_model_catalog_name,
-    enforce_model_access,
-    save_prompt_cache,
+)
+from thinkingllm_core.prompt_contracts import (
+    VIDEO_DURATION_INPUT,
+    apply_qwen_soft_thinking_directive,
+    apply_video_duration_context,
+    ensure_video_prompt_duration,
+    estimate_qwen_text_tokens,
+    resolve_qwen_thinking_mode,
+    resolve_video_duration,
+    validate_minimax_reference_request,
+    validate_minimax_source_duration,
+)
+from thinkingllm_core.prompt_state import (
+    NODE_PROMPT_STATE,
+    PROMPT_CACHE,
+    build_node_input_signature,
+    get_alternative_cache_key,
+    get_cache_key,
     get_node_saved_prompt,
     get_node_saved_prompt_with_seed,
-    resolve_qwen_thinking_mode,
-    set_node_saved_prompt,
-    validate_minimax_reference_request,
     load_node_prompt_state,
+    log_llm_input,
+    save_prompt_cache,
+    set_node_saved_prompt,
     _make_node_state_key,
-    NODE_PROMPT_STATE,
 )
 
 import folder_paths
-from AILab_OutputCleaner import OutputCleanConfig, clean_model_output
+from AILab_OutputCleaner import OUTPUT_CLEANER_VERSION, OutputCleanConfig, clean_model_output
 
 # DEPRECATED: per-node state via set_node_saved_prompt / get_node_saved_prompt is used instead.
 LAST_SAVED_PROMPT = None  # kept only to avoid ImportError in legacy importers
@@ -1402,7 +1414,11 @@ class QwenVLGGUFBase:
         arch = read_gguf_architecture(model_path)
         self.gguf_arch = arch
         is_qwen35 = arch in ("qwen35", "qwen35moe") if arch else "qwen3.5-" in model_name.lower()
-        self.supports_qwen_soft_think = arch == "qwen3" if arch else "qwen3-" in model_name.lower()
+        self.supports_qwen_soft_think = (
+            bool(is_qwen35 or arch == "qwen3")
+            if arch
+            else ("qwen3-" in model_name.lower() or "qwen3.5-" in model_name.lower())
+        )
         self.uses_qwen_template_thinking = bool(is_qwen35 or arch == "qwen3" or arch == "qwen")
 
         if arch == "gemma4" and has_mmproj:
@@ -1708,6 +1724,8 @@ class QwenVLGGUFBase:
                 stream_display = TerminalStreamDisplay("QwenVL GGUF", suppress_planning=True, compact=True)
                 stream_display.start_stage(stage_label)
                 full_text = ""
+                reasoning_text = ""
+                content_text = ""
                 degeneration_guard = StreamDegenerationGuard()
                 stopped_for_degenerate_stream = ""
                 result = self._create_chat_completion(
@@ -1729,8 +1747,10 @@ class QwenVLGGUFBase:
                     content_token = token.get("content", "")
                     display_token = reasoning_token + content_token
                     if reasoning_token:
+                        reasoning_text += reasoning_token
                         full_text += reasoning_token
                     if content_token:
+                        content_text += content_token
                         full_text += content_token
                     if display_token:
                         try:
@@ -1744,7 +1764,9 @@ class QwenVLGGUFBase:
                         stream_display.push_compact(display_token)
                 stream_display.end_compact()
                 stream_display.end_stage()
-                raw_full = strip_degenerate_repetition(full_text).strip()
+                raw_full = strip_degenerate_repetition(
+                    compose_streamed_model_output(reasoning_text, content_text)
+                ).strip()
                 if stopped_for_degenerate_stream:
                     print(f"[QwenVL GGUF] stopped repeated-token loop: {stopped_for_degenerate_stream}")
                 cleaned = clean_model_output(raw_full, OutputCleanConfig(mode="text"))
@@ -1761,6 +1783,8 @@ class QwenVLGGUFBase:
             abort_event = threading.Event()
             chunk_queue: qmod.Queue = qmod.Queue()
             full_text_acc = ""
+            reasoning_text_acc = ""
+            content_text_acc = ""
             worker_error: Exception | None = None
             degeneration_guard = StreamDegenerationGuard()
             stopped_for_degenerate_stream = ""
@@ -1804,8 +1828,10 @@ class QwenVLGGUFBase:
                     reasoning_token = token.get("reasoning", "")
                     content_token = token.get("content", "")
                     if reasoning_token:
+                        reasoning_text_acc += reasoning_token
                         full_text_acc += reasoning_token
                     if content_token:
+                        content_text_acc += content_token
                         full_text_acc += content_token
                     display_token = reasoning_token + content_token
                     if display_token:
@@ -1822,7 +1848,9 @@ class QwenVLGGUFBase:
                 raise worker_error
             throw_exception_if_processing_interrupted()
             elapsed = max(time.perf_counter() - start, 1e-6)
-            raw_content = strip_degenerate_repetition(full_text_acc).strip()
+            raw_content = strip_degenerate_repetition(
+                compose_streamed_model_output(reasoning_text_acc, content_text_acc)
+            ).strip()
             if stopped_for_degenerate_stream:
                 print(f"[QwenVL GGUF] stopped repeated-token loop: {stopped_for_degenerate_stream}")
             cleaned = clean_model_output(raw_content, OutputCleanConfig(mode="text"))
@@ -1960,9 +1988,17 @@ class QwenVLGGUFBase:
         enable_thinking=True,
         auto_finalization_retry=False,
         hf_token="",
+        duration_seconds=5.0,
     ):
         model_name = resolve_model_catalog_name(GGUF_VL_CATALOG.get("models") or {}, model_name)
         validate_minimax_reference_request(preset_prompt, custom_prompt)
+        resolved_duration = resolve_video_duration(preset_prompt, duration_seconds)
+        validate_minimax_source_duration(preset_prompt, duration_seconds, custom_prompt)
+        effective_duration_seconds = resolved_duration["effective_seconds"] if resolved_duration else None
+        duration_signature = ({
+            "effective_duration_seconds": effective_duration_seconds,
+            "video_prompt_contract_version": resolved_duration.get("contract_version"),
+        } if resolved_duration else {})
         print(f"[QwenVL GGUF DEBUG] Starting run with seed={seed}")
         image, mask_hash = apply_mask_highlight(image, mask)
         image_hash = get_image_hash(image)
@@ -1999,6 +2035,8 @@ class QwenVLGGUFBase:
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            output_cleaner_version=OUTPUT_CLEANER_VERSION,
+            **duration_signature,
         )
         requires_audio_input = node_class in {"ThinkingLLM_Gemma4_Audio_GGUF"}
         skip_prompt_persistence = requires_audio_input
@@ -2029,7 +2067,7 @@ class QwenVLGGUFBase:
         prompt_template = "" if preset_prompt == "🚫 No preset (image-only)" else SYSTEM_PROMPTS.get(preset_prompt, preset_prompt)
 
         # Generate cache key with all inputs including seed
-        cache_key = get_cache_key(model_name, preset_prompt, custom_prompt, image_hash, video_hash, int(seed), max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking)
+        cache_key = get_cache_key(model_name, preset_prompt, custom_prompt, image_hash, video_hash, int(seed), max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking, effective_duration_seconds=effective_duration_seconds, video_prompt_contract_version=resolved_duration.get("contract_version") if resolved_duration else None)
 
         # TEMPORARILY DISABLED CACHE FOR DEBUGGING
         # Check cache first (only for random mode)
@@ -2048,6 +2086,7 @@ class QwenVLGGUFBase:
             prompt = prompt_template
         if mask_hash:
             prompt = f"{prompt}\n\n{MASK_FOCUS_INSTRUCTION}".strip()
+        prompt = apply_video_duration_context(prompt, preset_prompt, duration_seconds)
 
         print(f"[QwenVL GGUF DEBUG] Final prompt: {prompt[:100]}...")
 
@@ -2187,6 +2226,13 @@ class QwenVLGGUFBase:
                     raise last_exc
                 raise RuntimeError("[QwenVL GGUF] Generation failed without returning text")
 
+            text = ensure_video_prompt_duration(
+                text,
+                preset_prompt,
+                duration_seconds,
+                source_prompt_text=custom_prompt,
+            )
+
             print(f"[QwenVL GGUF DEBUG] Generation completed. Text length: {len(text) if text else 0}")
             print(f"[QwenVL GGUF DEBUG] Generated text: {text[:100] if text else 'EMPTY'}...")
 
@@ -2200,7 +2246,8 @@ class QwenVLGGUFBase:
                     "seed": int(seed),
                     "image_hash": image_hash,
                     "mask_hash": mask_hash,
-                    "video_hash": video_hash
+                    "video_hash": video_hash,
+                    **duration_signature,
                 }
                 save_prompt_cache()  # Save cache to file
 
@@ -2253,6 +2300,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
                 "mask": ("MASK",),
                 "audio": ("AUDIO",),
                 "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["audio_file_path"]}),
+                "duration_seconds": VIDEO_DURATION_INPUT,
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -2284,6 +2332,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
         enable_thinking=True,
         auto_finalization_retry=False,
         hf_token="",
+        duration_seconds=5.0,
     ):
         result = self.run(
             model_name=model_name,
@@ -2321,6 +2370,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             enable_thinking=enable_thinking,
             auto_finalization_retry=auto_finalization_retry,
             hf_token=hf_token,
+            duration_seconds=duration_seconds,
         )
         hf_token = ""
         return result
@@ -2468,6 +2518,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
                 "mask": ("MASK",),
                 "audio": ("AUDIO",),
                 "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["audio_file_path"]}),
+                "duration_seconds": VIDEO_DURATION_INPUT,
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -2518,6 +2569,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
         enable_thinking=True,
         auto_finalization_retry=False,
         hf_token="",
+        duration_seconds=5.0,
     ):
         _ = legacy_seed_mode
         _ = legacy_unload_after_run
@@ -2557,6 +2609,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             enable_thinking=enable_thinking,
             auto_finalization_retry=auto_finalization_retry,
             hf_token=hf_token,
+            duration_seconds=duration_seconds,
         )
         hf_token = ""
         mask_preview, _ = apply_mask_highlight(image, mask)

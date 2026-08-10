@@ -43,7 +43,7 @@ STREAMING_FILES = {
         "stage": "HF TEXT GENERATION",
         "label": "QwenVL HF",
     },
-    "AILab_QwenVL.py": {
+    "thinkingllm_core/hf_runtime.py": {
         "stage": None,
         "label": "QwenVL HF",
     },
@@ -124,6 +124,11 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             StreamDegenerationError=stream_degeneration_error,
             StreamDegenerationGuard=type("StreamDegenerationGuard", (), {"__init__": lambda self, *args, **kwargs: None, "push": lambda self, text: None}),
             TerminalStreamDisplay=terminal_stream_display,
+            compose_streamed_model_output=lambda reasoning, content: (
+                f"<think>\n{reasoning.strip()}\n</think>\n\n{content.strip()}" if reasoning and content
+                else f"<think>\n{reasoning.strip()}\n</think>" if reasoning
+                else content.strip()
+            ),
             extract_stream_token=lambda chunk: {"reasoning": "", "content": (chunk.get("choices") or [{}])[0].get("delta", {}).get("content", "")},
             strip_degenerate_repetition=lambda text, *args, **kwargs: text,
         ),
@@ -136,6 +141,7 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
         ),
         "AILab_OutputCleaner": build_stub_module(
             "AILab_OutputCleaner",
+            OUTPUT_CLEANER_VERSION=4,
             OutputCleanConfig=output_clean_config,
             clean_model_output=lambda text, *args, **kwargs: text,
             prompt_output_guard=lambda text, *args, **kwargs: text,
@@ -195,11 +201,16 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             resolve_qwen_thinking_mode=lambda *args, **kwargs: False,
             resolve_qwen_context_window=lambda *args, **kwargs: 0,
             set_node_saved_prompt=lambda *args, **kwargs: None,
+            apply_video_duration_context=lambda prompt, *args, **kwargs: prompt,
+            ensure_video_prompt_duration=lambda prompt, *args, **kwargs: prompt,
+            resolve_video_duration=lambda *args, **kwargs: None,
+            validate_minimax_source_duration=lambda *args, **kwargs: [],
             validate_minimax_reference_request=lambda *args, **kwargs: None,
             load_node_prompt_state=lambda *args, **kwargs: None,
             QwenVLBase=qwen_base,
             Quantization=_StubQuantization,
             TOOLTIPS={},
+            VIDEO_DURATION_INPUT=("FLOAT", {"default": 5.0, "min": 0.2, "max": 150.0, "step": 0.1}),
         ),
     }
 
@@ -347,11 +358,11 @@ class TestMaskFocusedImageAnalysis(unittest.TestCase):
     def setUpClass(cls):
         function_node = next(
             node
-            for node in parse_source("AILab_QwenVL.py").body
+            for node in parse_source("thinkingllm_core/media.py").body
             if isinstance(node, ast.FunctionDef) and node.name == "apply_mask_highlight"
         )
         namespace = {"hashlib": hashlib, "torch": torch}
-        exec(compile(ast.fix_missing_locations(ast.Module(body=[function_node], type_ignores=[])), "AILab_QwenVL.py", "exec"), namespace)
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[function_node], type_ignores=[])), "thinkingllm_core/media.py", "exec"), namespace)
         cls.apply_mask_highlight = staticmethod(namespace["apply_mask_highlight"])
 
     def test_mask_dims_rgb_and_preserves_alpha_without_mutating_input(self):
@@ -392,7 +403,7 @@ class TestMaskFocusedImageAnalysis(unittest.TestCase):
             self.apply_mask_highlight(torch.ones((1, 2, 2, 3)), torch.zeros((1, 2, 2)))
 
     def test_both_backends_apply_the_shared_focus_instruction(self):
-        hf_source = read_source("AILab_QwenVL.py")
+        hf_source = read_source("thinkingllm_core/hf_runtime.py")
         gguf_source = read_source("AILab_QwenVL_GGUF.py")
 
         self.assertIn("image, mask_hash = apply_mask_highlight(image, mask)", hf_source)
@@ -497,7 +508,8 @@ class TestModelRecommendations(unittest.TestCase):
         }
 
         self.assertEqual(list(catalog), module.model_catalog_options(catalog))
-        with mock.patch.object(module, "COMMERCIAL_RELEASE", True):
+        access_globals = module.model_catalog_options.__globals__
+        with mock.patch.dict(access_globals, {"COMMERCIAL_RELEASE": True}):
             options = module.model_catalog_options(catalog)
             self.assertEqual(["✅", "🔑", "📁", "⚠", "⚠", "🚫"], [option.split()[0] for option in options])
         for raw_name, entry in catalog.items():
@@ -506,6 +518,27 @@ class TestModelRecommendations(unittest.TestCase):
             self.assertEqual(raw_name, module.resolve_model_catalog_name(catalog, decorated))
         self.assertEqual("unclear", module.normalize_commercial_status({}))
         self.assertEqual("unclear", module.normalize_commercial_status({"commercial_status": "invalid"}))
+
+    def test_qwenvl_facade_preserves_exports_and_shared_object_identity(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_facade_compatibility_test")
+
+        self.assertTrue(all(hasattr(module, name) for name in module.__all__))
+        self.assertIs(module.PROMPT_CACHE, module.get_cache_key.__globals__["PROMPT_CACHE"])
+        self.assertIs(module.NODE_PROMPT_STATE, module.get_node_saved_prompt.__globals__["NODE_PROMPT_STATE"])
+        self.assertIs(module.VIDEO_PRESET_METADATA, module.get_video_preset_metadata.__globals__["VIDEO_PRESET_METADATA"])
+
+        model_globals = module.load_model_configs.__globals__
+        exported_catalogs = (module.HF_VL_MODELS, module.HF_TEXT_MODELS, module.HF_ALL_MODELS)
+        module.load_model_configs()
+        self.assertEqual(
+            exported_catalogs,
+            (model_globals["HF_VL_MODELS"], model_globals["HF_TEXT_MODELS"], model_globals["HF_ALL_MODELS"]),
+        )
+        self.assertTrue(all(before is after for before, after in zip(
+            exported_catalogs,
+            (model_globals["HF_VL_MODELS"], model_globals["HF_TEXT_MODELS"], model_globals["HF_ALL_MODELS"]),
+        )))
 
     def test_community_hf_and_gguf_nodes_expose_plain_model_names(self):
         package = load_thinkingllm_loader_subset([
@@ -532,7 +565,9 @@ class TestModelRecommendations(unittest.TestCase):
 
     def test_commercial_mode_disables_mutable_runtime_behaviour(self):
         init_source = read_source("__init__.py")
-        hf_source = read_source("AILab_QwenVL.py")
+        access_source = read_source("thinkingllm_core/model_access.py")
+        hf_models_source = read_source("thinkingllm_core/hf_models.py")
+        hf_runtime_source = read_source("thinkingllm_core/hf_runtime.py")
         enhancer_source = read_source("AILab_QwenVL_PromptEnhancer.py")
 
         self.assertIn('os.environ.get("THINKINGLLM_COMMERCIAL_RELEASE") == "1"', init_source)
@@ -548,11 +583,11 @@ class TestModelRecommendations(unittest.TestCase):
             ast.literal_eval(commercial_node_modules.group(1)),
             {"story_split_node", "system_prompt_preset", "vram_cleanup"},
         )
-        self.assertIn("only permits preinstalled, hash-locked models", hf_source)
-        self.assertIn("if custom.exists() and not COMMERCIAL_RELEASE", hf_source)
-        self.assertIn("if not COMMERCIAL_RELEASE:\n        _scan_local_hf_models()", hf_source)
-        self.assertIn('"local_files_only": COMMERCIAL_RELEASE', hf_source)
-        self.assertIn("trust_remote_code=not COMMERCIAL_RELEASE", hf_source)
+        self.assertIn("only permits preinstalled, hash-locked models", access_source)
+        self.assertIn("if custom.exists() and not COMMERCIAL_RELEASE", hf_models_source)
+        self.assertIn("if not COMMERCIAL_RELEASE:\n        _scan_local_hf_models()", hf_models_source)
+        self.assertIn('"local_files_only": COMMERCIAL_RELEASE', hf_runtime_source)
+        self.assertIn("trust_remote_code=not COMMERCIAL_RELEASE", hf_runtime_source)
         self.assertIn('"local_files_only": COMMERCIAL_RELEASE', enhancer_source)
         self.assertIn("commercial release mode forbids runtime package installation", enhancer_source)
 
@@ -651,13 +686,20 @@ class TestModelRecommendations(unittest.TestCase):
     def test_minimax_h3_presets_are_split_by_input_mode(self):
         data = json.loads((PKG / "AILab_System_Prompts.json").read_text(encoding="utf-8"))
         text_label = "🎬 MiniMax H3 Text-to-Video"
+        first_label = "🖼️ MiniMax H3 First-Frame-to-Video (I2VA)"
+        first_last_label = "🎞️ MiniMax H3 First/Last-to-Video (FL2VA)"
+        last_label = "🏁 MiniMax H3 Last-Frame-to-Video (L2VA)"
         reference_label = "🖼️ MiniMax H3 Reference-to-Video"
 
         self.assertNotIn("🎬 MiniMax H3 Multimodal Video", data["_preset_prompts"])
-        self.assertIn(text_label, data["_preset_prompts"])
-        self.assertIn(reference_label, data["_preset_prompts"])
+        for label in (text_label, first_label, first_last_label, last_label, reference_label):
+            self.assertIn(label, data["_preset_prompts"])
+            self.assertIn(label, data["qwenvl"])
         self.assertIn("integrated_multimodal_description", data["qwenvl"][text_label])
         self.assertNotIn("subject_definitions", data["qwenvl"][text_label])
+        self.assertIn("literal square brackets", data["qwenvl"][text_label])
+        self.assertIn("may be visual-only", data["qwenvl"][text_label])
+        self.assertIn("<d>[English]", data["qwen_text"]["styles"][text_label]["system_prompt"])
         self.assertIn("subject_definitions", data["qwenvl"][reference_label])
         self.assertIn("retention_analysis", data["qwenvl"][reference_label])
         self.assertIn(text_label, data["qwen_text"]["styles"])
@@ -675,12 +717,13 @@ class TestModelRecommendations(unittest.TestCase):
 
         for node_name in ("ThinkingLLM_QwenVL", "ThinkingLLM_QwenVL_Advanced", "ThinkingLLM_QwenVL_GGUF", "ThinkingLLM_QwenVL_GGUF_Advanced"):
             values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"]["preset_prompt"][0]
-            self.assertIn(text_label, values)
-            self.assertIn(reference_label, values)
+            for label in (text_label, first_label, first_last_label, last_label, reference_label):
+                self.assertIn(label, values)
         for node_name, widget_name in (("ThinkingLLM_QwenVL_PromptEnhancer", "enhancement_style"), ("ThinkingLLM_QwenVL_GGUF_PromptEnhancer", "preset_system_prompt")):
             values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0]
             self.assertIn(text_label, values)
-            self.assertNotIn(reference_label, values)
+            for label in (first_label, first_last_label, last_label, reference_label):
+                self.assertNotIn(label, values)
 
     def test_minimax_reference_requires_a_custom_target_prompt(self):
         stub_modules = build_loader_test_stubs()
@@ -693,7 +736,7 @@ class TestModelRecommendations(unittest.TestCase):
 
         module.validate_minimax_reference_request("🖼️ MiniMax H3 Reference-to-Video", "Keep Picture 1 as the character identity.")
         module.validate_minimax_reference_request("🎬 MiniMax H3 Text-to-Video", "")
-        for filename in ("AILab_QwenVL.py", "AILab_QwenVL_GGUF.py"):
+        for filename in ("thinkingllm_core/hf_runtime.py", "AILab_QwenVL_GGUF.py"):
             self.assertIn(
                 "validate_minimax_reference_request(preset_prompt, custom_prompt)",
                 read_source(filename),
@@ -725,7 +768,7 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertNotIn("data:image", logged)
         self.assertNotIn("base64", logged.lower())
 
-        for filename in ("AILab_QwenVL.py", "AILab_QwenVL_GGUF.py", "AILab_QwenVL_PromptEnhancer.py", "AILab_QwenVL_GGUF_PromptEnhancer.py"):
+        for filename in ("thinkingllm_core/hf_runtime.py", "AILab_QwenVL_GGUF.py", "AILab_QwenVL_PromptEnhancer.py", "AILab_QwenVL_GGUF_PromptEnhancer.py"):
             with self.subTest(filename=filename):
                 source = read_source(filename)
                 self.assertIn("log_llm_input(", source)
@@ -747,39 +790,452 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertNotIn("Example:", vision_prompt)
         self.assertNotIn("Examples:", text_prompt)
 
-    def test_minimax_h3_presets_are_split_by_input_mode(self):
+    def test_video_preset_duration_and_recommendation_metadata_are_complete(self):
         data = json.loads((PKG / "AILab_System_Prompts.json").read_text(encoding="utf-8"))
-        text_label = "🎬 MiniMax H3 Text-to-Video"
-        reference_label = "🖼️ MiniMax H3 Reference-to-Video"
+        metadata = data["_video_presets"]
+        duration_labels = {
+            "📖 LTX 2.3 NSFW T2V Scene",
+            "🎦 LTX 2.3 NSFW I2V Scene",
+            "🎞️ LTX 2.3 First/Last-to-Video",
+            "🖼️ LTX 2.3 Reference-to-Video",
+            "🎬 MiniMax H3 Text-to-Video",
+            "🖼️ MiniMax H3 First-Frame-to-Video (I2VA)",
+            "🎞️ MiniMax H3 First/Last-to-Video (FL2VA)",
+            "🏁 MiniMax H3 Last-Frame-to-Video (L2VA)",
+            "🖼️ MiniMax H3 Reference-to-Video",
+        }
+        wan_labels = {
+            "🍿 Wan 2.2 NSFW I2V Timeline (3s)",
+            "🍿 Wan 2.2 NSFW I2V Timeline (5s)",
+            "🎥 Wan 2.2 NSFW I2V Scene (3s)",
+            "🎥 Wan 2.2 NSFW I2V Scene (5s)",
+            "🎬 Wan 2.2 NSFW I2V Timeline (20s)",
+            "📖 Wan 2.2 NSFW I2V Scene (20s)",
+            "🍿 Wan 2.2 NSFW T2V Timeline (3s)",
+            "🍿 Wan 2.2 NSFW T2V Timeline (5s)",
+            "🎥 Wan 2.2 NSFW T2V Scene (3s)",
+            "🎥 Wan 2.2 NSFW T2V Scene (5s)",
+            "🎬 Wan 2.2 NSFW T2V Timeline (20s)",
+            "📖 Wan 2.2 NSFW T2V Scene (20s)",
+        }
 
-        self.assertNotIn("🎬 MiniMax H3 Multimodal Video", data["_preset_prompts"])
-        self.assertIn(text_label, data["_preset_prompts"])
-        self.assertIn(reference_label, data["_preset_prompts"])
-        self.assertIn("integrated_multimodal_description", data["qwenvl"][text_label])
-        self.assertNotIn("subject_definitions", data["qwenvl"][text_label])
-        self.assertIn("subject_definitions", data["qwenvl"][reference_label])
-        self.assertIn("retention_analysis", data["qwenvl"][reference_label])
-        self.assertIn(text_label, data["qwen_text"]["styles"])
-        self.assertNotIn(reference_label, data["qwen_text"]["styles"])
+        self.assertEqual(set(metadata), duration_labels | wan_labels)
+        self.assertNotIn("🖼️ MiniMax H3 Reference-to-Video", data["qwen_text"]["styles"])
+        for label, entry in metadata.items():
+            with self.subTest(label=label):
+                self.assertIn(entry["provider"], {"ltx_2_3", "minimax_h3", "wan_2_2"})
+                self.assertTrue(entry["video_mode"])
+                self.assertIs(entry["duration_required"], label in duration_labels)
+                self.assertIs(entry["recommended_settings"]["enable_thinking"], False)
+                self.assertIn(entry["recommended_settings"]["max_tokens"], {512, 768, 1024, 1536, 2048, 3072})
+                self.assertTrue(entry["recommendation_note"])
 
-        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
-            package = load_thinkingllm_loader_subset(
-                [
-                    "AILab_QwenVL.py",
-                    "AILab_QwenVL_GGUF.py",
-                    "AILab_QwenVL_PromptEnhancer.py",
-                    "AILab_QwenVL_GGUF_PromptEnhancer.py",
-                ]
-            )
+        styles = data["qwen_text"]["styles"]
+        self.assertIn("🍿 Wan 2.2 NSFW T2V Timeline (3s)", styles)
+        self.assertNotIn("🍿 Wan 2.2 NSFW T2V Timeline (3)", styles)
+        wan_t2v_20 = styles["📖 Wan 2.2 NSFW T2V Scene (20s)"]["system_prompt"]
+        self.assertIn("EXACTLY FOUR continuous 5-second", wan_t2v_20)
+        self.assertNotIn("5s total) to establish initial scene", wan_t2v_20)
+        self.assertNotIn("PERFORMANCE OPTIMIZATION", json.dumps(data, ensure_ascii=False))
+        self.assertNotIn("RECOMMENDED: Use max_tokens", json.dumps(data, ensure_ascii=False))
 
-        for node_name in ("ThinkingLLM_QwenVL", "ThinkingLLM_QwenVL_Advanced", "ThinkingLLM_QwenVL_GGUF", "ThinkingLLM_QwenVL_GGUF_Advanced"):
-            values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"]["preset_prompt"][0]
-            self.assertIn(text_label, values)
-            self.assertIn(reference_label, values)
-        for node_name, widget_name in (("ThinkingLLM_QwenVL_PromptEnhancer", "enhancement_style"), ("ThinkingLLM_QwenVL_GGUF_PromptEnhancer", "preset_system_prompt")):
-            values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0]
-            self.assertIn(text_label, values)
-            self.assertNotIn(reference_label, values)
+    def test_video_duration_normalization_and_native_output_enforcement(self):
+        stub_modules = build_loader_test_stubs()
+        stub_modules.pop("AILab_QwenVL", None)
+        with mock.patch.dict(sys.modules, stub_modules, clear=False):
+            module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_video_duration_test")
+
+        for requested, expected_frames, expected_seconds, expected_text in (
+            (5.0, 124, 124 / 24, "5.17"),
+            (8.0, 192, 8.0, "8.00"),
+            (12.0, 294, 12.25, "12.25"),
+        ):
+            with self.subTest(requested=requested):
+                resolved = module.resolve_video_duration("🎬 MiniMax H3 Text-to-Video", requested)
+                self.assertEqual(resolved["frames"], expected_frames)
+                self.assertAlmostEqual(resolved["effective_seconds"], expected_seconds)
+                self.assertEqual(resolved["duration_text"], expected_text)
+
+        ltx = module.resolve_video_duration("📖 LTX 2.3 NSFW T2V Scene", 10.0)
+        self.assertEqual(ltx["effective_seconds"], 10.0)
+        self.assertEqual(ltx["duration_text"], "10")
+        self.assertIsNone(module.resolve_video_duration("🖼️ Detailed Description", 12.0))
+
+        ltx_output = module.ensure_video_prompt_duration(
+            "A dancer turns.\nThe camera follows.",
+            "📖 LTX 2.3 NSFW T2V Scene",
+            10.0,
+        )
+        self.assertEqual(ltx_output.count("10-second continuous shot"), 1)
+        self.assertNotIn("\n", ltx_output)
+
+        minimax_output = module.ensure_video_prompt_duration(
+            "integrated_multimodal_description: Target duration: 5.17 seconds. [Shot 1] A dancer turns.\n"
+            "overall_soundscape: Footsteps.\n"
+            "non_diegetic_music: N/A",
+            "🎬 MiniMax H3 Text-to-Video",
+            5.0,
+        )
+        self.assertNotIn("Target duration", minimax_output)
+        self.assertTrue(minimax_output.startswith("integrated_multimodal_description: [Shot 1]"))
+        self.assertLess(minimax_output.index("integrated_multimodal_description"), minimax_output.index("overall_soundscape"))
+
+        reference_output = module.ensure_video_prompt_duration(
+            "subject_definitions: <Subject 1> is the actor in <Picture 1>.\n"
+            "summary: [reference generation] Target duration: 12.25 seconds. The target video uses <Subject 1>.\n"
+            "retention_analysis: <Subject 1> (appears in [Shot 1]): fully_preserved - identity is retained.\n"
+            "detailed_description: Cinematic live action.\n[Shot 1] <Subject 1> performs the requested action.\n"
+            "overall_soundscape: Room tone.\n"
+            "non_diegetic_music: N/A",
+            "🖼️ MiniMax H3 Reference-to-Video",
+            12.0,
+        )
+        self.assertNotIn("Target duration", reference_output)
+        self.assertIn("summary: [reference generation] The target video uses <Subject 1>.", reference_output)
+        self.assertEqual(
+            [match.group(1) for match in re.finditer(r"(?m)^(subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music):", reference_output)],
+            ["subject_definitions", "summary", "retention_analysis", "detailed_description", "overall_soundscape", "non_diegetic_music"],
+        )
+
+        ordinary = "A plain image description."
+        self.assertEqual(module.ensure_video_prompt_duration(ordinary, "🖼️ Detailed Description", 30.0), ordinary)
+
+    def test_video_duration_context_and_cache_use_effective_duration(self):
+        stub_modules = build_loader_test_stubs()
+        stub_modules.pop("AILab_QwenVL", None)
+        with mock.patch.dict(sys.modules, stub_modules, clear=False):
+            module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_video_duration_cache_test")
+
+        context = module.apply_video_duration_context(
+            "Make it 3 seconds long.",
+            "🎬 MiniMax H3 Text-to-Video",
+            5.0,
+        )
+        self.assertIn("TARGET_DURATION_SECONDS: 5.17", context)
+        self.assertIn("overrides any conflicting duration", context)
+        resolved_five = module.resolve_video_duration("🎬 MiniMax H3 Text-to-Video", 5.0)
+        self.assertEqual(resolved_five["contract_version"], module.VIDEO_PROMPT_CONTRACT_VERSION)
+        five_seconds = resolved_five["effective_seconds"]
+        five_point_one_seconds = module.resolve_video_duration("🎬 MiniMax H3 Text-to-Video", 5.1)["effective_seconds"]
+        eight_seconds = module.resolve_video_duration("🎬 MiniMax H3 Text-to-Video", 8.0)["effective_seconds"]
+        self.assertEqual(five_seconds, five_point_one_seconds)
+        self.assertEqual(
+            module.get_cache_key("m", "p", "x", effective_duration_seconds=five_seconds),
+            module.get_cache_key("m", "p", "x", effective_duration_seconds=five_point_one_seconds),
+        )
+        self.assertNotEqual(
+            module.get_cache_key("m", "p", "x", effective_duration_seconds=five_seconds),
+            module.get_cache_key("m", "p", "x", effective_duration_seconds=eight_seconds),
+        )
+        self.assertNotEqual(
+            module.get_cache_key(
+                "m",
+                "p",
+                "x",
+                effective_duration_seconds=five_seconds,
+                video_prompt_contract_version=module.VIDEO_PROMPT_CONTRACT_VERSION - 1,
+            ),
+            module.get_cache_key(
+                "m",
+                "p",
+                "x",
+                effective_duration_seconds=five_seconds,
+                video_prompt_contract_version=module.VIDEO_PROMPT_CONTRACT_VERSION,
+            ),
+        )
+        self.assertEqual(
+            module.build_node_input_signature(effective_duration_seconds=five_seconds),
+            module.build_node_input_signature(effective_duration_seconds=five_point_one_seconds),
+        )
+        self.assertNotEqual(
+            module.build_node_input_signature(effective_duration_seconds=five_seconds),
+            module.build_node_input_signature(effective_duration_seconds=eight_seconds),
+        )
+        with self.assertRaisesRegex(ValueError, "between 0.2 and 150.0"):
+            module.resolve_video_duration("🎬 MiniMax H3 Text-to-Video", 0.1)
+        self.assertIsNone(module.resolve_video_duration("🖼️ Detailed Description", 0.1))
+
+    def test_minimax_h3_output_is_normalized_without_becoming_a_schema_gate(self):
+        stub_modules = build_loader_test_stubs()
+        stub_modules.pop("AILab_QwenVL", None)
+        with mock.patch.dict(sys.modules, stub_modules, clear=False):
+            module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_minimax_contract_test")
+
+        base_body = (
+            "integrated_multimodal_description: Target duration: 8.00 seconds. "
+            "[Shot 1] Live-action, a baker opens the shutters. "
+            "[Shot 2] At 00:3.5 the camera cuts to the bread on the counter.\n"
+            "overall_soundscape: Shutters scrape and trays clink.\n"
+            "non_diegetic_music: An invented electronic drone."
+        )
+        t2va = module.ensure_video_prompt_duration(
+            base_body,
+            "🎬 MiniMax H3 Text-to-Video",
+            8.0,
+            source_prompt_text="A baker opens the shutters and the camera cuts to bread.",
+        )
+        self.assertTrue(t2va.startswith("integrated_multimodal_description: [Shot 1]"))
+        self.assertIn("[Shot 2] At 00:03.500,", t2va)
+        self.assertNotIn("Target duration", t2va)
+        self.assertTrue(t2va.endswith("non_diegetic_music: An invented electronic drone."))
+
+        for preset in (
+            "🖼️ MiniMax H3 First-Frame-to-Video (I2VA)",
+            "🎞️ MiniMax H3 First/Last-to-Video (FL2VA)",
+            "🏁 MiniMax H3 Last-Frame-to-Video (L2VA)",
+        ):
+            with self.subTest(preset=preset):
+                output = module.ensure_video_prompt_duration(base_body, preset, 8.0)
+                self.assertTrue(output.startswith("integrated_multimodal_description:"))
+                self.assertEqual(output.count("integrated_multimodal_description:"), 1)
+
+        reference = module.ensure_video_prompt_duration(
+            "subject_definitions: <Subject 1> is the baker from <Picture 1>.\n"
+            "summary: [reference generation] The target video shows <Subject 1> opening the bakery.\n"
+            "retention_analysis: <Subject 1> (appears in [Shot 1]): fully_preserved - identity and clothing are retained.\n"
+            "detailed_description: Live-action with cool dawn light.\n"
+            "[Shot 1] <Subject 1> opens the shutters.\n"
+            "overall_soundscape: Shutters scrape over quiet street ambience.\n"
+            "non_diegetic_music: A fabricated synth cue.",
+            "🖼️ MiniMax H3 Reference-to-Video",
+            12.0,
+            source_prompt_text="Use Picture 1 for the baker opening the bakery, without music.",
+        )
+        self.assertEqual(
+            re.findall(
+                r"(?m)^(subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music):",
+                reference,
+            ),
+            [
+                "subject_definitions",
+                "summary",
+                "retention_analysis",
+                "detailed_description",
+                "overall_soundscape",
+                "non_diegetic_music",
+            ],
+        )
+        self.assertTrue(reference.endswith("non_diegetic_music: A fabricated synth cue."))
+
+        malformed_dialogue = (
+            "integrated_multimodal_description: [Shot 1] Peter (S1) says, "
+            "<d>English</d> This text is outside the dialogue tag.\n"
+            "overall_soundscape: Room tone.\n"
+            "non_diegetic_music: N/A"
+        )
+        self.assertIn(
+            "<d>English</d> This text is outside the dialogue tag.",
+            module.ensure_video_prompt_duration(
+                malformed_dialogue,
+                "🎬 MiniMax H3 Text-to-Video",
+                8.0,
+            ),
+        )
+
+        impossible_dialogue = (
+            "integrated_multimodal_description: [Shot 1] Peter (S1) says, "
+            "<d>[English] " + "word " * 40 + "</d>\n"
+            "overall_soundscape: Room tone.\n"
+            "non_diegetic_music: N/A"
+        )
+        self.assertIn(
+            "word word word",
+            module.ensure_video_prompt_duration(
+                impossible_dialogue,
+                "🎬 MiniMax H3 Text-to-Video",
+                5.0,
+            ),
+        )
+
+        missing_speaker_id = (
+            "integrated_multimodal_description: [Shot 1] Peter says, "
+            "<d>[English] This is still forwarded without an S1 marker.</d>\n"
+            "overall_soundscape: Room tone.\n"
+            "non_diegetic_music: N/A"
+        )
+        self.assertIn(
+            "forwarded without an S1 marker",
+            module.ensure_video_prompt_duration(
+                missing_speaker_id,
+                "🎬 MiniMax H3 Text-to-Video",
+                8.0,
+            ),
+        )
+
+        self.assertTrue(
+            module.ensure_video_prompt_duration(
+                "duration: 8 seconds\n" + base_body,
+                "🎬 MiniMax H3 Text-to-Video",
+                8.0,
+            ).startswith("duration: 8 seconds")
+        )
+
+    def test_minimax_dialogue_preflight_fidelity_and_format_recovery(self):
+        stub_modules = build_loader_test_stubs()
+        stub_modules.pop("AILab_QwenVL", None)
+        with mock.patch.dict(sys.modules, stub_modules, clear=False):
+            module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_minimax_dialogue_preflight_test")
+
+        source = (
+            "Peter looks at the screen.\n\n"
+            "He says:\n\n"
+            "“Hello there.”\n\n"
+            "The screen reads “STATUS”.\n\n"
+            "“This is still the original second line!”"
+        )
+        self.assertEqual(
+            module.extract_minimax_source_dialogue(source),
+            ["Hello there.", "This is still the original second line!"],
+        )
+
+        too_long_source = "Peter says:\n\n“" + "word " * 100 + "”"
+        self.assertEqual(
+            module.validate_minimax_source_duration(
+                "🎬 MiniMax H3 Text-to-Video",
+                7.0,
+                too_long_source,
+            ),
+            [("word " * 100).strip()],
+        )
+
+        inline_candidate = (
+            "integrated_multimodal_description: [Shot 1] at 00:00.000, Peter (S1) says, "
+            "<d>[English] Hello there.</d> Peter (S1) continues, "
+            "<d>[English] This is still the original second line!</d> "
+            "[Shot 2] at 00:03.5, the camera cuts to the screen. "
+            "overall_soundscape: Room tone. non_diegetic_music: N/A"
+        )
+        normalized = module.ensure_video_prompt_duration(
+            inline_candidate,
+            "🎬 MiniMax H3 Text-to-Video",
+            8.0,
+            source_prompt_text=source,
+        )
+        self.assertTrue(normalized.startswith("integrated_multimodal_description: [Shot 1] Peter"))
+        self.assertNotIn("[Shot 1] At", normalized)
+        self.assertIn("[Shot 2] At 00:03.500,", normalized)
+        self.assertIn("\n\noverall_soundscape: Room tone.\n\nnon_diegetic_music: N/A", normalized)
+
+        unbracketed_language = (
+            "integrated_multimodal_description: [Shot 1] Peter (S1) says, "
+            "<d>English Hello there.</d>\n"
+            "overall_soundscape: Room tone.\n"
+            "non_diegetic_music: N/A"
+        )
+        normalized_language = module.ensure_video_prompt_duration(
+            unbracketed_language,
+            "🎬 MiniMax H3 Text-to-Video",
+            8.0,
+            source_prompt_text=source,
+        )
+        self.assertIn("<d>[English] Hello there.</d>", normalized_language)
+        self.assertNotIn("<d>English ", normalized_language)
+
+        selected_subset = (
+            "integrated_multimodal_description: [Shot 1] Peter (S1) says, "
+            "<d>[English] This is still the original second line!</d>\n"
+            "overall_soundscape: Room tone.\n"
+            "non_diegetic_music: N/A"
+        )
+        self.assertIn(
+            "This is still the original second line!",
+            module.ensure_video_prompt_duration(
+                selected_subset,
+                "🎬 MiniMax H3 Text-to-Video",
+                8.0,
+                source_prompt_text=source,
+            ),
+        )
+
+        missing_dialogue = (
+            "integrated_multimodal_description: [Shot 1] Peter silently looks at the screen.\n"
+            "overall_soundscape: Room tone.\n"
+            "non_diegetic_music: N/A"
+        )
+        visual_only = module.ensure_video_prompt_duration(
+            missing_dialogue,
+            "🎬 MiniMax H3 Text-to-Video",
+            8.0,
+            source_prompt_text=source,
+        )
+        self.assertIn("Peter silently looks at the screen", visual_only)
+        self.assertNotIn("<d>", visual_only)
+
+        rewritten_dialogue = selected_subset.replace(
+            "This is still the original second line!",
+            "This is a rewritten line!",
+        )
+        self.assertIn(
+            "This is a rewritten line!",
+            module.ensure_video_prompt_duration(
+                rewritten_dialogue,
+                "🎬 MiniMax H3 Text-to-Video",
+                8.0,
+                source_prompt_text=source,
+            ),
+        )
+
+        over_duration = (
+            "integrated_multimodal_description: [Shot 1] Opening. "
+            "[Shot 2] At 00:10.000, cut to the ending.\n"
+            "overall_soundscape: Room tone.\n"
+            "non_diegetic_music: N/A"
+        )
+        self.assertIn(
+            "[Shot 2] At 00:10.000,",
+            module.ensure_video_prompt_duration(
+                over_duration,
+                "🎬 MiniMax H3 Text-to-Video",
+                8.0,
+            ),
+        )
+
+    def test_minimax_gguf_forwards_best_effort_output_without_repair_pass(self):
+        source = read_source("AILab_QwenVL_GGUF_PromptEnhancer.py")
+
+        self.assertNotIn("is_recoverable_minimax_validation_error", source)
+        self.assertNotIn("ORIGINAL USER REQUEST:", source)
+        self.assertNotIn("CANDIDATE TO REPAIR:", source)
+        self.assertNotIn("MINIMAX STRUCTURE REPAIR", source)
+        self.assertNotIn("_NON_THINKING_REASONING_CHAR_LIMIT", source)
+        self.assertIn("final = ensure_video_prompt_duration(", source)
+        self.assertIn("arch.startswith(\"qwen35\")", source)
+        self.assertIn('completion_kwargs["chat_template_kwargs"]', source)
+        self.assertIn('"thinking_mode": "enabled" if current_enable_thinking else "disabled"', source)
+        for filename in (
+            "thinkingllm_core/hf_runtime.py",
+            "AILab_QwenVL_GGUF.py",
+            "AILab_QwenVL_PromptEnhancer.py",
+            "AILab_QwenVL_GGUF_PromptEnhancer.py",
+        ):
+            with self.subTest(filename=filename):
+                self.assertIn("validate_minimax_source_duration(", read_source(filename))
+
+    def test_output_cleaner_preserves_structured_video_prompt_after_thinking(self):
+        from AILab_OutputCleaner import OutputCleanConfig, clean_model_output
+
+        raw = (
+            "<think>\nFirst, I need to plan the output.\nThen, I will write it.\n</think>\n\n"
+            "integrated_multimodal_description: Target duration: 7.29 seconds. "
+            "[Shot 1] Peter clicks to the next slide while the first robot appears, then the camera pans left.\n\n"
+            "overall_soundscape: Conference ambience and keyboard clicks.\n\n"
+            "non_diegetic_music: Minimal electronic drone."
+        )
+        cleaned = clean_model_output(raw, OutputCleanConfig(mode="prompt"))
+
+        self.assertNotIn("<think>", cleaned)
+        self.assertIn("integrated_multimodal_description:", cleaned)
+        self.assertIn("[Shot 1] Peter clicks to the next slide", cleaned)
+        self.assertIn("the first robot appears, then the camera pans left", cleaned)
+        self.assertLess(cleaned.index("integrated_multimodal_description"), cleaned.index("overall_soundscape"))
+        self.assertLess(cleaned.index("overall_soundscape"), cleaned.index("non_diegetic_music"))
+
+    def test_output_cleaner_still_drops_actual_leading_planning_paragraph(self):
+        from AILab_OutputCleaner import OutputCleanConfig, clean_model_output
+
+        raw = "First: I need to plan this response.\n\nA cinematic close-up of a dancer in rain."
+        cleaned = clean_model_output(raw, OutputCleanConfig(mode="prompt"))
+        self.assertEqual(cleaned, "A cinematic close-up of a dancer in rain.")
 
     def test_llm_input_logging_is_complete_and_shared(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
@@ -807,7 +1263,7 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertNotIn("data:image", logged)
         self.assertNotIn("base64", logged.lower())
 
-        for filename in ("AILab_QwenVL.py", "AILab_QwenVL_GGUF.py", "AILab_QwenVL_PromptEnhancer.py", "AILab_QwenVL_GGUF_PromptEnhancer.py"):
+        for filename in ("thinkingllm_core/hf_runtime.py", "AILab_QwenVL_GGUF.py", "AILab_QwenVL_PromptEnhancer.py", "AILab_QwenVL_GGUF_PromptEnhancer.py"):
             with self.subTest(filename=filename):
                 source = read_source(filename)
                 self.assertIn("log_llm_input(", source)
@@ -865,6 +1321,7 @@ class TestModelRecommendations(unittest.TestCase):
                 name: entry["system_prompt"]
                 for name, entry in system_prompts["qwen_text"]["styles"].items()
             },
+            "video_presets": system_prompts["_video_presets"],
         }
         self.assertEqual(tooltip_payload, expected)
 
@@ -932,6 +1389,17 @@ class TestModelRecommendations(unittest.TestCase):
         for widget_name in ["preset_prompt", "enhancement_style", "preset_system_prompt"]:
             with self.subTest(widget_name=widget_name):
                 self.assertIn(f'"{widget_name}"', source)
+        self.assertIn("updateDurationVisibility(node, promptMap)", source)
+        self.assertIn('findWidget(node, "duration_seconds")', source)
+        self.assertIn('fetch(PRESET_TOOLTIPS_URL, { cache: "no-store" })', source)
+        self.assertIn("findVideoPresetMetadata(payload, selectedPreset)", source)
+        self.assertIn("metadataAvailable: false", source)
+        self.assertIn('replaceAll("\\uFE0F", "")', source)
+        self.assertIn("Boolean(metadata?.duration_required)", source)
+        self.assertIn("buildVideoPresetRecommendationText(node, payload)", source)
+        self.assertIn("metadata?.recommended_settings", source)
+        self.assertIn("Info only: your saved widget values are not changed.", source)
+        self.assertIn('["model_name", "enable_thinking", ...PRESET_WIDGET_NAMES]', source)
 
     def test_hf_default_flag_controls_default_model(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
@@ -1001,6 +1469,7 @@ class TestModelRecommendations(unittest.TestCase):
             source = read_source(filename)
             with self.subTest(filename=filename):
                 self.assertIn("extract_stream_token", source, f"{filename} should use shared chunk extraction")
+                self.assertIn("compose_streamed_model_output", source)
                 self.assertIn("display_token = reasoning_token + content_token", source)
                 self.assertNotIn("display_token = reasoning_token or content_token", source)
                 self.assertNotIn("stream_display.push(display_token)", source)
@@ -1031,6 +1500,51 @@ class TestModelRecommendations(unittest.TestCase):
         )
         self.assertEqual(extract_stream_token(object_chunk), {"reasoning": "why", "content": " then"})
 
+    def test_stream_channel_composer_keeps_reasoning_out_of_clean_response(self):
+        cleaner = load_module_from_file(
+            "AILab_OutputCleaner.py",
+            "thinkingllm_output_cleaner_channel_test",
+        )
+        stream_helpers = load_module_from_file(
+            "AILab_StreamDisplay.py",
+            "thinkingllm_stream_channel_test",
+        )
+
+        reasoning = (
+            "integrated_multimodal_description: obsolete draft\n\n"
+            "Wait, I need to rethink the structure."
+        )
+        final_prompt = (
+            "integrated_multimodal_description: [Shot 1] The actual shot.\n\n"
+            "overall_soundscape: N/A\n\n"
+            "non_diegetic_music: N/A"
+        )
+        raw_trace = stream_helpers.compose_streamed_model_output(reasoning, final_prompt)
+        cleaned = cleaner.clean_model_output(
+            raw_trace,
+            cleaner.OutputCleanConfig(mode="prompt"),
+        )
+
+        self.assertIn(reasoning, raw_trace)
+        self.assertEqual(cleaned, final_prompt)
+        self.assertNotIn("obsolete draft", cleaned)
+
+    def test_output_cleaner_drops_unclosed_thinking_instead_of_salvaging_it(self):
+        cleaner = load_module_from_file(
+            "AILab_OutputCleaner.py",
+            "thinkingllm_unclosed_thinking_test",
+        )
+        truncated = (
+            "<think>\nThinking Process:\n\n"
+            "integrated_multimodal_description: obsolete example\n\n"
+            "1. Analyze the request: I need to"
+        )
+        cleaned = cleaner.clean_model_output(
+            truncated,
+            cleaner.OutputCleanConfig(mode="prompt"),
+        )
+        self.assertEqual(cleaned, "")
+
     def test_compact_stream_display_does_not_flush_unstyled_tail(self):
         from AILab_StreamDisplay import TerminalStreamDisplay
         import io
@@ -1048,6 +1562,21 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertIn("partial compact token", output)
         self.assertIn("output with visible", output)
         self.assertIn("words", output)
+
+    def test_terminal_display_uses_ascii_safe_typographic_punctuation(self):
+        from AILab_StreamDisplay import TerminalStreamDisplay
+        import io
+
+        original = "\u201cThat\u2019s useful\u2026 really\u201d \u2014 Peter"
+        display = TerminalStreamDisplay("UnitTest", compact=True, line_width=80)
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            display.start_stage("STREAMING")
+            display.push_compact(original)
+            display.end_stage()
+
+        self.assertEqual(stream.getvalue(), '"That\'s useful... really" -- Peter\n')
+        self.assertEqual(original, "\u201cThat\u2019s useful\u2026 really\u201d \u2014 Peter")
 
     def test_stream_degeneracy_guard_catches_repeated_word_loop(self):
         from AILab_StreamDisplay import StreamDegenerationError, StreamDegenerationGuard, strip_degenerate_repetition
@@ -1067,7 +1596,7 @@ class TestModelRecommendations(unittest.TestCase):
         for filename in STREAMING_FILES:
             source = read_source(filename)
             with self.subTest(filename=filename):
-                if "GGUF" in filename or filename in {"AILab_QwenVL.py", "AILab_QwenVL_PromptEnhancer.py"}:
+                if "GGUF" in filename or filename in {"thinkingllm_core/hf_runtime.py", "AILab_QwenVL_PromptEnhancer.py"}:
                     stream_pushes = [line for line in source.splitlines() if "push_compact" in line]
                     self.assertTrue(stream_pushes)
                 self.assertNotIn("last_status_at = _maybe_emit_answer_stream_heartbeat", source)
@@ -1199,7 +1728,8 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
 
     def test_commercial_mode_rejects_every_status_except_cleared(self):
         module = self._load_qwenvl_with_stubs()
-        with mock.patch.object(module, "COMMERCIAL_RELEASE", True):
+        access_globals = module.enforce_model_access.__globals__
+        with mock.patch.dict(access_globals, {"COMMERCIAL_RELEASE": True}):
             module.enforce_model_access({"commercial_status": "cleared"}, "official/model", local_exists=True)
             for info in (
                 {"commercial_status": "external_gated"},
@@ -1213,6 +1743,8 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
 
     def test_gated_hf_snapshot_uses_local_copy_without_token_and_requires_token_before_download(self):
         module = self._load_qwenvl_with_stubs()
+        models_globals = module.ensure_model.__globals__
+        model_folder_paths = models_globals["folder_paths"]
         entry = {"repo_id": "private/repo", "commercial_status": "external_gated"}
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1221,24 +1753,26 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
             target.mkdir(parents=True)
             (target / "config.json").write_text("{}", encoding="utf-8")
             (target / "model.safetensors").write_bytes(b"weights")
-            with mock.patch.object(module, "HF_ALL_MODELS", {"gated": entry}), mock.patch.object(
-                module.folder_paths, "models_dir", str(models_dir)
-            ), mock.patch.object(module.folder_paths, "folder_names_and_paths", {}), mock.patch.object(
-                module, "_download_model_snapshot", side_effect=AssertionError("local gated model must not download")
+            with mock.patch.dict(models_globals, {"HF_ALL_MODELS": {"gated": entry}}), mock.patch.object(
+                model_folder_paths, "models_dir", str(models_dir)
+            ), mock.patch.object(model_folder_paths, "folder_names_and_paths", {}), mock.patch.dict(
+                models_globals, {"_download_model_snapshot": mock.Mock(side_effect=AssertionError("local gated model must not download"))}
             ):
                 self.assertEqual(str(target), module.ensure_model("gated"))
 
             shutil.rmtree(target)
-            with mock.patch.object(module, "HF_ALL_MODELS", {"gated": entry}), mock.patch.object(
-                module.folder_paths, "models_dir", str(models_dir)
-            ), mock.patch.object(module.folder_paths, "folder_names_and_paths", {}), mock.patch.object(
-                module, "_download_model_snapshot", side_effect=AssertionError("missing token must stop before download")
+            with mock.patch.dict(models_globals, {"HF_ALL_MODELS": {"gated": entry}}), mock.patch.object(
+                model_folder_paths, "models_dir", str(models_dir)
+            ), mock.patch.object(model_folder_paths, "folder_names_and_paths", {}), mock.patch.dict(
+                models_globals, {"_download_model_snapshot": mock.Mock(side_effect=AssertionError("missing token must stop before download"))}
             ), mock.patch.dict(module.os.environ, {}, clear=True):
                 with self.assertRaisesRegex(PermissionError, "no Hugging Face access token"):
                     module.ensure_model("gated", hf_token="")
 
     def test_gated_hf_snapshot_forwards_token_only_to_download(self):
         module = self._load_qwenvl_with_stubs()
+        models_globals = module.ensure_model.__globals__
+        model_folder_paths = models_globals["folder_paths"]
         captured = []
 
         def fake_download(repo_id, target, **kwargs):
@@ -1247,11 +1781,15 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
             (target / "config.json").write_text("{}", encoding="utf-8")
             (target / "model.safetensors").write_bytes(b"weights")
 
-        with tempfile.TemporaryDirectory() as temp_dir, mock.patch.object(
-            module, "HF_ALL_MODELS", {"gated": {"repo_id": "private/repo", "commercial_status": "external_gated"}}
-        ), mock.patch.object(module.folder_paths, "models_dir", temp_dir), mock.patch.object(
-            module.folder_paths, "folder_names_and_paths", {}
-        ), mock.patch.object(module, "_download_model_snapshot", side_effect=fake_download):
+        with tempfile.TemporaryDirectory() as temp_dir, mock.patch.dict(
+            models_globals,
+            {
+                "HF_ALL_MODELS": {"gated": {"repo_id": "private/repo", "commercial_status": "external_gated"}},
+                "_download_model_snapshot": mock.Mock(side_effect=fake_download),
+            },
+        ), mock.patch.object(model_folder_paths, "models_dir", temp_dir), mock.patch.object(
+            model_folder_paths, "folder_names_and_paths", {}
+        ):
             module.ensure_model("gated", hf_token="hf_test_secret")
 
         self.assertEqual([("private/repo", "hf_test_secret")], captured)
@@ -1320,6 +1858,7 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
 
     def test_hf_download_prefers_exact_file_and_passes_token(self):
         module = self._load_qwenvl_with_stubs()
+        access_globals = module.download_hf_file_to_path.__globals__
         captured_kwargs = []
 
         def fake_hf_hub_download(**kwargs):
@@ -1336,8 +1875,13 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             target_path = Path(temp_dir) / "model.gguf"
-            with mock.patch.object(module, "hf_hub_download", side_effect=fake_hf_hub_download):
-                with mock.patch.object(module, "snapshot_download", side_effect=fail_snapshot_download):
+            with mock.patch.dict(
+                access_globals,
+                {
+                    "hf_hub_download": mock.Mock(side_effect=fake_hf_hub_download),
+                    "snapshot_download": mock.Mock(side_effect=fail_snapshot_download),
+                },
+            ):
                     module.download_hf_file_to_path(
                         ["private/repo"],
                         "model.gguf",
@@ -1390,6 +1934,7 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
 
     def test_hf_file_download_failure_raises_redacted_message(self):
         module = self._load_qwenvl_with_stubs()
+        access_globals = module.download_hf_file_to_path.__globals__
         secret = "hf_secret_test_token"
 
         def fake_snapshot_download(**kwargs):
@@ -1397,8 +1942,13 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             target_path = Path(temp_dir) / "missing.gguf"
-            with mock.patch.object(module, "hf_hub_download", side_effect=fake_snapshot_download):
-                with mock.patch.object(module, "snapshot_download", side_effect=fake_snapshot_download):
+            with mock.patch.dict(
+                access_globals,
+                {
+                    "hf_hub_download": mock.Mock(side_effect=fake_snapshot_download),
+                    "snapshot_download": mock.Mock(side_effect=fake_snapshot_download),
+                },
+            ):
                     with self.assertRaises(FileNotFoundError) as raised:
                         module.download_hf_file_to_path(
                             ["private/repo"],
@@ -1441,7 +1991,7 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
 
 class TestInterruptSupport(unittest.TestCase):
     INTERRUPT_FILES = [
-        "AILab_QwenVL.py",
+        "thinkingllm_core/hf_runtime.py",
         "AILab_QwenVL_GGUF.py",
         "AILab_QwenVL_PromptEnhancer.py",
         "AILab_QwenVL_GGUF_PromptEnhancer.py",
@@ -1756,20 +2306,27 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
             "AILab_WhisperASR.py",
         ])
         expected_optional_inputs = {
-            "ThinkingLLM_QwenVL": {"image", "video", "mask"},
-            "ThinkingLLM_QwenVL_Advanced": {"image", "video", "mask"},
-            "ThinkingLLM_QwenVL_PromptEnhancer": set(),
-            "ThinkingLLM_QwenVL_GGUF": {"image", "video", "mask", "audio", "audio_file_path"},
-            "ThinkingLLM_QwenVL_GGUF_Advanced": {"image", "video", "mask", "audio", "audio_file_path"},
+            "ThinkingLLM_QwenVL": {"image", "video", "mask", "duration_seconds"},
+            "ThinkingLLM_QwenVL_Advanced": {"image", "video", "mask", "duration_seconds"},
+            "ThinkingLLM_QwenVL_PromptEnhancer": {"duration_seconds"},
+            "ThinkingLLM_QwenVL_GGUF": {"image", "video", "mask", "audio", "audio_file_path", "duration_seconds"},
+            "ThinkingLLM_QwenVL_GGUF_Advanced": {"image", "video", "mask", "audio", "audio_file_path", "duration_seconds"},
             "ThinkingLLM_Gemma4_Audio_GGUF": {"audio", "audio_file_path"},
             "ThinkingLLM_Whisper_ASR": {"audio", "audio_file_path"},
-            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": set(),
+            "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": {"duration_seconds"},
         }
 
         for node_name, expected in expected_optional_inputs.items():
             with self.subTest(node_name=node_name):
                 input_types = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()
                 self.assertEqual(set(input_types.get("optional", {})), expected)
+                if "duration_seconds" in expected:
+                    duration_type, duration_meta = input_types["optional"]["duration_seconds"]
+                    self.assertEqual(duration_type, "FLOAT")
+                    self.assertEqual(duration_meta["default"], 5.0)
+                    self.assertEqual(duration_meta["min"], 0.2)
+                    self.assertEqual(duration_meta["max"], 150.0)
+                    self.assertEqual(duration_meta["step"], 0.1)
 
     def test_gguf_vision_selector_includes_google_gemma4_e4b_image_model(self):
         package = load_thinkingllm_loader_subset(["AILab_QwenVL_GGUF.py"])
@@ -3308,6 +3865,188 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         self.assertIn("ok", raw_trace)
         self.assertEqual(loader.llm.reset_count, 1)
         self.assertEqual(loader.llm.events, ["reset", "completion"])
+
+    def test_gguf_invoke_returns_content_without_reasoning_drafts(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gguf_separate_reasoning_content_test",
+            )
+
+        cleaner = load_module_from_file(
+            "AILab_OutputCleaner.py",
+            "thinkingllm_output_cleaner_invoke_test",
+        )
+        stream_helpers = load_module_from_file(
+            "AILab_StreamDisplay.py",
+            "thinkingllm_stream_helpers_invoke_test",
+        )
+        module.OutputCleanConfig = cleaner.OutputCleanConfig
+        module.clean_model_output = cleaner.clean_model_output
+        module.extract_stream_token = stream_helpers.extract_stream_token
+        module.compose_streamed_model_output = stream_helpers.compose_streamed_model_output
+
+        final_prompt = (
+            "integrated_multimodal_description: [Shot 1] The actual shot.\n\n"
+            "overall_soundscape: N/A\n\n"
+            "non_diegetic_music: N/A"
+        )
+
+        class DummyLlama:
+            def reset(self):
+                pass
+
+            def create_chat_completion(self, **kwargs):
+                return iter([
+                    {"choices": [{"delta": {"reasoning_content": (
+                        "integrated_multimodal_description: obsolete internal draft. "
+                        "Wait, I need to reconsider it."
+                    )}}]},
+                    {"choices": [{"delta": {"content": final_prompt}}]},
+                ])
+
+        loader = module.QwenVLGGUFBase()
+        loader.llm = DummyLlama()
+
+        text, raw_trace = loader._invoke(
+            system_prompt="system",
+            user_prompt="user",
+            images_b64=[],
+            audio_b64=[],
+            max_tokens=256,
+            temperature=0.0,
+            top_p=1.0,
+            repetition_penalty=1.0,
+            seed=1,
+            stream_to_terminal=False,
+            enable_thinking=True,
+        )
+
+        self.assertEqual(text, final_prompt)
+        self.assertNotIn("obsolete internal draft", text)
+        self.assertIn("obsolete internal draft", raw_trace)
+        self.assertIn(final_prompt, raw_trace)
+
+    def test_gguf_video_prompt_enhancer_retries_unfinished_thinking_with_schema_prefill(self):
+        stubs = build_loader_test_stubs()
+        stubs["AILab_QwenVL_GGUF"] = build_stub_module(
+            "AILab_QwenVL_GGUF",
+            construct_llama_safely=lambda *args, **kwargs: None,
+            read_gguf_architecture=lambda *args, **kwargs: "qwen35",
+            register_active_gguf_loader=lambda *args, **kwargs: None,
+            release_other_gguf_loaders=lambda *args, **kwargs: None,
+            _filter_kwargs_for_callable=lambda func, kwargs: kwargs,
+            _find_existing_local_file_in_dirs=lambda *args, **kwargs: None,
+            _gguf_search_dirs=lambda *args, **kwargs: [],
+        )
+        with mock.patch.dict(sys.modules, stubs, clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                "thinkingllm_gguf_video_direct_retry_test",
+            )
+
+        cleaner = load_module_from_file(
+            "AILab_OutputCleaner.py",
+            "thinkingllm_output_cleaner_video_retry_test",
+        )
+        stream_helpers = load_module_from_file(
+            "AILab_StreamDisplay.py",
+            "thinkingllm_stream_helpers_video_retry_test",
+        )
+        module.OutputCleanConfig = cleaner.OutputCleanConfig
+        module.clean_model_output = cleaner.clean_model_output
+        module.extract_stream_token = stream_helpers.extract_stream_token
+        module.compose_streamed_model_output = stream_helpers.compose_streamed_model_output
+        module.resolve_video_duration = lambda preset, duration: {
+            "provider": "minimax_h3",
+            "video_mode": "t2va",
+        } if "MiniMax" in preset else None
+        module.apply_qwen_soft_thinking_directive = lambda text, *args, **kwargs: text
+
+        class DummyLlama:
+            def __init__(self):
+                self.calls = []
+
+            def reset(self):
+                pass
+
+            def create_chat_completion(self, **kwargs):
+                self.calls.append(kwargs)
+                if len(self.calls) == 1:
+                    return iter([{
+                        "choices": [{"delta": {"content": (
+                            "<think>Thinking Process:\n\n"
+                            "integrated_multimodal_description: obsolete draft\n\n"
+                            "I need to continue"
+                        )}}]
+                    }])
+                return iter([{
+                    "choices": [{"delta": {"content": (
+                        "<think>\n</think>\n\n"
+                        "integrated_multimodal_description: [Shot 1] The actual shot.\n\n"
+                        "overall_soundscape: N/A\n\n"
+                        "non_diegetic_music: N/A"
+                    )}}]
+                }])
+
+        loader = module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer()
+        loader.llm = DummyLlama()
+        loader.supports_qwen_soft_think = True
+
+        text, raw_trace = loader._invoke_llama(
+            system_prompt="system",
+            user_prompt="original request",
+            max_tokens=1024,
+            temperature=0.5,
+            top_p=0.9,
+            repetition_penalty=1.1,
+            seed=1,
+            stream_to_terminal=False,
+            enable_thinking=False,
+            auto_finalization_retry=False,
+            preset_name="🎬 MiniMax H3 Text-to-Video",
+        )
+
+        self.assertEqual(len(loader.llm.calls), 2)
+        self.assertTrue(text.startswith("integrated_multimodal_description: [Shot 1]"))
+        self.assertEqual(text.count("integrated_multimodal_description:"), 1)
+        self.assertNotIn("obsolete draft", text)
+        self.assertIn("FINALIZATION ATTEMPT 2/3", raw_trace)
+        self.assertEqual(loader.llm.calls[1]["messages"][-1], {
+            "role": "assistant",
+            "content": "integrated_multimodal_description:",
+        })
+
+    def test_gguf_video_prompt_acceptance_is_not_a_schema_gate(self):
+        stubs = build_loader_test_stubs()
+        stubs["AILab_QwenVL_GGUF"] = build_stub_module(
+            "AILab_QwenVL_GGUF",
+            construct_llama_safely=lambda *args, **kwargs: None,
+            read_gguf_architecture=lambda *args, **kwargs: "qwen35",
+            register_active_gguf_loader=lambda *args, **kwargs: None,
+            release_other_gguf_loaders=lambda *args, **kwargs: None,
+            _filter_kwargs_for_callable=lambda func, kwargs: kwargs,
+            _find_existing_local_file_in_dirs=lambda *args, **kwargs: None,
+            _gguf_search_dirs=lambda *args, **kwargs: [],
+        )
+        with mock.patch.dict(sys.modules, stubs, clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                "thinkingllm_gguf_video_no_schema_gate_test",
+            )
+
+        module.resolve_video_duration = lambda preset, duration: {
+            "provider": "minimax_h3",
+            "video_mode": "t2va",
+        }
+        self.assertTrue(module._preset_output_is_usable(
+            "integrated_multimodal_description: A usable prompt with a minor missing optional section.",
+            "🎬 MiniMax H3 Text-to-Video",
+        ))
+        self.assertFalse(module._preset_output_is_usable(
+            "",
+            "🎬 MiniMax H3 Text-to-Video",
+        ))
 
     def test_gguf_invoke_does_not_auto_finalize_by_default(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):

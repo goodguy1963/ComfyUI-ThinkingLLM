@@ -18,9 +18,13 @@
 ThinkingLLM nodes add a read-only `recommended_settings` info box.
 
 - It explains the selected model family and recommended generation settings.
+- For every LTX 2.3, MiniMax H3, and Wan 2.2 video preset, it adds a preset-specific `enable_thinking` and `max_tokens` recommendation with a short reason.
+- Model sampling guidance and video-preset output budgets stay separate, so selecting a preset never replaces the selected model family's sampler advice.
 - It does not change your saved widget values.
 - For GGUF audio-capable nodes, it tells you whether the selected model actually supports audio.
 - In Advanced GGUF nodes, if you connect or expose audio for a model without known audio support, the box warns you instead of silently implying that audio will work.
+
+See [video preset settings](docs/VIDEO_PRESET_SETTINGS.md) for the complete recommendation table and source rationale.
 
 ### The Thinking Toggle
 
@@ -137,11 +141,29 @@ The GGUF path requires a multimodal-capable `llama-cpp-python` build. The normal
 - **Inspect reasoning** — connect the RAW_TRACE output to a second Show Text node to see what the model was thinking.
 - **Use the dedicated audio nodes first** — Gemma 4 Audio is for audio understanding; Whisper ASR is for transcription. The Advanced GGUF audio input is intentionally more flexible, but the info box will warn you when the selected model has no curated audio support.
 
+### Duration-aware video prompts
+
+The four vision nodes and both Prompt Enhancer nodes expose an optional `duration_seconds` input. It becomes visible only for registered LTX 2.3 and MiniMax H3 video presets; all other presets ignore it. Connect the same requested duration value to ThinkingLLM and your downstream video generator so prompt timing and generated length stay aligned.
+
+- LTX 2.3 uses the requested value directly and returns one chronological paragraph with a natural total-duration phrase.
+- MiniMax H3 mirrors ComfyUI's 24 fps `17k+5` frame grid. For example, `5.0` seconds becomes 124 frames (`5.17` seconds), `8.0` stays 192 frames (`8.00` seconds), and `12.0` becomes 294 frames (`12.25` seconds). The effective duration is internal planning context: T2VA, I2VA, and full-reference outputs do not get an invented `Target duration:` field. FL2VA and L2VA use it only in the official image-alignment line.
+- The duration input overrides conflicting duration wording in the free prompt for duration-aware presets. Older saved nodes that do not contain the optional input use `5.0` seconds.
+
+See the [duration-aware video prompt guide](docs/VIDEO_PROMPT_DURATION.md) for node coverage, MiniMax frame normalization, Base and Full-Reference structures, cache behavior, best-effort normalization, and troubleshooting.
+
+For LTX, use `📖 LTX 2.3 NSFW T2V Scene` in a text Prompt Enhancer, or choose the matching I2V, First/Last-to-Video, or Reference-to-Video preset in a vision node. The First/Last preset treats the first two connected pictures as exact boundary frames; the Reference preset treats connected media as reusable identity, style, prop, environment, motion, or camera anchors.
+
 ### MiniMax H3 prompt preset
 
-Select `🎬 MiniMax H3 Text-to-Video` for text and keyframe prompting or `🖼️ MiniMax H3 Reference-to-Video` for full-reference generation. Vision nodes support text-to-video, first-frame, first-and-last-frame, last-frame, and full-reference prompting; text-only Prompt Enhancer nodes emit the T2VA format. The presets keep timed shots, camera motion, dialogue, soundscape, music, keyframe alignment, and reference-retention fields in the structure expected by H3.
+Select the dedicated T2VA, I2VA, FL2VA, L2VA, or Reference-to-Video preset that matches the connected media. Vision nodes expose all five formats; text-only Prompt Enhancer nodes expose only T2VA. The preset instructs the LLM to use the official three-field Base or six-section Full-Reference structure. After generation, ThinkingLLM only applies safe best-effort cleanup: it removes obsolete `Target duration:` declarations, normalizes recognizable cut timestamps, separates uniquely identifiable fields, and converts clear `<d>English ...</d>` variants to `<d>[English] ...</d>`. It does not reject the result when fields, speaker IDs, dialogue length, or timing remain imperfect.
 
-Reference-to-Video requires a custom prompt that describes the target video and assigns each reference a role such as identity, style, motion, camera, or voice. To animate one image as the first frame, use Text-to-Video instead. For fast direct prompt generation, start with `enable_thinking=false` and `max_tokens=1024` for Text-to-Video or `max_tokens=1536` for Reference-to-Video; raise the limit only if a useful response is truncated.
+Standalone quoted dialogue blocks are presented to the LLM as verbatim source material. When the input is a longer master script, the preset asks the model to select one coherent moment that fits instead of compressing the complete story. The selected moment may be visual-only. This is prompt guidance, not a blocking post-generation validator; the downstream MiniMax pipeline receives the cleaned model output even if the model deviates slightly.
+
+For example, a 99-word multi-scene script with `duration_seconds=8.0` is valid input. ThinkingLLM selects one feasible short scene, with or without dialogue; it does not require all 99 dialogue words to play in eight seconds and does not compress the full narrative into rapid cuts.
+
+The effective duration remains authoritative planning context for the LLM. ThinkingLLM does not launch a schema-repair generation or block output because of an out-of-range timestamp, missing speaker tag, unexpected field, or estimated dialogue length; MiniMax performs its own downstream prompt interpretation. The only automatic retry is a direct finalization retry when generation ends before any usable final prompt, such as inside an unfinished `<think>` block.
+
+Reference-to-Video requires a custom prompt that describes the target video and assigns each reference a role such as identity, style, motion, camera, or voice. To animate one image as the first frame, use Text-to-Video instead. Start with `enable_thinking=false` and `max_tokens=2048` for Base formats or `max_tokens=3072` for Reference-to-Video. If a model still spends the initial budget inside an unfinished `<think>` block, ThinkingLLM discards that incomplete reasoning and automatically performs a direct schema-prefilled retry instead of forwarding it as the video prompt.
 
 See the official [MiniMax H3 ComfyUI workflows](https://docs.comfy.org/tutorials/video/minimax/minimax-h3), [base prompt guide](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md), and [full-reference prompt guide](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md).
 

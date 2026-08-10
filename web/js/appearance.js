@@ -51,6 +51,21 @@ const PRESET_TOOLTIP_NODE_NAMES = new Set([
     "ThinkingLLM_SystemPromptPreset",
 ]);
 
+const DURATION_INPUT_NODE_NAMES = new Set([
+    "AILab_QwenVL",
+    "AILab_QwenVL_Advanced",
+    "AILab_QwenVL_PromptEnhancer",
+    "AILab_QwenVL_GGUF",
+    "AILab_QwenVL_GGUF_Advanced",
+    "AILab_QwenVL_GGUF_PromptEnhancer",
+    "ThinkingLLM_QwenVL",
+    "ThinkingLLM_QwenVL_Advanced",
+    "ThinkingLLM_QwenVL_PromptEnhancer",
+    "ThinkingLLM_QwenVL_GGUF",
+    "ThinkingLLM_QwenVL_GGUF_Advanced",
+    "ThinkingLLM_QwenVL_GGUF_PromptEnhancer",
+]);
+
 const AUDIO_CAPABLE_NODE_NAMES = new Set([
     "ThinkingLLM_Gemma4_Audio_GGUF",
     "ThinkingLLM_Whisper_ASR",
@@ -96,7 +111,7 @@ function loadRecommendations() {
 
 function loadPresetTooltips() {
     if (!presetTooltipsPromise) {
-        presetTooltipsPromise = fetch(PRESET_TOOLTIPS_URL)
+        presetTooltipsPromise = fetch(PRESET_TOOLTIPS_URL, { cache: "no-store" })
             .then((response) => {
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
@@ -138,6 +153,88 @@ function hideStableWidget(node, widget) {
     widget.type = `thinkingllm_hidden_${widget.type || "widget"}`;
     widget.computeSize = () => [0, 0];
     widget.draw = () => {};
+}
+
+function setWidgetVisible(node, widget, visible) {
+    if (!widget) { return; }
+    if (!widget._thinkingllmVisibilityState) {
+        widget._thinkingllmVisibilityState = {
+            type: widget.type,
+            computeSize: widget.computeSize,
+            draw: widget.draw,
+            hidden: widget.hidden,
+        };
+    }
+    const original = widget._thinkingllmVisibilityState;
+    if (visible) {
+        widget.type = original.type;
+        widget.computeSize = original.computeSize;
+        widget.draw = original.draw;
+        widget.hidden = original.hidden;
+    } else {
+        widget.hidden = true;
+        widget.type = `thinkingllm_hidden_${original.type || "widget"}`;
+        widget.computeSize = () => [0, 0];
+        widget.draw = () => {};
+    }
+    resizeNode(node);
+}
+
+function readComboValue(widget) {
+    const value = widget?.value;
+    if (typeof value === "string") {
+        return value;
+    }
+    if (value && typeof value === "object") {
+        for (const key of ["value", "content", "label", "name"]) {
+            if (typeof value[key] === "string") {
+                return value[key];
+            }
+        }
+    }
+    return value == null ? "" : String(value);
+}
+
+function normalizePresetName(value) {
+    return String(value || "").normalize("NFC").replaceAll("\uFE0F", "").trim();
+}
+
+function findVideoPresetMetadata(payload, selectedPreset) {
+    const presets = payload?.video_presets;
+    if (!presets || typeof presets !== "object" || Array.isArray(presets)) {
+        return { metadataAvailable: false, metadata: null };
+    }
+    if (Object.prototype.hasOwnProperty.call(presets, selectedPreset)) {
+        return { metadataAvailable: true, metadata: presets[selectedPreset] };
+    }
+    const normalizedSelection = normalizePresetName(selectedPreset);
+    const matchingEntry = Object.entries(presets)
+        .find(([name]) => normalizePresetName(name) === normalizedSelection);
+    return {
+        metadataAvailable: true,
+        metadata: matchingEntry?.[1] || null,
+    };
+}
+
+function selectedPresetName(node) {
+    return PRESET_WIDGET_NAMES
+        .map((name) => readComboValue(findWidget(node, name)))
+        .find((value) => value) || "";
+}
+
+function updateDurationVisibility(node, payload) {
+    if (!DURATION_INPUT_NODE_NAMES.has(node.comfyClass)) {
+        return;
+    }
+    const selectedPreset = selectedPresetName(node);
+    const durationWidget = findWidget(node, "duration_seconds");
+    const { metadataAvailable, metadata } = findVideoPresetMetadata(payload, selectedPreset);
+    if (!metadataAvailable) {
+        // Keep the backend-provided control usable if the auxiliary payload is stale or unavailable.
+        setWidgetVisible(node, durationWidget, true);
+        return;
+    }
+    setWidgetVisible(node, durationWidget, Boolean(metadata?.duration_required));
 }
 
 function findWidgets(node, name) {
@@ -328,6 +425,40 @@ function buildRecommendationText(node, rules) {
     return lines.join("\n");
 }
 
+function buildVideoPresetRecommendationText(node, payload) {
+    const presetName = selectedPresetName(node);
+    if (!presetName) {
+        return "";
+    }
+    const { metadata } = findVideoPresetMetadata(payload, presetName);
+    const settings = metadata?.recommended_settings;
+    if (!settings || typeof settings !== "object") {
+        return "";
+    }
+
+    const suggested = [];
+    if (hasWidget(node, "enable_thinking") && typeof settings.enable_thinking === "boolean") {
+        suggested.push(`thinking ${settings.enable_thinking ? "ON" : "OFF"}`);
+    }
+    if (hasWidget(node, "max_tokens") && Number.isFinite(settings.max_tokens)) {
+        suggested.push(`max_tokens=${settings.max_tokens}`);
+    }
+    if (!suggested.length) {
+        return "";
+    }
+
+    const lines = [
+        `Video preset: ${presetName}`,
+        `Suggested: ${suggested.join(" | ")}`,
+    ];
+    if (metadata.recommendation_note) {
+        lines.push(`Reason: ${metadata.recommendation_note}`);
+    }
+    lines.push("Sampler: follow the model/input-mode recommendation above.");
+    lines.push("Info only: your saved widget values are not changed.");
+    return lines.join("\n");
+}
+
 function ensureRecommendationWidget(node) {
     if (!THINKINGLLM_NODE_NAMES.has(node.comfyClass)) {
         return null;
@@ -344,7 +475,7 @@ function ensureRecommendationWidget(node) {
         widget.inputEl.style.opacity = 0.78;
         widget.inputEl.style.fontSize = "12px";
         widget.inputEl.style.lineHeight = "1.35";
-        widget.inputEl.rows = 6;
+        widget.inputEl.rows = 10;
     }
     widget.options = { ...(widget.options || {}), serialize: false };
     widget.serializeValue = async () => undefined;
@@ -373,8 +504,11 @@ function updateRecommendationWidget(node) {
     if (!widget) {
         return;
     }
-    loadRecommendations().then((rules) => {
-        widget.value = buildRecommendationText(node, rules);
+    Promise.all([loadRecommendations(), loadPresetTooltips()]).then(([rules, payload]) => {
+        widget.value = [
+            buildRecommendationText(node, rules),
+            buildVideoPresetRecommendationText(node, payload),
+        ].filter(Boolean).join("\n\n");
         resizeNode(node);
     });
 }
@@ -422,6 +556,7 @@ function hookPresetTooltipPreviews(node) {
             for (const widgetName of PRESET_WIDGET_NAMES) {
                 updatePresetTooltip(findWidget(node, widgetName), promptMap);
             }
+            updateDurationVisibility(node, promptMap);
         };
 
         for (const widgetName of PRESET_WIDGET_NAMES) {
@@ -456,7 +591,7 @@ function hookRecommendationUpdates(node) {
     node._thinkingllmRecommendationHooked = true;
     ensureRecommendationWidget(node);
 
-    for (const widgetName of ["model_name", "enable_thinking"]) {
+    for (const widgetName of ["model_name", "enable_thinking", ...PRESET_WIDGET_NAMES]) {
         const target = findWidget(node, widgetName);
         if (!target || target._thinkingllmRecommendationCallbackHooked) {
             continue;

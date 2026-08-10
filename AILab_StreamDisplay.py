@@ -6,6 +6,32 @@ import time
 # ── Global singleton for live terminal streaming ──────────────────────────
 THINKING_STREAM_DISPLAY = None
 
+_TERMINAL_SAFE_PUNCTUATION = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201a": "'",
+        "\u201b": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u201e": '"',
+        "\u201f": '"',
+        "\u2013": "-",
+        "\u2014": "--",
+        "\u2026": "...",
+        "\u00a0": " ",
+    }
+)
+
+
+def _terminal_safe_text(text: str) -> str:
+    """Keep streamed terminal text readable through legacy Windows code pages.
+
+    Only the display copy is normalized. The caller's generated text, cache,
+    RESPONSE, and RAW_TRACE retain the model's original Unicode characters.
+    """
+    return str(text or "").translate(_TERMINAL_SAFE_PUNCTUATION)
+
 
 def get_thinking_stream_display():
     """Return or create a compact-mode TerminalStreamDisplay for live
@@ -90,6 +116,24 @@ def extract_stream_token(chunk) -> dict[str, str]:
     )
 
     return {"reasoning": reasoning, "content": content}
+
+
+def compose_streamed_model_output(reasoning_text: str, content_text: str) -> str:
+    """Preserve streamed channel boundaries for the output cleaner.
+
+    Some OpenAI-compatible GGUF backends send hidden reasoning through
+    ``reasoning_content`` without literal ``<think>`` tags.  Concatenating that
+    channel with ``content`` makes internal drafts look like part of RESPONSE.
+    Wrapping only the reasoning channel lets the existing cleaner remove it,
+    while RAW_TRACE still retains it for diagnostics.
+    """
+    reasoning = str(reasoning_text or "").strip()
+    content = str(content_text or "").strip()
+    if not reasoning:
+        return content
+    if not content:
+        return f"<think>\n{reasoning}\n</think>"
+    return f"<think>\n{reasoning}\n</think>\n\n{content}"
 
 
 class StreamDegenerationError(RuntimeError):
@@ -324,7 +368,7 @@ class TerminalStreamDisplay:
     def _write_line(self, text: str):
         if not text:
             return
-        msg = f"{text}\n"
+        msg = f"{_terminal_safe_text(text)}\n"
         sys.stdout.write(msg)
         sys.stdout.flush()
 
@@ -337,6 +381,7 @@ class TerminalStreamDisplay:
     def _write_wrapped_stream_text(self, text: str):
         if not text:
             return
+        text = _terminal_safe_text(text)
         width = self._stream_line_width()
         for part in re.findall(r"\S+|\s+", text.replace("\r", "")):
             if not part:
