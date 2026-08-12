@@ -1,5 +1,20 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.4.0 (2026/08/12) - Duration-Aware Video Prompting and QwenVL Core
+
+### 2.4.0 Changes
+
+- Added duration-aware LTX 2.3 and MiniMax H3 prompting across the Hugging Face, ComfyUI-native, and GGUF video workflows.
+- Split MiniMax H3 prompting into dedicated T2VA, I2VA, FL2VA, L2VA, and full-reference contracts with frame-grid normalization and safer best-effort output cleanup.
+- Refactored the QwenVL implementation into focused shared modules for model access, runtime configuration, prompt state, prompt contracts, and media handling while preserving compatibility exports.
+- Improved streaming so reasoning stays separate from final content, unfinished thinking traces trigger a direct finalization retry, and terminal-only punctuation remains safe on legacy Windows code pages.
+- Expanded preset recommendations, tooltips, system prompts, and documentation for video token budgets, thinking behavior, reference roles, dialogue fidelity, and duration handling.
+
+### 2.4.0 Validation
+
+- Expanded regression coverage for compatibility, downloads, caching, duration-aware prompting, MiniMax structures, streaming, and node registration.
+- All 131 isolated regression tests pass in the bundled ComfyUI Python runtime.
+
 ## Version 2.3.24 (2026/08/08) - System Prompt Preset Utility
 
 ### 2.3.24 Changes
