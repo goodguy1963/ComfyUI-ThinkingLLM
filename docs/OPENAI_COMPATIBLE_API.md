@@ -149,6 +149,37 @@ If ComfyUI is launched by a service, task scheduler, wrapper, or another account
 
 After changing persistent environment values, restart ComfyUI.
 
+### Windows — user environment variable + `.bat` launcher (ComfyUI Easy-Install)
+
+Recommended for a local single-user ComfyUI that is started from a `.bat` file (for example the `ComfyUI-Easy-Install` `run_nvidia_gpu.bat`). The key lives in the **Windows user environment**, not in any file in the install tree, so it is not exposed in a `.bat`, a profile JSON, a workflow, or a Git commit.
+
+Set the variable once, from any PowerShell:
+
+```powershell
+[System.Environment]::SetEnvironmentVariable("OPENROUTER_API_KEY", "sk-or-xxxx", "User")
+```
+
+Use the variable name that matches your provider (see the built-in profiles table above). The `.bat` needs **no** changes: the embedded Python inherits the user environment automatically. A `.bat` comment can simply point to this documentation:
+
+```bat
+REM API keys are provided via Windows user environment variables (see docs/OPENAI_COMPATIBLE_API.md).
+```
+
+If you already have a key in the current process or want to add one for this session only, you can export it too:
+
+```powershell
+$env:OPENROUTER_API_KEY="sk-or-xxxx"
+```
+
+Verification:
+
+```powershell
+[System.Environment]::GetEnvironmentVariable("OPENROUTER_API_KEY", "User")
+```
+
+> [!NOTE]
+> The user environment is read when a new process is launched. If ComfyUI is already running, restart it after setting the variable. Never put a real key directly into a `.bat` that is stored, backed up, or could end up in version control.
+
 ### Linux/macOS shell
 
 ```bash
@@ -283,6 +314,28 @@ stream_tokens_to_terminal: false
 The node never asks for the real provider credential.
 
 Terminal streaming defaults to **off** for the remote API node. When enabled, ThinkingLLM prints a display-only copy with C0/C1 control characters removed; the actual `RESPONSE`/`RAW_TRACE` strings remain unchanged.
+
+---
+
+## Curated model lists (UX only)
+
+The node ships curated convenience model lists in `web/api_model_catalogs.json`, one per provider (OpenAI, QwenCloud, OpenRouter, Together, Fireworks, DeepInfra, Groq, Featherless, OrcaRouter). In the node UI, `model_name` becomes a dropdown filled from the list for the selected `api_profile`, with a `Custom…` option for anything not listed.
+
+**The catalog is UI convenience only. It is never a security boundary:**
+
+- It does **not** override a server-side profile's `allowed_models` allowlist.
+- It does **not** whitelist models for profiles without an allowlist — any ID can still be typed in `Custom…`.
+- It contains no credentials and no endpoints; it only suggests model IDs.
+
+### Keeping the lists fresh at release time
+
+The lists are curated by hand and validated automatically:
+
+- `tools/check_api_model_catalogs.py` validates schema, required provider entries, well-formed IDs, and duplicate detection.
+- CI runs the validator on every pull request and push to `main` (`.github/workflows/api-security-tests.yml`).
+- `release.yml` runs the validator as a **gate before the release is created**, so a stale or broken catalog cannot ship.
+
+To update the lists: edit `web/api_model_catalogs.json`, run the validator locally, and open a PR. The release workflow will not publish until the catalog validates.
 
 ---
 
