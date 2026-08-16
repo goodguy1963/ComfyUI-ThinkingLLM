@@ -36,6 +36,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install minimal image test dependencies
+        run: python -m pip install --disable-pip-version-check --quiet numpy pillow
+
       - name: Compile API node
         run: python -m py_compile nodes/openai_compatible_api.py
 
