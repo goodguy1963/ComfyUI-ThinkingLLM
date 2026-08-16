@@ -6,7 +6,7 @@
       "auth": "bearer_env",
       "api_key_env": "OPENROUTER_PRODUCTION_API_KEY",
       "allowed_models": [
-        "qwen/qwen3-32b"
+        "provider/model-id"
       ],
       "max_tokens_limit": 8192,
       "allow_extra_body": false,
