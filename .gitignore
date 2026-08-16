@@ -29,6 +29,13 @@ venv/
 env/
 ENV/
 
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+thinkingllm_api_profiles*.json
+!thinkingllm_api_profiles.example.json
+
 # IDE
 .vscode/
 .idea/

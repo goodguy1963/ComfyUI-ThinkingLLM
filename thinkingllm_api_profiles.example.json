@@ -1,0 +1,31 @@
+{
+  "profiles": {
+    "OpenRouter Production": {
+      "provider": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "auth": "bearer_env",
+      "api_key_env": "OPENROUTER_PRODUCTION_API_KEY",
+      "allowed_models": [
+        "provider/model-id"
+      ],
+      "max_tokens_limit": 8192,
+      "max_input_chars": 131072,
+      "max_timeout_seconds": 300,
+      "allowed_extra_body_fields": [],
+      "send_seed": false
+    },
+    "Internal vLLM": {
+      "provider": "vLLM",
+      "base_url": "http://127.0.0.1:8000/v1",
+      "auth": "none",
+      "allowed_models": [
+        "my-qwen-model"
+      ],
+      "max_tokens_limit": 8192,
+      "max_input_chars": 1000000,
+      "max_timeout_seconds": 300,
+      "allowed_extra_body_fields": [],
+      "send_seed": true
+    }
+  }
+}

@@ -1,0 +1,43 @@
+name: API security tests
+
+on:
+  pull_request:
+    paths:
+      - "nodes/openai_compatible_api.py"
+      - "tests/test_openai_api_security.py"
+      - "thinkingllm_api_profiles.example.json"
+      - "docs/OPENAI_COMPATIBLE_API.md"
+      - ".gitignore"
+      - ".github/workflows/api-security-tests.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "nodes/openai_compatible_api.py"
+      - "tests/test_openai_api_security.py"
+      - "thinkingllm_api_profiles.example.json"
+      - "docs/OPENAI_COMPATIBLE_API.md"
+      - ".gitignore"
+      - ".github/workflows/api-security-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  api-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile API node
+        run: python -m py_compile nodes/openai_compatible_api.py
+
+      - name: Run API security regression tests
+        run: python tests/test_openai_api_security.py
