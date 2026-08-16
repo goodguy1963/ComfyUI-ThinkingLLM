@@ -40,9 +40,6 @@ MAX_IMAGE_URL_CHARS = 8_192
 CATALOG_PATH = PACKAGE_DIR / "web" / "api_model_catalogs.json"
 _CATALOG_CACHE: dict | None = None
 
-# Sentinel option in the model_name combo; selecting it lets the user type any model ID.
-API_CUSTOM_MODEL = "Custom…"
-
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _IMAGE_ERROR_RE = re.compile(
@@ -424,8 +421,6 @@ def _parse_extra_json(extra_body_json: str, allowed_fields) -> dict:
 
 def _validate_model(profile: dict, model_name: str) -> str:
     model = _validate_model_identifier(model_name)
-    if model == API_CUSTOM_MODEL:
-        raise ValueError("Select Custom and type a model ID, or pick a curated model for this profile.")
     if profile.get("allowed_models") is not None and model not in profile["allowed_models"]:
         raise ValueError(f"Model {model!r} is not allowed by API profile {profile['name']!r}.")
     return model
@@ -702,11 +697,11 @@ class ThinkingLLMOpenAICompatibleAPI:
         default_models = _catalog_models_for_profile(default_profile)
         if not default_models:
             default_models = ["provider/model-id"]
-        model_options = [*default_models, API_CUSTOM_MODEL]
+        model_options = list(dict.fromkeys(default_models))  # dedupe, keep order
         return {
             "required": {
                 "api_profile": (profiles, {"default": default_profile, "tooltip": "Server-side profile binding endpoint, authentication, credential reference, capabilities, and safety limits."}),
-                "model_name": (model_options, {"default": default_models[0], "tooltip": "Exact provider model ID. Choose a curated model for the selected profile, or Custom to type any ID; the profile may enforce an allowlist."}),
+                "model_name": (model_options, {"default": model_options[0], "tooltip": "Curated model for the selected profile. For anything not listed, leave this as-is and type the ID in custom_model_name below."}),
                 "system_prompt": ("STRING", {"default": "You are a helpful assistant.", "multiline": True}),
                 "prompt": ("STRING", {"default": "", "multiline": True}),
                 "max_tokens": ("INT", {"default": 8192, "min": 1, "max": 65536}),
@@ -719,6 +714,7 @@ class ThinkingLLMOpenAICompatibleAPI:
                 "timeout_seconds": ("INT", {"default": 300, "min": 1, "max": 3600, "tooltip": "Server profile enforces max_timeout_seconds (300 by default)."}),
             },
             "optional": {
+                "custom_model_name": ("STRING", {"default": "", "multiline": False, "tooltip": "Optional: exact model ID for anything not in the curated list. When set, it overrides model_name."}),
                 "image": ("IMAGE", {"tooltip": "Single ComfyUI IMAGE. Encoded as PNG Base64 data URL and sent as OpenAI-style image_url content."}),
                 "image_url": ("STRING", {"default": "", "multiline": False, "tooltip": "Alternative to IMAGE: public HTTPS image URL. Do not connect IMAGE at the same time."}),
                 "extra_body_json": ("STRING", {"default": "", "multiline": True, "tooltip": "Every top-level field must be explicitly allowlisted by the server profile."}),
@@ -738,11 +734,14 @@ class ThinkingLLMOpenAICompatibleAPI:
     def generate(
         self, api_profile, model_name, system_prompt, prompt, max_tokens, temperature, top_p,
         seed, enable_thinking, thinking_budget, stream_tokens_to_terminal, timeout_seconds,
-        image=None, image_url="", extra_body_json="",
+        custom_model_name="", image=None, image_url="", extra_body_json="",
     ):
         profile = _resolve_profile(api_profile)
         if not isinstance(enable_thinking, bool) or not isinstance(stream_tokens_to_terminal, bool):
             raise ValueError("Boolean node inputs must be booleans.")
+        # A custom model ID overrides the curated dropdown selection.
+        if str(custom_model_name or "").strip():
+            model_name = custom_model_name
         model = _validate_model(profile, model_name)
         max_out = _validate_max_tokens(profile, max_tokens)
         timeout = _validate_timeout(profile, timeout_seconds)

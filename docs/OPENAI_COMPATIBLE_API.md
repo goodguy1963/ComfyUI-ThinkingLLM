@@ -319,23 +319,35 @@ Terminal streaming defaults to **off** for the remote API node. When enabled, Th
 
 ## Curated model lists (UX only)
 
-The node ships curated convenience model lists in `web/api_model_catalogs.json`, one per provider (OpenAI, QwenCloud, OpenRouter, Together, Fireworks, DeepInfra, Groq, Featherless, OrcaRouter). In the node UI, `model_name` becomes a dropdown filled from the list for the selected `api_profile`, with a `Custom…` option for anything not listed.
+The node ships convenience model lists in `web/api_model_catalogs.json`, one per provider. `model_name` is a dropdown filled from the list for the selected `api_profile`. For anything not in the list, use the separate **`custom_model_name`** field (optional) — when filled, it overrides the dropdown selection.
+
+Provider coverage:
+
+- **Public `/models` endpoints (auto-refreshed at release):** OpenRouter, OrcaRouter, DeepInfra, Featherless. These ship the *full* current model list (OpenRouter ~413, OrcaRouter ~190, DeepInfra ~185, Featherless capped at 500).
+- **Key-protected providers (hand-curated):** OpenAI, QwenCloud (Singapore), Together AI, Fireworks AI, Groq.
 
 **The catalog is UI convenience only. It is never a security boundary:**
 
 - It does **not** override a server-side profile's `allowed_models` allowlist.
-- It does **not** whitelist models for profiles without an allowlist — any ID can still be typed in `Custom…`.
+- It does **not** whitelist models for profiles without an allowlist — any ID can still be typed in `custom_model_name`.
 - It contains no credentials and no endpoints; it only suggests model IDs.
 
 ### Keeping the lists fresh at release time
 
-The lists are curated by hand and validated automatically:
+The public-provider lists are refreshed automatically at every release:
 
+- `tools/update_api_model_catalogs.py` fetches the public `/models` endpoints and rewrites `web/api_model_catalogs.json` (keeps hand-curated providers unchanged).
 - `tools/check_api_model_catalogs.py` validates schema, required provider entries, well-formed IDs, and duplicate detection.
-- CI runs the validator on every pull request and push to `main` (`.github/workflows/api-security-tests.yml`).
-- `release.yml` runs the validator as a **gate before the release is created**, so a stale or broken catalog cannot ship.
+- `release.yml` runs **both** tools before creating the release: it refreshes the lists, validates, and commits any changes back to the tag. CI (`api-security-tests.yml`) validates on every PR and push to `main`.
 
-To update the lists: edit `web/api_model_catalogs.json`, run the validator locally, and open a PR. The release workflow will not publish until the catalog validates.
+To refresh locally:
+
+```bash
+python tools/update_api_model_catalogs.py
+python tools/check_api_model_catalogs.py
+```
+
+Open a PR with the refreshed catalog. The release workflow will not publish until the catalog validates.
 
 ---
 

@@ -8,6 +8,7 @@ on:
       - "thinkingllm_api_profiles.example.json"
       - "web/api_model_catalogs.json"
       - "tools/check_api_model_catalogs.py"
+      - "tools/update_api_model_catalogs.py"
       - "docs/OPENAI_COMPATIBLE_API.md"
       - ".gitignore"
       - ".github/workflows/api-security-tests.yml"
@@ -20,6 +21,7 @@ on:
       - "thinkingllm_api_profiles.example.json"
       - "web/api_model_catalogs.json"
       - "tools/check_api_model_catalogs.py"
+      - "tools/update_api_model_catalogs.py"
       - "docs/OPENAI_COMPATIBLE_API.md"
       - ".gitignore"
       - ".github/workflows/api-security-tests.yml"
@@ -45,6 +47,9 @@ jobs:
 
       - name: Compile API node
         run: python -m py_compile nodes/openai_compatible_api.py
+
+      - name: Compile catalog tools
+        run: python -m py_compile tools/check_api_model_catalogs.py tools/update_api_model_catalogs.py
 
       - name: Validate API model catalogs
         run: python tools/check_api_model_catalogs.py
