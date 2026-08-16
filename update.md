@@ -9,11 +9,12 @@
 - Refactored the QwenVL implementation into focused shared modules for model access, runtime configuration, prompt state, prompt contracts, and media handling while preserving compatibility exports.
 - Improved streaming so reasoning stays separate from final content, unfinished thinking traces trigger a direct finalization retry, and terminal-only punctuation remains safe on legacy Windows code pages.
 - Expanded preset recommendations, tooltips, system prompts, and documentation for video token budgets, thinking behavior, reference roles, dialogue fidelity, and duration handling.
+- Fixed dynamic duration-widget hiding so switching from LTX or MiniMax back to `Custom Only` cannot serialize the read-only recommendation text as `duration_seconds`; existing corrupted values are repaired to the last valid duration or `5.0` seconds.
 
 ### 2.4.0 Validation
 
 - Expanded regression coverage for compatibility, downloads, caching, duration-aware prompting, MiniMax structures, streaming, and node registration.
-- All 131 isolated regression tests pass in the bundled ComfyUI Python runtime.
+- All 136 isolated regression tests pass in the bundled ComfyUI Python runtime, including duration-widget serialization coverage.
 
 ## Version 2.3.24 (2026/08/08) - System Prompt Preset Utility
 

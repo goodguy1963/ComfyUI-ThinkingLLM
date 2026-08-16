@@ -46,6 +46,7 @@ from thinkingllm_core.hf_models import ensure_cuda_vram_headroom
 from thinkingllm_core.model_access import (
     download_hf_file_to_path,
     enforce_model_access,
+    mark_catalog_files_installed,
     model_catalog_options,
     resolve_model_catalog_name,
 )
@@ -85,7 +86,7 @@ from AILab_QwenVL_GGUF import (
 
 
 GGUF_PROMPT_TOOLTIPS = {
-    "model_name": "GGUF text model from config or auto-detected local files. First run downloads the selected GGUF when it is not already on disk.",
+    "model_name": "GGUF text model from config or auto-detected local files. [installed] means the catalog model was found in a configured GGUF/LLM location; [local] means an uncatalogued local model. Missing GGUF files download on first use.",
     "prompt_text": "Prompt text to enhance. Leave blank to emit the selected preset instruction as the base prompt.",
     "preset_system_prompt": "Preset enhancement style. Use Custom Only when you want custom_system_prompt to fully control the instruction.",
     "custom_system_prompt": "Optional extra instruction. Required when using Custom Only; otherwise it is prepended to the selected style.",
@@ -126,7 +127,7 @@ def _quant_from_filename(filename: str) -> str | None:
     E.g. 'gemma-4-E4B-it-Q4_K_M.gguf' -> 'Q4'."""
     from pathlib import Path
     name = Path(filename).stem.upper()
-    for q in ('BF16', 'F16', 'F32', 'Q8_0', 'Q6_K', 'Q5_K_M', 'Q5_K_S', 'Q4_K_M', 'Q4_K_S', 'Q3_K_M', 'Q2_K'):
+    for q in ('BF16', 'F16', 'F32', 'Q8_0', 'Q6_K', 'Q5_K_M', 'Q5_K_S', 'Q4_K_M', 'Q4_K_S', 'Q3_K_M', 'Q3_K_S', 'Q2_K'):
         if q in name:
             return _QUANT_CANONICAL.get(q, q)
     return None
@@ -136,7 +137,7 @@ _QUANT_CANONICAL = {
     'Q8_0': 'Q8', 'Q6_K': 'Q6',
     'Q5_K_M': 'Q5', 'Q5_K_S': 'Q5',
     'Q4_K_M': 'Q4', 'Q4_K_S': 'Q4',
-    'Q3_K_M': 'Q3', 'Q2_K': 'Q2',
+    'Q3_K_M': 'Q3', 'Q3_K_S': 'Q3', 'Q2_K': 'Q2',
 }
 
 _EMPTY_THINK_RE = re.compile(r"<think[^>]*>\s*</think>", flags=re.IGNORECASE | re.DOTALL)
@@ -531,8 +532,10 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
 
         # Scan filesystem for locally available models not in JSON config
         # Collect all directories to scan: the configured base_dir + any extra LLM paths from ComfyUI
+        search_dirs = _gguf_search_dirs(base_dir)
+        mark_catalog_files_installed(models, search_dirs)
         existing_filenames = {Path(e.get("filename", "")).name for e in models.values() if e.get("filename")}
-        for scan_dir in _gguf_search_dirs(base_dir):
+        for scan_dir in search_dirs:
             local_models = ThinkingLLM_QwenVL_GGUF_PromptEnhancer._scan_local_gguf_text_models(scan_dir, existing_filenames)
             models.update(local_models)
             existing_filenames.update(Path(e.get("filename", "")).name for e in local_models.values() if e.get("filename"))

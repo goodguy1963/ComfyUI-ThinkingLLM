@@ -224,6 +224,26 @@
                 "context_length": 131072
             }
         },
+        "Qwen3.8-27B-ABLITERATED-GGUF [Q2:10.7GB|Q3:12.1-13.3GB|Q4:15.6-16.5GB|Q5:18.7-19.2GB|Q6:22.1GB|Q8:28.6GB|VRAM:~20GB+]": {
+            "author": "Blackfrost-AI",
+            "repo_name": "Qwen3.8-27B-ABLITERATED-GGUF",
+            "repo_id": "Blackfrost-AI/Qwen3.8-27B-ABLITERATED-GGUF",
+            "commercial_status": "unclear",
+            "model_files": [
+                "Qwen3.8-27B-ABLITERATED-Q2_K.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q3_K_S.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q3_K_M.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q4_K_S.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q4_K_M.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q5_K_S.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q5_K_M.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q6_K.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q8_0.gguf"
+            ],
+            "defaults": {
+                "context_length": 262144
+            }
+        },
         "Gemma-4-E2B-it-GGUF [Q4:3.2GB|Q8:4.7GB|BF16:8.7GB|VRAM:~5GB]": {
             "author": "bartowski",
             "repo_name": "google_gemma-4-E2B-it-GGUF",
@@ -433,6 +453,37 @@
             ],
             "defaults": {
                 "context_length": 131072,
+                "image_max_tokens": 4096,
+                "n_batch": 512,
+                "gpu_layers": -1,
+                "top_k": 20,
+                "pool_size": 4194304
+            }
+        },
+        "Qwen3.8-27B-ABLITERATED-GGUF [Q2:10.7GB|Q3:12.1-13.3GB|Q4:15.6-16.5GB|Q5:18.7-19.2GB|Q6:22.1GB|Q8:28.6GB|VRAM:~20GB+]": {
+            "author": "Blackfrost-AI",
+            "repo_name": "Qwen3.8-27B-ABLITERATED-GGUF",
+            "repo_id": "Blackfrost-AI/Qwen3.8-27B-ABLITERATED-GGUF",
+            "commercial_status": "unclear",
+            "mmproj_file": "mmproj-Qwen3.8-27B-ABLITERATED-Q8_0.gguf",
+            "mmproj_local_filenames": {
+                "mmproj-Qwen3.8-27B-ABLITERATED-Q8_0.gguf": [
+                    "mmproj-Qwen3.8-27B-ABLITERATED-F16.gguf"
+                ]
+            },
+            "model_files": [
+                "Qwen3.8-27B-ABLITERATED-Q2_K.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q3_K_S.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q3_K_M.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q4_K_S.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q4_K_M.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q5_K_S.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q5_K_M.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q6_K.gguf",
+                "Qwen3.8-27B-ABLITERATED-Q8_0.gguf"
+            ],
+            "defaults": {
+                "context_length": 262144,
                 "image_max_tokens": 4096,
                 "n_batch": 512,
                 "gpu_layers": -1,

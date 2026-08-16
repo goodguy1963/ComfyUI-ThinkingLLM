@@ -60,6 +60,7 @@ from thinkingllm_core.media import (
 from thinkingllm_core.model_access import (
     download_hf_file_to_path,
     enforce_model_access,
+    mark_catalog_files_installed,
     model_catalog_options,
     normalize_commercial_status,
     resolve_model_catalog_name,
@@ -181,7 +182,7 @@ def _quant_from_filename(filename: str) -> str | None:
     """Extract quantization level from a GGUF filename stem.
     E.g. 'gemma-4-E4B-it-Q4_K_M.gguf' -> 'Q4'."""
     name = Path(filename).stem.upper()
-    for q in ('BF16', 'F16', 'F32', 'Q8_0', 'Q6_K', 'Q5_K_M', 'Q5_K_S', 'Q4_K_M', 'Q4_K_S', 'Q3_K_M', 'Q2_K'):
+    for q in ('BF16', 'F16', 'F32', 'Q8_0', 'Q6_K', 'Q5_K_M', 'Q5_K_S', 'Q4_K_M', 'Q4_K_S', 'Q3_K_M', 'Q3_K_S', 'Q2_K'):
         if q in name:
             return _QUANT_CANONICAL.get(q, q)
     return None
@@ -191,7 +192,7 @@ _QUANT_CANONICAL = {
     'Q8_0': 'Q8', 'Q6_K': 'Q6',
     'Q5_K_M': 'Q5', 'Q5_K_S': 'Q5',
     'Q4_K_M': 'Q4', 'Q4_K_S': 'Q4',
-    'Q3_K_M': 'Q3', 'Q2_K': 'Q2',
+    'Q3_K_M': 'Q3', 'Q3_K_S': 'Q3', 'Q2_K': 'Q2',
 }
 
 import re
@@ -582,17 +583,7 @@ def _load_gguf_vl_catalog():
 
     # Mark catalog entries already present on disk, then add uncatalogued local models.
     search_dirs = _gguf_search_dirs(base_dir)
-    installed_filenames: set[str] = set()
-    for directory in search_dirs:
-        try:
-            installed_filenames.update(path.name for path in directory.rglob("*.gguf") if path.is_file())
-        except (OSError, PermissionError):
-            pass
-    for display, entry in list(flattened.items()):
-        filenames = _filename_search_candidates(entry.get("filename", ""), entry.get("local_filenames"))
-        if any(filename in installed_filenames for filename in filenames):
-            flattened.pop(display)
-            flattened[f"{display} [installed]"] = {**entry, "catalog_display_name": display}
+    mark_catalog_files_installed(flattened, search_dirs)
 
     existing_filenames = {Path(e.get("filename", "")).name for e in flattened.values() if e.get("filename")}
     for scan_dir in search_dirs:
@@ -607,7 +598,7 @@ def _load_gguf_vl_catalog():
 GGUF_VL_CATALOG = _load_gguf_vl_catalog()
 
 GGUF_TOOLTIPS = {
-    "model_name": "GGUF vision model from gguf_models.json or auto-detected local files. [installed] means the catalog model file was found on disk; [local] means an uncatalogued local model. Missing GGUF or mmproj files are downloaded on first use.",
+    "model_name": "GGUF vision model from gguf_models.json or auto-detected local files. [installed] means the catalog model was found in a configured GGUF/LLM location; [local] means an uncatalogued local model. Missing GGUF or mmproj files are downloaded on first use.",
     "audio_model_name": "Gemma 4 audio-capable GGUF model. Only Gemma 4 E2B, E4B, and 12B are listed; 26B/31B variants are image/text-only for this purpose.",
     "audio_file_path": "Optional local audio file path. M4A, MP3, WAV, FLAC, and other FFmpeg-readable files are decoded to 16 kHz mono WAV before inference.",
     "device": "auto prefers CUDA when PyTorch sees an NVIDIA GPU. If RAW_TRACE says GPU offload is no or unknown, verify your llama-cpp-python CUDA wheel before blaming the model.",

@@ -35,6 +35,8 @@ MODEL_STATUS_PRESENTATION = {
     "unclear": (3, "⚠ Rights unclear | "),
     "noncommercial": (4, "🚫 Non-commercial | "),
 }
+MODEL_INSTALLED_SUFFIX = " [installed]"
+MODEL_LOCAL_PREFIX = "[local] "
 
 
 def _format_download_size(num_bytes) -> str:
@@ -196,10 +198,25 @@ def normalize_commercial_status(info: dict | None) -> str:
     return status if status in VALID_COMMERCIAL_STATUSES else "unclear"
 
 
+def _model_display_name(name: str, info: dict | None) -> str:
+    info = info if isinstance(info, dict) else {}
+    local_display_name = str(info.get("local_display_name") or "").strip()
+    if info.get("is_local") and local_display_name:
+        label = f"{MODEL_LOCAL_PREFIX}{local_display_name}"
+        storage_label = str(info.get("storage_label") or "").strip()
+        if storage_label:
+            label = f"{label} ({storage_label})"
+        return label
+    if info.get("is_installed") and not info.get("is_local") and not name.endswith(MODEL_INSTALLED_SUFFIX):
+        return f"{name}{MODEL_INSTALLED_SUFFIX}"
+    return name
+
+
 def model_catalog_label(name: str, info: dict | None) -> str:
+    display_name = _model_display_name(name, info)
     if not COMMERCIAL_RELEASE:
-        return name
-    return f"{MODEL_STATUS_PRESENTATION[normalize_commercial_status(info)][1]}{name}"
+        return display_name
+    return f"{MODEL_STATUS_PRESENTATION[normalize_commercial_status(info)][1]}{display_name}"
 
 
 def model_catalog_options(models: dict[str, dict], predicate=None) -> list[str]:
@@ -222,9 +239,72 @@ def resolve_model_catalog_name(models: dict[str, dict], selected: str) -> str:
     if selected in models:
         return selected
     for name, info in models.items():
-        if selected == f"{MODEL_STATUS_PRESENTATION[normalize_commercial_status(info)][1]}{name}":
+        prefix = MODEL_STATUS_PRESENTATION[normalize_commercial_status(info)][1]
+        if selected in {model_catalog_label(name, info), f"{prefix}{name}"}:
             return name
+    undecorated = selected
+    for _order, prefix in MODEL_STATUS_PRESENTATION.values():
+        if undecorated.startswith(prefix):
+            undecorated = undecorated[len(prefix):]
+            break
+    if undecorated.endswith(MODEL_INSTALLED_SUFFIX):
+        legacy_name = undecorated[:-len(MODEL_INSTALLED_SUFFIX)]
+        if legacy_name in models:
+            return legacy_name
     return selected
+
+
+def _catalog_filename_candidates(info: dict) -> set[str]:
+    candidates: set[str] = set()
+    for key in ("filename", "local_filenames", "local_model_files"):
+        value = info.get(key)
+        if isinstance(value, str):
+            values = [value]
+        elif isinstance(value, (list, tuple, set)):
+            values = value
+        elif isinstance(value, dict):
+            values = [*value.keys(), *value.values()]
+        else:
+            values = []
+        for candidate in values:
+            if isinstance(candidate, (list, tuple, set)):
+                nested = candidate
+            else:
+                nested = [candidate]
+            for item in nested:
+                filename = Path(str(item)).name.casefold()
+                if filename:
+                    candidates.add(filename)
+    return candidates
+
+
+def mark_catalog_files_installed(models: dict[str, dict], search_dirs) -> None:
+    """Mark catalog entries found in any configured directory without changing their keys."""
+    installed_files: dict[str, Path] = {}
+    for directory in search_dirs:
+        directory = Path(directory)
+        if not directory.exists() or not directory.is_dir():
+            continue
+        try:
+            for path in directory.rglob("*.gguf"):
+                if path.is_file():
+                    installed_files.setdefault(path.name.casefold(), path)
+        except (OSError, PermissionError):
+            continue
+
+    for info in models.values():
+        if not isinstance(info, dict) or info.get("is_local"):
+            continue
+        installed_path = next(
+            (installed_files[name] for name in _catalog_filename_candidates(info) if name in installed_files),
+            None,
+        )
+        if installed_path is None:
+            info.pop("is_installed", None)
+            info.pop("installed_path", None)
+            continue
+        info["is_installed"] = True
+        info["installed_path"] = str(installed_path)
 
 
 def enforce_model_access(info: dict | None, model_name: str, *, local_exists: bool, hf_token: str | None = None) -> None:

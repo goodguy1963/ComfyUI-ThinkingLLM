@@ -519,6 +519,48 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertEqual("unclear", module.normalize_commercial_status({}))
         self.assertEqual("unclear", module.normalize_commercial_status({"commercial_status": "invalid"}))
 
+    def test_model_catalog_labels_share_installed_and_local_conventions(self):
+        module = load_module_from_file(
+            "thinkingllm_core/model_access.py",
+            "thinkingllm_shared_model_label_test",
+        )
+        catalog = {
+            "catalog model": {"is_installed": True},
+            "remote model": {},
+            "[local] custom.gguf": {"is_local": True},
+            "[ComfyUI] encoder.safetensors": {
+                "is_local": True,
+                "local_display_name": "encoder.safetensors",
+                "storage_label": "text_encoders",
+            },
+        }
+
+        self.assertEqual(
+            [
+                "catalog model [installed]",
+                "remote model",
+                "[local] custom.gguf",
+                "[local] encoder.safetensors (text_encoders)",
+            ],
+            module.model_catalog_options(catalog),
+        )
+        self.assertEqual(
+            "catalog model",
+            module.resolve_model_catalog_name(catalog, "catalog model [installed]"),
+        )
+        self.assertEqual(
+            "catalog model",
+            module.resolve_model_catalog_name(catalog, "catalog model"),
+        )
+        self.assertEqual(
+            "[ComfyUI] encoder.safetensors",
+            module.resolve_model_catalog_name(catalog, "[local] encoder.safetensors (text_encoders)"),
+        )
+        self.assertEqual(
+            "[ComfyUI] encoder.safetensors",
+            module.resolve_model_catalog_name(catalog, "[ComfyUI] encoder.safetensors"),
+        )
+
     def test_qwenvl_facade_preserves_exports_and_shared_object_identity(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_facade_compatibility_test")
@@ -585,7 +627,8 @@ class TestModelRecommendations(unittest.TestCase):
         )
         self.assertIn("only permits preinstalled, hash-locked models", access_source)
         self.assertIn("if custom.exists() and not COMMERCIAL_RELEASE", hf_models_source)
-        self.assertIn("if not COMMERCIAL_RELEASE:\n        _scan_local_hf_models()", hf_models_source)
+        self.assertIn("if COMMERCIAL_RELEASE:\n        _mark_installed_hf_catalog_models()", hf_models_source)
+        self.assertIn("else:\n        _scan_local_hf_models()", hf_models_source)
         self.assertIn('"local_files_only": COMMERCIAL_RELEASE', hf_runtime_source)
         self.assertIn("trust_remote_code=not COMMERCIAL_RELEASE", hf_runtime_source)
         self.assertIn('"local_files_only": COMMERCIAL_RELEASE', enhancer_source)
@@ -630,6 +673,71 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertIn("mmproj-Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-f16.gguf", vision_catalog[vision_key]["mmproj_file"])
         self.assertGreaterEqual(len(text_catalog[text_key].get("model_files") or []), 11)
         self.assertGreaterEqual(len(vision_catalog[vision_key].get("model_files") or []), 11)
+
+    def test_qwen38_blackfrost_exists_in_text_and_vision_catalogs(self):
+        payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
+        text_catalog = payload.get("Qwen_model") or {}
+        vision_catalog = payload.get("qwenVL_model") or {}
+        expected_files = [
+            "Qwen3.8-27B-ABLITERATED-Q2_K.gguf",
+            "Qwen3.8-27B-ABLITERATED-Q3_K_S.gguf",
+            "Qwen3.8-27B-ABLITERATED-Q3_K_M.gguf",
+            "Qwen3.8-27B-ABLITERATED-Q4_K_S.gguf",
+            "Qwen3.8-27B-ABLITERATED-Q4_K_M.gguf",
+            "Qwen3.8-27B-ABLITERATED-Q5_K_S.gguf",
+            "Qwen3.8-27B-ABLITERATED-Q5_K_M.gguf",
+            "Qwen3.8-27B-ABLITERATED-Q6_K.gguf",
+            "Qwen3.8-27B-ABLITERATED-Q8_0.gguf",
+        ]
+
+        text_key = next((key for key in text_catalog if "Qwen3.8-27B-ABLITERATED" in key), None)
+        vision_key = next((key for key in vision_catalog if "Qwen3.8-27B-ABLITERATED" in key), None)
+
+        self.assertIsNotNone(text_key)
+        self.assertIsNotNone(vision_key)
+        for catalog, key in ((text_catalog, text_key), (vision_catalog, vision_key)):
+            entry = catalog[key]
+            self.assertEqual(entry["repo_id"], "Blackfrost-AI/Qwen3.8-27B-ABLITERATED-GGUF")
+            self.assertEqual(entry["model_files"], expected_files)
+            self.assertEqual(entry["defaults"]["context_length"], 262144)
+        self.assertEqual(
+            vision_catalog[vision_key]["mmproj_file"],
+            "mmproj-Qwen3.8-27B-ABLITERATED-Q8_0.gguf",
+        )
+        self.assertEqual(
+            vision_catalog[vision_key]["mmproj_local_filenames"],
+            {
+                "mmproj-Qwen3.8-27B-ABLITERATED-Q8_0.gguf": [
+                    "mmproj-Qwen3.8-27B-ABLITERATED-F16.gguf"
+                ]
+            },
+        )
+
+    def test_qwen38_blackfrost_expands_in_both_gguf_node_catalogs(self):
+        stubs = build_loader_test_stubs()
+        with mock.patch.dict(sys.modules, stubs, clear=False):
+            vision_module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_qwen38_vision_catalog_test",
+            )
+            with mock.patch.dict(sys.modules, {"AILab_QwenVL_GGUF": vision_module}, clear=False):
+                prompt_module = load_module_from_file(
+                    "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                    "thinkingllm_qwen38_prompt_catalog_test",
+                )
+
+        vision_models = vision_module.GGUF_VL_CATALOG.get("models") or {}
+        prompt_models = prompt_module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer.load_gguf_models().get("models") or {}
+        q3_name = "Qwen3.8-27B-ABLITERATED-Q3_K_S.gguf [~12.1-13.3GB]"
+        q4_name = "Qwen3.8-27B-ABLITERATED-Q4_K_M.gguf [~15.6-16.5GB]"
+
+        self.assertIn(q3_name, vision_models)
+        self.assertIn(q4_name, vision_models)
+        self.assertIn(q3_name, prompt_models)
+        self.assertIn(q4_name, prompt_models)
+        resolved = vision_module._resolve_model_entry(q4_name)
+        self.assertEqual(resolved.mmproj_filename, "mmproj-Qwen3.8-27B-ABLITERATED-Q8_0.gguf")
+        self.assertIn("mmproj-Qwen3.8-27B-ABLITERATED-F16.gguf", resolved.mmproj_local_filenames)
 
     def test_gemma4_12b_is_available_for_hf_and_gguf_vision_and_text(self):
         hf_payload = json.loads((PKG / "hf_models.json").read_text(encoding="utf-8"))
@@ -1401,6 +1509,20 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertIn("Info only: your saved widget values are not changed.", source)
         self.assertIn('["model_name", "enable_thinking", ...PRESET_WIDGET_NAMES]', source)
 
+    def test_duration_visibility_preserves_widget_type_and_serialization_slot(self):
+        source = read_source("web/js/appearance.js")
+        visibility_block = source[
+            source.index("function setWidgetVisible("):
+            source.index("function readComboValue(")
+        ]
+
+        self.assertNotIn("widget.type =", visibility_block)
+        self.assertNotIn("widget.draw =", visibility_block)
+        self.assertIn("widget.computedHeight = 0", visibility_block)
+        self.assertIn("delete widget.computedHeight", visibility_block)
+        self.assertIn("repairDurationWidgetValue(durationWidget)", source)
+        self.assertIn("DEFAULT_DURATION_SECONDS", source)
+
     def test_hf_default_flag_controls_default_model(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             package = load_thinkingllm_loader_subset(["AILab_QwenVL.py"])
@@ -1666,28 +1788,39 @@ class TestSharedComfyUITextEncoders(unittest.TestCase):
 
         with mock.patch.dict(sys.modules, stub_modules, clear=False):
             module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_native_text_encoder_test")
-            qwen_name = "[ComfyUI] qwen3vl_8b_fp8_scaled.safetensors"
-            gemma_name = "[ComfyUI] gemma-3-12b-it-heretic-v2_int8.safetensors"
+            hf_folder_paths = module.load_model_configs.__globals__["folder_paths"]
+            with mock.patch.object(
+                hf_folder_paths,
+                "get_filename_list",
+                side_effect=lambda category: filenames if category == "text_encoders" else [],
+            ), mock.patch.object(
+                hf_folder_paths,
+                "get_full_path_or_raise",
+                side_effect=lambda category, filename: str(PKG / filename),
+            ):
+                module.load_model_configs()
+                qwen_name = "[ComfyUI] qwen3vl_8b_fp8_scaled.safetensors"
+                gemma_name = "[ComfyUI] gemma-3-12b-it-heretic-v2_int8.safetensors"
 
-            self.assertIn("[ComfyUI] qwen3vl_4b_convrot.safetensors", module.HF_VL_MODELS)
-            self.assertIn(qwen_name, module.HF_VL_MODELS)
-            self.assertIn(gemma_name, module.HF_VL_MODELS)
-            self.assertNotIn("[ComfyUI] qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", module.HF_VL_MODELS)
-            self.assertNotIn("[ComfyUI] qwen3vl_32b_minimax_h3_nvfp4_awq.safetensor", module.HF_VL_MODELS)
+                self.assertIn("[ComfyUI] qwen3vl_4b_convrot.safetensors", module.HF_VL_MODELS)
+                self.assertIn(qwen_name, module.HF_VL_MODELS)
+                self.assertIn(gemma_name, module.HF_VL_MODELS)
+                self.assertNotIn("[ComfyUI] qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", module.HF_VL_MODELS)
+                self.assertNotIn("[ComfyUI] qwen3vl_32b_minimax_h3_nvfp4_awq.safetensor", module.HF_VL_MODELS)
 
-            node = module.QwenVLBase()
-            node.load_model(qwen_name, "unused", "auto", False, "auto", True)
-            text, raw = node.generate("hello", None, None, 4, 32, 0.7, 0.9, 1, 1.1, model_name=qwen_name, seed=7)
+                node = module.QwenVLBase()
+                node.load_model(qwen_name, "unused", "auto", False, "auto", True)
+                text, raw = node.generate("hello", None, None, 4, 32, 0.7, 0.9, 1, 1.1, model_name=qwen_name, seed=7)
 
-            self.assertEqual(("native answer", "native answer"), (text, raw))
-            self.assertEqual([str(PKG / "qwen3vl_8b_fp8_scaled.safetensors")], calls["load"]["ckpt_paths"])
-            self.assertTrue(calls["tokenize"][1]["thinking"])
-            self.assertEqual(7, calls["generate"][1]["seed"])
-            calls["decoded_text"] = "  "
-            with self.assertRaisesRegex(RuntimeError, "without producing text"):
-                node.generate("hello", None, None, 4, 32, 0.7, 0.9, 1, 1.1, model_name=qwen_name, seed=8)
-            with self.assertRaisesRegex(ValueError, "not video"):
-                node.generate("hello", None, object(), 4, 32, 0.7, 0.9, 1, 1.1, model_name=gemma_name)
+                self.assertEqual(("native answer", "native answer"), (text, raw))
+                self.assertEqual([str(PKG / "qwen3vl_8b_fp8_scaled.safetensors")], calls["load"]["ckpt_paths"])
+                self.assertTrue(calls["tokenize"][1]["thinking"])
+                self.assertEqual(7, calls["generate"][1]["seed"])
+                calls["decoded_text"] = "  "
+                with self.assertRaisesRegex(RuntimeError, "without producing text"):
+                    node.generate("hello", None, None, 4, 32, 0.7, 0.9, 1, 1.1, model_name=qwen_name, seed=8)
+                with self.assertRaisesRegex(ValueError, "not video"):
+                    node.generate("hello", None, object(), 4, 32, 0.7, 0.9, 1, 1.1, model_name=gemma_name)
 
 
 class TestHuggingFaceTokenSupport(unittest.TestCase):
@@ -1793,6 +1926,44 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
             module.ensure_model("gated", hf_token="hf_test_secret")
 
         self.assertEqual([("private/repo", "hf_test_secret")], captured)
+
+    def test_hf_catalog_model_is_labeled_and_reused_from_extra_llm_path(self):
+        module = self._load_qwenvl_with_stubs()
+        models_globals = module.ensure_model.__globals__
+        model_folder_paths = models_globals["folder_paths"]
+        entry = {"repo_id": "example/example-model", "commercial_status": "unclear"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            shared_llm = temp_root / "shared" / "LLM"
+            target = shared_llm / "Qwen-VL" / "example-model"
+            target.mkdir(parents=True)
+            (target / "config.json").write_text("{}", encoding="utf-8")
+            (target / "model.safetensors").write_bytes(b"weights")
+
+            with mock.patch.dict(models_globals, {"HF_ALL_MODELS": {"Example model": entry}}), mock.patch.object(
+                model_folder_paths,
+                "models_dir",
+                str(temp_root / "dev" / "models"),
+            ), mock.patch.object(
+                model_folder_paths,
+                "folder_names_and_paths",
+                {"LLM": ([str(shared_llm)], set())},
+            ), mock.patch.object(
+                model_folder_paths,
+                "get_folder_paths",
+                side_effect=lambda name: [str(shared_llm)] if name == "LLM" else [],
+            ), mock.patch.dict(
+                models_globals,
+                {"_download_model_snapshot": mock.Mock(side_effect=AssertionError("installed model must not download"))},
+            ):
+                models_globals["_mark_installed_hf_catalog_models"]()
+                self.assertTrue(entry["is_installed"])
+                self.assertEqual(
+                    ["Example model [installed]"],
+                    module.model_catalog_options({"Example model": entry}),
+                )
+                self.assertEqual(str(target), module.ensure_model("Example model [installed]"))
 
     def test_gated_gguf_stops_before_download_when_token_is_missing(self):
         hf_module = self._load_qwenvl_with_stubs()
@@ -2365,12 +2536,16 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
                 with mock.patch.object(module.folder_paths, "models_dir", str(models_dir)):
                     catalog = module._load_gguf_vl_catalog()
 
-            self.assertIn("model.gguf [installed]", catalog["models"])
+            self.assertIn("model.gguf", catalog["models"])
+            self.assertTrue(catalog["models"]["model.gguf"]["is_installed"])
             self.assertNotIn("[local] model.gguf", catalog["models"])
+            self.assertIn("model.gguf [installed]", module.model_catalog_options(catalog["models"]))
 
             with mock.patch.object(module, "GGUF_VL_CATALOG", catalog):
                 resolved = module._resolve_model_entry("model.gguf")
+                resolved_from_label = module._resolve_model_entry("model.gguf [installed]")
             self.assertEqual(resolved.model_filename, "model.gguf")
+            self.assertEqual(resolved_from_label.model_filename, "model.gguf")
 
     def test_gguf_vision_advanced_allows_larger_reasoning_output_budget(self):
         node_cls = self._load_gguf_advanced_class()
@@ -2934,16 +3109,22 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
             )
 
             with mock.patch.dict(sys.modules, stubs, clear=False):
-                module = load_module_from_file(
-                    "AILab_QwenVL_GGUF_PromptEnhancer.py",
-                    "thinkingllm_gguf_prompt_extra_llm_reuse_test",
+                vision_module = load_module_from_file(
+                    "AILab_QwenVL_GGUF.py",
+                    "thinkingllm_gguf_prompt_extra_llm_vision_dependency_test",
                 )
+                with mock.patch.dict(sys.modules, {"AILab_QwenVL_GGUF": vision_module}, clear=False):
+                    module = load_module_from_file(
+                        "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                        "thinkingllm_gguf_prompt_extra_llm_reuse_test",
+                    )
 
             model_name = next(
                 name
-                for name in module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer.load_gguf_models()["models"]
+                for name in module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer.INPUT_TYPES()["required"]["model_name"][0]
                 if name.startswith(model_filename)
             )
+            self.assertTrue(model_name.endswith(" [installed]"))
             loader = module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer()
 
             with mock.patch.dict(sys.modules, stubs, clear=False), mock.patch.object(
@@ -3206,10 +3387,15 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
             )
 
             with mock.patch.dict(sys.modules, stubs, clear=False):
-                module = load_module_from_file(
-                    "AILab_QwenVL_GGUF_PromptEnhancer.py",
-                    "thinkingllm_gguf_prompt_google_gemma_alias_reuse_test",
+                vision_module = load_module_from_file(
+                    "AILab_QwenVL_GGUF.py",
+                    "thinkingllm_gguf_prompt_google_gemma_vision_dependency_test",
                 )
+                with mock.patch.dict(sys.modules, {"AILab_QwenVL_GGUF": vision_module}, clear=False):
+                    module = load_module_from_file(
+                        "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                        "thinkingllm_gguf_prompt_google_gemma_alias_reuse_test",
+                    )
 
             model_name = "google_gemma-4-E4B-it-Q8_0.gguf [~8GB]"
             loader = module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer()

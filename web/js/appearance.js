@@ -84,6 +84,7 @@ const RECOMMENDATIONS_URL = new URL("../model_recommendations.json", import.meta
 const PRESET_TOOLTIPS_URL = new URL("../preset_tooltips.json", import.meta.url);
 const RECOMMENDATION_WIDGET_NAME = "recommended_settings";
 const RECOMMENDATION_PLACEHOLDER = "Select a model to see provider/community recommended settings. This note never changes your saved widget values.";
+const DEFAULT_DURATION_SECONDS = 5.0;
 const RECOMMENDATION_FIELDS = ["temperature", "top_p", "top_k", "max_tokens", "ctx_min", "n_batch", "image_max_tokens"];
 const AUDIO_UNSUPPORTED_MESSAGE = "No curated audio support for the selected model. Use Gemma 4 Audio for audio understanding or Whisper ASR for transcription.";
 const PRESET_WIDGET_NAMES = ["preset_prompt", "enhancement_style", "preset_system_prompt"];
@@ -159,25 +160,37 @@ function setWidgetVisible(node, widget, visible) {
     if (!widget) { return; }
     if (!widget._thinkingllmVisibilityState) {
         widget._thinkingllmVisibilityState = {
-            type: widget.type,
             computeSize: widget.computeSize,
-            draw: widget.draw,
             hidden: widget.hidden,
         };
     }
     const original = widget._thinkingllmVisibilityState;
     if (visible) {
-        widget.type = original.type;
         widget.computeSize = original.computeSize;
-        widget.draw = original.draw;
         widget.hidden = original.hidden;
+        delete widget.computedHeight;
     } else {
         widget.hidden = true;
-        widget.type = `thinkingllm_hidden_${original.type || "widget"}`;
-        widget.computeSize = () => [0, 0];
-        widget.draw = () => {};
+        widget.computeSize = () => [0, -3.3];
+        widget.computedHeight = 0;
     }
     resizeNode(node);
+}
+
+function repairDurationWidgetValue(widget) {
+    if (!widget) { return; }
+    const numericValue = typeof widget.value === "number"
+        ? widget.value
+        : Number(String(widget.value ?? "").trim());
+    const minimum = Number(widget.options?.min ?? 0.2);
+    const maximum = Number(widget.options?.max ?? 150.0);
+    if (Number.isFinite(numericValue) && numericValue >= minimum && numericValue <= maximum) {
+        widget.value = numericValue;
+        widget._thinkingllmLastValidDuration = numericValue;
+        return;
+    }
+    const previousValue = Number(widget._thinkingllmLastValidDuration);
+    widget.value = Number.isFinite(previousValue) ? previousValue : DEFAULT_DURATION_SECONDS;
 }
 
 function readComboValue(widget) {
@@ -228,6 +241,7 @@ function updateDurationVisibility(node, payload) {
     }
     const selectedPreset = selectedPresetName(node);
     const durationWidget = findWidget(node, "duration_seconds");
+    repairDurationWidgetValue(durationWidget);
     const { metadataAvailable, metadata } = findVideoPresetMetadata(payload, selectedPreset);
     if (!metadataAvailable) {
         // Keep the backend-provided control usable if the auxiliary payload is stale or unavailable.

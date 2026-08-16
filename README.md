@@ -118,7 +118,7 @@ HF tokenizer note: some Gemma and Qwen variants need `sentencepiece` or `tiktoke
 
 #### Shared ComfyUI text encoders
 
-Compatible single-file checkpoints already in `ComfyUI/models/text_encoders` appear in the model selector with a `[ComfyUI]` prefix. ThinkingLLM loads them through ComfyUI, so it does not download or duplicate a Transformers snapshot.
+Compatible single-file checkpoints already in `ComfyUI/models/text_encoders` appear as `[local] filename (text_encoders)` in every applicable model selector. ThinkingLLM loads them through ComfyUI, so it does not download or duplicate a Transformers snapshot. Older workflows saved with the former `[ComfyUI]` label remain compatible.
 
 - Qwen3-VL 4B and 8B `.safetensors`, including `qwen3vl_8b_fp8_scaled.safetensors`
 - Gemma 3 12B `.safetensors`, including `gemma-3-12b-it-heretic-v2_int8.safetensors`
@@ -134,6 +134,8 @@ The MiniMax H3/Qwen3-VL 32B conditioning checkpoint is intentionally excluded be
 
 The GGUF path requires a multimodal-capable `llama-cpp-python` build. The normal PyPI package may not include the chat handlers needed for Qwen vision, Gemma 4, or MTMD audio. On Linux, ThinkingLLM auto-checks this at first GGUF use and attempts an automatic install of a matching JamePeng backend. Use the setup notes in [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md) if you need to override the wheel/package source.
 
+Model labels are consistent across the standard, Advanced, audio, and Prompt Enhancer selectors: `[installed]` marks a catalog model found in any configured `LLM`, `GGUF`, or `Qwen-VL` location, while `[local]` marks an uncatalogued local model. These labels are display-only and do not change saved model identities.
+
 ## Workflow tips
 
 - **Pre-process input images** — use a resize or scale node before ThinkingLLM so large images don't blow up the context window.
@@ -144,6 +146,8 @@ The GGUF path requires a multimodal-capable `llama-cpp-python` build. The normal
 ### Duration-aware video prompts
 
 The four vision nodes and both Prompt Enhancer nodes expose an optional `duration_seconds` input. It becomes visible only for registered LTX 2.3 and MiniMax H3 video presets; all other presets ignore it. Connect the same requested duration value to ThinkingLLM and your downstream video generator so prompt timing and generated length stay aligned.
+
+Switching from a duration-aware preset back to `Custom Only` or another non-video preset hides the control without changing its ComfyUI serialization slot. The last valid duration is preserved; if an older workflow contains a corrupted non-numeric value in that slot, the frontend repairs it to the last valid value or `5.0` seconds. After updating ThinkingLLM, restart ComfyUI and use `Ctrl+F5` once so the corrected frontend code is loaded.
 
 - LTX 2.3 uses the requested value directly and returns one chronological paragraph with a natural total-duration phrase.
 - MiniMax H3 mirrors ComfyUI's 24 fps `17k+5` frame grid. For example, `5.0` seconds becomes 124 frames (`5.17` seconds), `8.0` stays 192 frames (`8.00` seconds), and `12.0` becomes 294 frames (`12.25` seconds). The effective duration is internal planning context: T2VA, I2VA, and full-reference outputs do not get an invented `Target duration:` field. FL2VA and L2VA use it only in the official image-alignment line.
@@ -180,6 +184,7 @@ Commercial-release model dropdowns group entries by rights status and accept onl
 - Qwen2.5-VL 3B / 7B
 
 ### Qwen — Vision-language (GGUF)
+- Qwen3.8 27B Blackfrost Abliterated (Q2 through Q8, image/video)
 - Qwen3.5 4B / 9B / 27B (Q4 K M through BF16)
 - Qwen3-VL 4B / 8B / 32B (Instruct, abliterated, thinking)
 - Qwen2.5-VL 3B / 7B
@@ -189,6 +194,7 @@ Commercial-release model dropdowns group entries by rights status and accept onl
 - Qwen3.5 4B / 9B (base + heretic + uncensored)
 
 ### Qwen — Text-only (GGUF)
+- Qwen3.8 27B Blackfrost Abliterated (Q2 through Q8)
 - Qwen3 4B / 8B (abliterated, Josiefied, base)
 - Qwen3.5 4B / 9B / 27B (base + uncensored HauhauCS)
 

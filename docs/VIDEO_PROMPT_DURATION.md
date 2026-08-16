@@ -13,7 +13,7 @@ The optional `duration_seconds` input is available on:
 - `ThinkingLLM Prompt Enhancer`
 - `ThinkingLLM Prompt Enhancer (GGUF)`
 
-The widget is shown only for registered LTX 2.3 and MiniMax H3 video presets. It remains hidden and has no effect for image, analysis, tagging, and other non-video presets. Older workflows without the input use `5.0` seconds for a duration-aware preset.
+The widget is shown only for registered LTX 2.3 and MiniMax H3 video presets. It remains hidden and has no effect for `Custom Only`, image, analysis, tagging, and other non-video presets. Hiding the widget does not change its type or serialization position, so switching presets cannot move the read-only recommendation text into `duration_seconds`. The last valid duration is preserved. Older workflows without the input use `5.0` seconds for a duration-aware preset, and workflows containing a corrupted non-numeric duration are repaired to the last valid value or `5.0` seconds by the frontend.
 
 Connect the same requested duration to ThinkingLLM and the downstream video generator. No separate enable switch is required.
 
@@ -99,6 +99,7 @@ ThinkingLLM does **not** enforce exact field count or order, speaker IDs, dialog
 ## Recommended settings
 
 - The read-only info box shows the active video preset's recommendation without changing node values. See the [complete video preset settings table](VIDEO_PRESET_SETTINGS.md).
+- You can switch from LTX or MiniMax back to `Custom Only` and queue immediately; the hidden duration remains numeric and is ignored by the non-video preset.
 - Connect the same requested duration to ThinkingLLM and the H3 generator.
 - Start with `enable_thinking=false` for direct prompt conversion.
 - Start with `max_tokens=2048` for Base/T2VA, I2VA, FL2VA, and L2VA prompts.
@@ -107,7 +108,7 @@ ThinkingLLM does **not** enforce exact field count or order, speaker IDs, dialog
 - Increase the token limit only when a useful response is genuinely truncated.
 - Inspect `RAW_TRACE` for model reasoning and connect the main output to Show Text or Show Anything to inspect the exact downstream string.
 
-After updating the custom node, restart ComfyUI completely and refresh the browser with `Ctrl+F5` so Python node definitions and frontend widget visibility are both reloaded.
+After updating the custom node, restart ComfyUI completely and refresh the browser with `Ctrl+F5` so Python node definitions and frontend widget visibility are both reloaded. If an old browser tab still reports `Failed to convert ... duration_seconds` followed by recommendation text, that tab is still using the stale frontend script; close it or perform another hard refresh.
 
 ## Official references
 

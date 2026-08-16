@@ -2,6 +2,42 @@
   "version": 1,
   "rules": [
     {
+      "id": "qwen38_blackfrost_27b",
+      "priority": 110,
+      "match_any": [
+        "Qwen3.8-27B-ABLITERATED"
+      ],
+      "family_label": "Qwen3.8 27B Blackfrost abliterated",
+      "sources": [
+        "Blackfrost-AI Qwen3.8 27B Abliterated GGUF model card",
+        "Qwen3.8 27B official model card"
+      ],
+      "support_notes": {
+        "hf": "This catalog entry is GGUF-only. Use a GGUF node for this repository.",
+        "gguf": "Hard toggle via enable_thinking in the Qwen3.8 chat template. Vision requires the matching mmproj file and a current llama.cpp build.",
+        "soft_switch": "Qwen3.8 uses chat-template thinking controls; no /think or /no_think soft switch is documented."
+      },
+      "thinking_on": {
+        "temperature": 1.0,
+        "top_p": 0.95,
+        "top_k": 20,
+        "max_tokens": 32768,
+        "ctx_min": 262144
+      },
+      "thinking_off": {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "top_k": 20,
+        "max_tokens": 32768,
+        "ctx_min": 262144
+      },
+      "notes": [
+        "Thinking is enabled by default; disable it for direct prompt rewrites and keep it enabled for deeper scene planning.",
+        "Q4_K_M is the model author's balanced default; use the compact Q8 projector for image or video input.",
+        "The model supports 262K context architecturally, but large llama.cpp contexts consume substantial KV-cache memory; lower ctx for ordinary prompt work."
+      ]
+    },
+    {
       "id": "qwen36_hauhau_multimodal",
       "priority": 100,
       "match_any": [

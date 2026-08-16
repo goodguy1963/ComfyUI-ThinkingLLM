@@ -51,7 +51,7 @@ PRESET_PROMPTS: list[str] = [NO_PRESET_PROMPT, "Describe this image in detail."]
 
 
 TOOLTIPS = {
-    "model_name": "Pick the checkpoint. [ComfyUI] entries reuse compatible models/text_encoders files; other entries download into models/LLM/Qwen-VL on first use.",
+    "model_name": "Pick the checkpoint. [installed] means a catalog model is available in a configured LLM location; [local] means an uncatalogued local model, including compatible ComfyUI text_encoders. Missing catalog models download on first use.",
     "quantization": "Precision vs VRAM. FP16 gives the best quality if memory allows; 8-bit suits 8–16 GB GPUs; 4-bit fits 6 GB or lower but is slower.",
     "attention_mode": "auto tries SageAttention → FlashAttention 2 → SDPA in order. SDPA is stable and recommended. Only override when debugging attention backends.",
     "preset_prompt": "Built-in instruction describing how Qwen-VL should analyze the media input.",
@@ -68,6 +68,63 @@ TOOLTIPS = {
     "frame_count": "Number of frames extracted from video inputs before prompting Qwen-VL. More frames provide context but cost time.",
     "hf_token": "Optional Hugging Face access token for private or gated model downloads. It is passed only to the download call, never logged or cached, and the in-memory copy is dropped after the download attempt. Clear this field before saving or sharing workflows.",
 }
+
+
+def _configured_llm_roots() -> list[Path]:
+    roots: list[Path] = []
+    try:
+        if "LLM" in folder_paths.folder_names_and_paths:
+            roots.extend(Path(path) for path in folder_paths.get_folder_paths("LLM"))
+    except (AttributeError, KeyError, TypeError):
+        pass
+    default_root = Path(folder_paths.models_dir) / "LLM"
+    if default_root not in roots:
+        roots.append(default_root)
+    return roots
+
+
+def _hf_qwen_vl_dirs() -> list[Path]:
+    return [root / "Qwen-VL" for root in _configured_llm_roots()]
+
+
+def _hf_catalog_search_dirs() -> list[Path]:
+    search_dirs: list[Path] = []
+    for root in _configured_llm_roots():
+        for directory in (root / "Qwen-VL", root):
+            if directory not in search_dirs:
+                search_dirs.append(directory)
+    return search_dirs
+
+
+def _find_installed_hf_model_dir(info: dict, *, require_processor: bool = False) -> Path | None:
+    repo_id = info.get("repo_id") if isinstance(info, dict) else None
+    if not isinstance(repo_id, str) or not repo_id.strip():
+        return None
+    directory_name = repo_id.rstrip("/").rsplit("/", 1)[-1]
+    installed_path = info.get("installed_path")
+    candidates = [Path(installed_path)] if installed_path else []
+    candidates.extend(directory / directory_name for directory in _hf_catalog_search_dirs())
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if _model_snapshot_has_required_files(candidate, require_processor=require_processor):
+            return candidate
+    return None
+
+
+def _mark_installed_hf_catalog_models() -> None:
+    for info in HF_ALL_MODELS.values():
+        if not isinstance(info, dict) or info.get("is_local"):
+            continue
+        installed_path = _find_installed_hf_model_dir(info)
+        if installed_path is None:
+            info.pop("is_installed", None)
+            info.pop("installed_path", None)
+            continue
+        info["is_installed"] = True
+        info["installed_path"] = str(installed_path)
 
 
 def ensure_cuda_vram_headroom(module_name="QwenVL", min_free_gb=1.0, min_free_ratio=0.08):
@@ -226,24 +283,18 @@ def load_model_configs():
     SYSTEM_PROMPTS.update(next_system_prompts)
     PRESET_PROMPTS[:] = next_preset_prompts
 
-    # Commercial releases expose only the two entries in the reviewed catalog.
-    if not COMMERCIAL_RELEASE:
+    # Commercial releases expose only reviewed catalog entries, but still show
+    # whether those entries are available in any configured LLM location.
+    if COMMERCIAL_RELEASE:
+        _mark_installed_hf_catalog_models()
+    else:
         _scan_local_hf_models()
 
 
 def _scan_local_hf_models():
     """Scan local HF directories and compatible ComfyUI text encoders."""
-    # Collect all Qwen-VL directories to scan from ComfyUI's multi-path system
-    scan_dirs: list[Path] = []
-    llm_paths = folder_paths.get_folder_paths("LLM") if "LLM" in folder_paths.folder_names_and_paths else []
-    for llm_path in llm_paths:
-        qwen_dir = Path(llm_path) / "Qwen-VL"
-        if qwen_dir not in scan_dirs:
-            scan_dirs.append(qwen_dir)
-    # Always include the default location as fallback
-    default_dir = Path(folder_paths.models_dir) / "LLM" / "Qwen-VL"
-    if default_dir not in scan_dirs:
-        scan_dirs.append(default_dir)
+    _mark_installed_hf_catalog_models()
+    scan_dirs = _hf_qwen_vl_dirs()
 
     # Collect known local directory names from JSON config
     known_dirs = set()
@@ -302,6 +353,8 @@ def _scan_local_hf_models():
             "comfy_text_encoder": filename,
             "repo_id": None,
             "is_local": True,
+            "local_display_name": filename,
+            "storage_label": "text_encoders",
             "commercial_status": "local",
             "quantized": True,
             "native_family": family,
@@ -599,6 +652,13 @@ def ensure_model(model_name, require_processor=False, node_id=None, progress_lab
     if not repo_id:
         raise ValueError(f"Model '{model_name}' has no repo_id or local_path")
 
+    installed_target = _find_installed_hf_model_dir(info, require_processor=require_processor)
+    if installed_target is not None:
+        info["is_installed"] = True
+        info["installed_path"] = str(installed_target)
+        enforce_model_access(info, model_name, local_exists=True, hf_token=hf_token)
+        return str(installed_target)
+
     if COMMERCIAL_RELEASE:
         enforce_model_access(info, model_name, local_exists=False, hf_token=hf_token)
         target = Path(folder_paths.models_dir) / "LLM" / repo_id.split("/")[-1]
@@ -609,13 +669,8 @@ def ensure_model(model_name, require_processor=False, node_id=None, progress_lab
             f"[QwenVL] Locked commercial model is missing or incomplete: {target}"
         )
 
-    # Use ComfyUI's multi-path system if available
-    llm_paths = folder_paths.get_folder_paths("LLM") if "LLM" in folder_paths.folder_names_and_paths else []
-    if llm_paths:
-        models_dir = Path(llm_paths[0]) / "Qwen-VL"
-    else:
-        # Fallback to default behavior
-        models_dir = Path(folder_paths.models_dir) / "LLM" / "Qwen-VL"
+    # Download into ComfyUI's first configured LLM location.
+    models_dir = _hf_qwen_vl_dirs()[0]
 
     models_dir.mkdir(parents=True, exist_ok=True)
     target = models_dir / repo_id.split("/")[-1]
