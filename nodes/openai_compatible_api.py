@@ -38,7 +38,7 @@ _RESERVED_EXTRA_BODY_FIELDS = {
 }
 _PROFILE_ALLOWED_FIELDS = {
     "provider", "base_url", "auth", "api_key_env", "allowed_models",
-    "max_tokens_limit", "max_input_chars", "max_timeout_seconds",
+    "max_tokens_limit", "max_input_chars", "max_timeout_seconds", "max_thinking_budget",
     "allowed_extra_body_fields", "send_seed", "thinking_mode",
     "max_tokens_field", "allow_insecure_http",
 }
@@ -203,7 +203,7 @@ def _normalize_profile(name: str, raw: dict) -> dict:
     raw_models = raw.get("allowed_models")
     allowed_models = None
     if raw_models is not None:
-        if not isinstance(raw_models, list):
+        if not isinstance(raw_models, list) or not all(isinstance(item, str) for item in raw_models):
             raise ValueError(f"API profile {profile_name!r} allowed_models must be a list of strings.")
         allowed_models = [_validate_model_identifier(item, "allowed model") for item in raw_models]
 
@@ -233,6 +233,7 @@ def _normalize_profile(name: str, raw: dict) -> dict:
         "max_tokens_limit": _profile_int(raw, "max_tokens_limit", None, maximum=65_536),
         "max_input_chars": _profile_int(raw, "max_input_chars", DEFAULT_MAX_INPUT_CHARS, maximum=20_000_000),
         "max_timeout_seconds": _profile_int(raw, "max_timeout_seconds", DEFAULT_MAX_TIMEOUT_SECONDS, maximum=3_600),
+        "max_thinking_budget": _profile_int(raw, "max_thinking_budget", 262_144, minimum=0, maximum=262_144),
         "allowed_extra_body_fields": allowed_extra, "thinking_mode": thinking_mode,
         "send_seed": _strict_bool(raw, "send_seed", False), "max_tokens_field": max_tokens_field,
         "allow_insecure_http": allow_insecure_http,
@@ -260,6 +261,7 @@ def _load_api_profiles() -> dict[str, dict]:
         profile_name = str(name or "").strip()
         if not profile_name:
             continue
+        profiles.pop(profile_name, None)
         try:
             profiles[profile_name] = _normalize_profile(profile_name, raw)
         except ValueError as exc:
@@ -337,6 +339,10 @@ def _validate_timeout(profile: dict, value) -> int:
     return value
 
 def _validate_sampling(temperature, top_p, seed, thinking_budget):
+    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
+        raise ValueError("temperature must be a numeric value.")
+    if isinstance(top_p, bool) or not isinstance(top_p, (int, float)):
+        raise ValueError("top_p must be a numeric value.")
     t, p = float(temperature), float(top_p)
     if not math.isfinite(t) or not 0.0 <= t <= 2.0:
         raise ValueError("temperature must be a finite value between 0.0 and 2.0.")
@@ -347,6 +353,17 @@ def _validate_sampling(temperature, top_p, seed, thinking_budget):
     if isinstance(thinking_budget, bool) or not isinstance(thinking_budget, int) or not 0 <= thinking_budget <= 262_144:
         raise ValueError("thinking_budget must be an integer between 0 and 262144.")
     return t, p, seed, thinking_budget
+
+def _validate_thinking_budget(profile: dict, value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 262_144:
+        raise ValueError("thinking_budget must be an integer between 0 and 262144.")
+    limit = profile.get("max_thinking_budget", 262_144)
+    if value > limit:
+        raise ValueError(
+            f"Requested thinking_budget={value} exceeds server-side limit {limit} "
+            f"for API profile {profile['name']!r}."
+        )
+    return value
 
 def _validate_input_text(profile: dict, system_prompt, prompt) -> tuple[str, str]:
     if system_prompt is not None and not isinstance(system_prompt, str):
@@ -480,6 +497,7 @@ class ThinkingLLMOpenAICompatibleAPI:
         max_out = _validate_max_tokens(profile, max_tokens)
         timeout = _validate_timeout(profile, timeout_seconds)
         temperature, top_p, seed, thinking_budget = _validate_sampling(temperature, top_p, seed, thinking_budget)
+        thinking_budget = _validate_thinking_budget(profile, thinking_budget)
         system_text, prompt_text = _validate_input_text(profile, system_prompt, prompt)
 
         messages = []
