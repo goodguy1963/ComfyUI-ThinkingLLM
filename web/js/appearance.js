@@ -637,20 +637,20 @@ function hookApiModelDropdown(node) {
 
 function buildApiHelpText() {
     return [
-        "SETUP (einmalig):",
+        "SETUP (one-time):",
         "",
-        "Windows - API-Key als User-Umgebungsvariable (PowerShell):",
+        "Windows - set the API key as a user environment variable (PowerShell):",
         '  [System.Environment]::SetEnvironmentVariable("OPENROUTER_API_KEY", "sk-...", "User")',
-        "  (Variablennamen je Provider: OPENROUTER_API_KEY, OPENAI_API_KEY,",
+        "  (Variable name depends on provider: OPENROUTER_API_KEY, OPENAI_API_KEY,",
         "   DASHSCOPE_API_KEY, GROQ_API_KEY, ORCAROUTER_API_KEY, ...)",
         "",
-        "Linux/macOS - export im Terminal vor dem Start:",
+        "Linux/macOS - export it in the terminal before starting ComfyUI:",
         '  export OPENROUTER_API_KEY="sk-..."',
         "",
-        "Danach ComfyUI NEU starten. Der Key liegt nur auf dem Server/Rechner -",
-        "nie im Workflow, im Profil-JSON oder in Git.",
+        "Then RESTART ComfyUI. The key lives only on the server/machine -",
+        "never in the workflow, profile JSON, or Git.",
         "",
-        "Doku: docs/OPENAI_COMPATIBLE_API.md",
+        "Docs: docs/OPENAI_COMPATIBLE_API.md",
     ].join("\n");
 }
 
