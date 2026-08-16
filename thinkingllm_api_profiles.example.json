@@ -9,7 +9,9 @@
         "provider/model-id"
       ],
       "max_tokens_limit": 8192,
-      "allow_extra_body": false,
+      "max_input_chars": 131072,
+      "max_timeout_seconds": 300,
+      "allowed_extra_body_fields": [],
       "send_seed": false
     },
     "Internal vLLM": {
@@ -20,7 +22,9 @@
         "my-qwen-model"
       ],
       "max_tokens_limit": 8192,
-      "allow_extra_body": false,
+      "max_input_chars": 1000000,
+      "max_timeout_seconds": 300,
+      "allowed_extra_body_fields": [],
       "send_seed": true
     }
   }
