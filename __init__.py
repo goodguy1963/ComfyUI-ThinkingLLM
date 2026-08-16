@@ -3,7 +3,7 @@
     "name": "ComfyUI-ThinkingLLM",
     "description": "A multimodal ComfyUI AI node with Qwen3.5, Qwen3-VL, Qwen2.5-VL, Qwen3, and Gemma 4 integrations. Features live thinking in the terminal to see what the LLM is doing in real time.",
     "author": "goodguy1963",
-    "version": "2.4.0",
+    "version": "2.5.0",
     "url": "https://github.com/goodguy1963/ComfyUI-ThinkingLLM",
     "category": "image"
 }
