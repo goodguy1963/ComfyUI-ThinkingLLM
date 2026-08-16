@@ -6,6 +6,8 @@ on:
       - "nodes/openai_compatible_api.py"
       - "tests/test_openai_api_security.py"
       - "thinkingllm_api_profiles.example.json"
+      - "docs/OPENAI_COMPATIBLE_API.md"
+      - ".gitignore"
       - ".github/workflows/api-security-tests.yml"
   push:
     branches:
@@ -14,6 +16,8 @@ on:
       - "nodes/openai_compatible_api.py"
       - "tests/test_openai_api_security.py"
       - "thinkingllm_api_profiles.example.json"
+      - "docs/OPENAI_COMPATIBLE_API.md"
+      - ".gitignore"
       - ".github/workflows/api-security-tests.yml"
 
 permissions:
