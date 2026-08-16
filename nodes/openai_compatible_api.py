@@ -82,8 +82,8 @@ _BUILTIN_PROFILES = {
         "auth": "bearer_env", "api_key_env": "ORCAROUTER_API_KEY",
     },
     "Ollama (local)": {"provider": "Ollama", "base_url": "http://127.0.0.1:11434/v1", "auth": "none"},
-    "vLLM (local)": {"provider": "vLLM", "base_url": "http://127.0.0.1:8000/v1", "auth": "none", "send_seed": true},
-    "llama.cpp (local)": {"provider": "llama.cpp", "base_url": "http://127.0.0.1:8080/v1", "auth": "none", "send_seed": true},
+    "vLLM (local)": {"provider": "vLLM", "base_url": "http://127.0.0.1:8000/v1", "auth": "none", "send_seed": True},
+    "llama.cpp (local)": {"provider": "llama.cpp", "base_url": "http://127.0.0.1:8080/v1", "auth": "none", "send_seed": True},
 }
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -443,20 +443,20 @@ class ThinkingLLMOpenAICompatibleAPI:
         return {
             "required": {
                 "api_profile": (profiles, {"default": default_profile, "tooltip": "Server-side profile binding endpoint, authentication, credential reference, and safety limits."}),
-                "model_name": ("STRING", {"default": "provider/model-id", "multiline": false, "tooltip": "Exact provider model ID; the profile may enforce an allowlist."}),
-                "system_prompt": ("STRING", {"default": "You are a helpful assistant.", "multiline": true}),
-                "prompt": ("STRING", {"default": "", "multiline": true}),
+                "model_name": ("STRING", {"default": "provider/model-id", "multiline": False, "tooltip": "Exact provider model ID; the profile may enforce an allowlist."}),
+                "system_prompt": ("STRING", {"default": "You are a helpful assistant.", "multiline": True}),
+                "prompt": ("STRING", {"default": "", "multiline": True}),
                 "max_tokens": ("INT", {"default": 8192, "min": 1, "max": 65536}),
                 "temperature": ("FLOAT", {"default": 0.6, "min": 0.0, "max": 2.0, "step": 0.05}),
                 "top_p": ("FLOAT", {"default": 0.95, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "seed": ("INT", {"default": 1, "min": 0, "max": 2**32 - 1, "tooltip": "Sent only when the server profile enables send_seed."}),
-                "enable_thinking": ("BOOLEAN", {"default": true, "tooltip": "Used by profiles with thinking_mode='qwen'."}),
+                "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Used by profiles with thinking_mode='qwen'."}),
                 "thinking_budget": ("INT", {"default": 8192, "min": 0, "max": 262144}),
-                "stream_tokens_to_terminal": ("BOOLEAN", {"default": false, "tooltip": "Print a control-character-sanitized display copy to the ComfyUI terminal."}),
+                "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Print a control-character-sanitized display copy to the ComfyUI terminal."}),
                 "timeout_seconds": ("INT", {"default": 300, "min": 1, "max": 3600, "tooltip": "Server profile enforces max_timeout_seconds (300 by default)."}),
             },
             "optional": {
-                "extra_body_json": ("STRING", {"default": "", "multiline": true, "tooltip": "Every top-level field must be explicitly allowlisted by the server profile."}),
+                "extra_body_json": ("STRING", {"default": "", "multiline": True, "tooltip": "Every top-level field must be explicitly allowlisted by the server profile."}),
             },
         }
 
@@ -489,7 +489,7 @@ class ThinkingLLMOpenAICompatibleAPI:
         request_body = {
             "model": model, "messages": messages,
             profile.get("max_tokens_field", "max_tokens"): max_out,
-            "temperature": temperature, "top_p": top_p, "stream": true,
+            "temperature": temperature, "top_p": top_p, "stream": True,
         }
         if profile.get("send_seed"):
             request_body["seed"] = seed
@@ -498,12 +498,12 @@ class ThinkingLLMOpenAICompatibleAPI:
             if thinking_budget > 0:
                 request_body["thinking_budget"] = thinking_budget
         request_body.update(_parse_extra_json(extra_body_json, profile.get("allowed_extra_body_fields", [])))
-        request_body["stream"] = true
+        request_body["stream"] = True
 
         headers = {"Content-Type": "application/json", "Accept": "text/event-stream", "User-Agent": "ComfyUI-ThinkingLLM/OpenAI-Compatible-API"}
         headers.update(_authorization_headers(profile))
         try:
-            payload = json.dumps(request_body, ensure_ascii=false, allow_nan=false).encode("utf-8")
+            payload = json.dumps(request_body, ensure_ascii=False, allow_nan=False).encode("utf-8")
         except (TypeError, ValueError) as exc:
             raise ValueError("Unable to serialize the API request safely.") from exc
         req = urllib.request.Request(profile["base_url"] + "/chat/completions", data=payload, headers=headers, method="POST")
@@ -542,14 +542,17 @@ class ThinkingLLMOpenAICompatibleAPI:
                         reasoning, content = token.get("reasoning", ""), token.get("content", "")
                         if reasoning:
                             reasoning_parts.append(reasoning)
-                            if display is not None: display.push_compact(_terminal_display_safe(reasoning))
+                            if display is not None:
+                                display.push_compact(_terminal_display_safe(reasoning))
                         if content:
                             content_parts.append(content)
-                            if display is not None: display.push_compact(_terminal_display_safe(content))
+                            if display is not None:
+                                display.push_compact(_terminal_display_safe(content))
         except urllib.error.HTTPError as exc:
             detail = f"HTTP {exc.code} {exc.reason}"
             body = _redact_for_log(_read_error_body(exc), profile)
-            if body: detail += f": {body}"
+            if body:
+                detail += f": {body}"
             print(f"[ThinkingLLM API] Request failed for profile {profile['name']!r}: {detail}")
             if 300 <= int(exc.code) < 400:
                 raise RuntimeError(f"ThinkingLLM API redirect rejected for profile {profile['name']!r}.") from exc
@@ -567,8 +570,8 @@ class ThinkingLLMOpenAICompatibleAPI:
         content_text, reasoning_text = "".join(content_parts).strip(), "".join(reasoning_parts).strip()
         raw_trace = compose_streamed_model_output(reasoning_text, content_text)
         response_text = clean_model_output(content_text, OutputCleanConfig(
-            mode="text", strip_think=true, strip_code_fences=false, strip_role_prefixes=false,
-            strip_json_wrappers=false, strip_leading_preamble=false, strip_planning=false,
+            mode="text", strip_think=True, strip_code_fences=False, strip_role_prefixes=False,
+            strip_json_wrappers=False, strip_leading_preamble=False, strip_planning=False,
         ))
         return (response_text, raw_trace)
 
