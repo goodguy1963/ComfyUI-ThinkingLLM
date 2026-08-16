@@ -375,6 +375,26 @@ def _catalog_models_for_profile(profile_name: str) -> list[str]:
     return ids
 
 
+def _catalog_all_model_ids() -> list[str]:
+    """Union of every curated model ID across all profiles (deduplicated).
+
+    Used as the backend combo list so that any saved model_name from any
+    profile still passes ComfyUI's front-end validation ("Value not in list").
+    The front-end narrows the visible dropdown to the selected profile.
+    """
+    seen: dict[str, None] = {}
+    for entry in _load_model_catalog().values():
+        if not isinstance(entry, dict):
+            continue
+        models = entry.get("models")
+        if not isinstance(models, list):
+            continue
+        for item in models:
+            if isinstance(item, dict) and isinstance(item.get("id"), str):
+                seen.setdefault(item["id"], None)
+    return list(seen)
+
+
 def _credential_value(profile: dict) -> str:
     if profile["auth"] == "none":
         return ""
@@ -697,11 +717,16 @@ class ThinkingLLMOpenAICompatibleAPI:
         default_models = _catalog_models_for_profile(default_profile)
         if not default_models:
             default_models = ["provider/model-id"]
-        model_options = list(dict.fromkeys(default_models))  # dedupe, keep order
+        # Use the union of all profile models so any saved model_name from any
+        # profile passes ComfyUI's front-end combo validation. The JS narrows
+        # the visible dropdown to the selected api_profile.
+        all_models = _catalog_all_model_ids()
+        if not all_models:
+            all_models = default_models
         return {
             "required": {
                 "api_profile": (profiles, {"default": default_profile, "tooltip": "Server-side profile binding endpoint, authentication, credential reference, capabilities, and safety limits."}),
-                "model_name": (model_options, {"default": model_options[0], "tooltip": "Curated model for the selected profile. For anything not listed, leave this as-is and type the ID in custom_model_name below."}),
+                "model_name": (all_models, {"default": default_models[0], "tooltip": "Curated model for the selected profile. For anything not listed, leave this as-is and type the ID in custom_model_name below."}),
                 "system_prompt": ("STRING", {"default": "You are a helpful assistant.", "multiline": True}),
                 "prompt": ("STRING", {"default": "", "multiline": True}),
                 "max_tokens": ("INT", {"default": 8192, "min": 1, "max": 65536}),
