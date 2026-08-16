@@ -40,6 +40,9 @@ MAX_IMAGE_URL_CHARS = 8_192
 CATALOG_PATH = PACKAGE_DIR / "web" / "api_model_catalogs.json"
 _CATALOG_CACHE: dict | None = None
 
+# Sentinel option in the model_name combo; selecting it lets the user type any model ID.
+API_CUSTOM_MODEL = "Custom…"
+
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _IMAGE_ERROR_RE = re.compile(
@@ -421,6 +424,8 @@ def _parse_extra_json(extra_body_json: str, allowed_fields) -> dict:
 
 def _validate_model(profile: dict, model_name: str) -> str:
     model = _validate_model_identifier(model_name)
+    if model == API_CUSTOM_MODEL:
+        raise ValueError("Select Custom and type a model ID, or pick a curated model for this profile.")
     if profile.get("allowed_models") is not None and model not in profile["allowed_models"]:
         raise ValueError(f"Model {model!r} is not allowed by API profile {profile['name']!r}.")
     return model
@@ -694,10 +699,14 @@ class ThinkingLLMOpenAICompatibleAPI:
     def INPUT_TYPES(cls):
         profiles = list(_load_api_profiles()) or ["No API profiles configured"]
         default_profile = "OpenRouter" if "OpenRouter" in profiles else profiles[0]
+        default_models = _catalog_models_for_profile(default_profile)
+        if not default_models:
+            default_models = ["provider/model-id"]
+        model_options = [*default_models, API_CUSTOM_MODEL]
         return {
             "required": {
                 "api_profile": (profiles, {"default": default_profile, "tooltip": "Server-side profile binding endpoint, authentication, credential reference, capabilities, and safety limits."}),
-                "model_name": ("STRING", {"default": "provider/model-id", "multiline": False, "tooltip": "Exact provider model ID; the profile may enforce an allowlist."}),
+                "model_name": (model_options, {"default": default_models[0], "tooltip": "Exact provider model ID. Choose a curated model for the selected profile, or Custom to type any ID; the profile may enforce an allowlist."}),
                 "system_prompt": ("STRING", {"default": "You are a helpful assistant.", "multiline": True}),
                 "prompt": ("STRING", {"default": "", "multiline": True}),
                 "max_tokens": ("INT", {"default": 8192, "min": 1, "max": 65536}),
