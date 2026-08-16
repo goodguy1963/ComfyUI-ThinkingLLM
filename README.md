@@ -1,6 +1,6 @@
 # ComfyUI-ThinkingLLM
 
-**ThinkingLLM** is a local-LLM custom-node pack for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that wraps Qwen3.5, Qwen3, Qwen-VL, Gemma 4, and Whisper ASR behind a cleaner node interface with thinking-mode control, audio/vision workflows, live token streaming, and a raw trace output for debugging.
+**ThinkingLLM** is a local-LLM custom-node pack for [ComfyUI](https://github.com/comfyanonymous/ComfyUI) that wraps Qwen3.5, Qwen3, Qwen-VL, Gemma 4, and Whisper ASR behind a cleaner node interface with thinking-mode control, audio/vision workflows, live token streaming, a raw trace output for debugging — and a secure OpenAI-compatible API node for remote providers (OpenRouter, OrcaRouter, …).
 
 📺 **[Watch the demo](https://youtu.be/K1JsvnzujOw)** for a better viewing experience.
 
@@ -11,7 +11,47 @@
 
 > 🎥 Prefer a narrated version? **[Watch the demo on YouTube](https://youtu.be/K1JsvnzujOw)**
 
-## What ThinkingLLM adds
+---
+
+## Quick install
+
+### ComfyUI Manager (recommended)
+1. Open **ComfyUI Manager** → **Install via Registry**
+2. Search for `ThinkingLLM`
+3. Click **Install**
+
+### Manual install
+```bash
+cd ComfyUI/custom_nodes
+git clone https://github.com/goodguy1963/ComfyUI-ThinkingLLM.git
+cd ComfyUI-ThinkingLLM
+pip install -r requirements.txt
+```
+
+For GGUF vision support, follow [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md).
+
+---
+
+## Nodes at a glance
+
+| Node | Path | Purpose |
+| --- | --- | --- |
+| `ThinkingLLM` | Transformers / HF (recommended) | Vision/video analysis with text output |
+| `ThinkingLLM (Advanced)` | Transformers / HF | Vision/video + full sampling controls, `MASK_PREVIEW` |
+| `ThinkingLLM Prompt Enhancer` | Transformers / HF | Text prompt enhancement |
+| `ThinkingLLM (GGUF)` | GGUF / llama.cpp | Vision/video via GGUF models |
+| `ThinkingLLM (GGUF Advanced)` | GGUF / llama.cpp | GGUF vision/video + advanced controls, `MASK_PREVIEW` |
+| `ThinkingLLM Gemma 4 Audio (GGUF)` | GGUF / llama.cpp | Audio understanding (Gemma 4) |
+| `ThinkingLLM Whisper ASR` | ASR | Speech-to-text transcription |
+| `ThinkingLLM Prompt Enhancer (GGUF)` | GGUF / llama.cpp | Text prompt enhancement via GGUF |
+| `ThinkingLLM System Prompt Preset` | Utility | Reusable system-prompt presets as `STRING` |
+| `ThinkingLLM API (OpenAI Compatible)` | ThinkingLLM/API | Secure calls to OpenAI-compatible remote providers |
+
+> **Need a remote/cloud model?** The **API node** calls approved OpenAI-compatible backends (OpenRouter, OrcaRouter, OpenAI, QwenCloud, Groq, …) with credentials kept server-side. See [docs/OPENAI_COMPATIBLE_API.md](docs/OPENAI_COMPATIBLE_API.md).
+
+---
+
+## Feature overview
 
 ### Model guidance box
 
@@ -64,37 +104,28 @@ The Advanced GGUF node also exposes optional `audio`, but this is for power user
 
 ### Mask-focused image analysis and object removal
 
-The four ThinkingLLM vision nodes accept an optional ComfyUI `MASK` input:
+The four ThinkingLLM vision nodes (`ThinkingLLM`, `ThinkingLLM (Advanced)`, `ThinkingLLM (GGUF)`, `ThinkingLLM (GGUF Advanced)`) accept an optional ComfyUI `MASK` input. White mask pixels select the area to analyze; black pixels preserve surrounding context, and soft mask values create a gradual transition. ThinkingLLM keeps the selected area at normal brightness while dimming everything outside it, helping the vision model focus on the mask without losing the scene's geometry, lighting, or background context.
 
-- `ThinkingLLM`
-- `ThinkingLLM (Advanced)`
-- `ThinkingLLM (GGUF)`
-- `ThinkingLLM (GGUF Advanced)`
+**Object-removal workflow**
+1. Connect the source image to `image` and the mask to `mask`.
+2. Select `👁️ Remove (Mask Area)` from `preset_prompt`.
+3. Optionally describe the desired replacement in `custom_prompt` (e.g. `continue the brick wall` or `fill with matching wooden floor`).
+4. Connect `RESPONSE` to the positive prompt of your diffusion inpainting workflow.
+5. Send the original image and mask separately to the diffusion model's inpainting inputs.
 
-White mask pixels select the area to analyze. Black pixels preserve surrounding context, and soft mask values create a gradual transition. ThinkingLLM keeps the selected area at normal brightness while dimming everything outside it, helping the vision model focus on the mask without losing the scene's geometry, lighting, or background context.
+ThinkingLLM does not edit the image itself — it examines the masked area and surrounding scene, then generates a positive description of what should appear inside the mask. The downstream diffusion model performs the actual replacement.
 
-#### Object-removal workflow
+**Previewing the LLM mask view**
 
-1. Connect the source image to ThinkingLLM's `image` input.
-2. Connect the corresponding mask to its `mask` input.
-3. Select `👁️ Remove (Mask Area)` from `preset_prompt`.
-4. Optionally describe the desired replacement in `custom_prompt`, such as `continue the brick wall` or `fill with matching wooden floor`.
-5. Connect `RESPONSE` to the positive prompt input of your diffusion inpainting workflow.
-6. Send the original image and mask separately to the diffusion model's inpainting inputs.
+`ThinkingLLM (Advanced)` and `ThinkingLLM (GGUF Advanced)` return a third output `MASK_PREVIEW` — connect it to a ComfyUI **Preview Image** node to inspect the exact highlighted image used for analysis (selected area at full brightness, surrounding scene dimmed to 20%; original image when no mask is connected).
 
-ThinkingLLM does not edit the image itself. It examines the masked area and surrounding scene, then generates a positive description of what should appear inside the mask. The downstream diffusion model performs the actual replacement.
-
-#### Previewing the LLM mask view
-
-`ThinkingLLM (Advanced)` and `ThinkingLLM (GGUF Advanced)` return a third output named `MASK_PREVIEW`. Connect it to a ComfyUI **Preview Image** node to inspect the exact highlighted image used for mask-focused analysis. The selected area remains at normal brightness and the surrounding scene is dimmed to 20%. When no mask is connected, the preview returns the original connected image.
-
-Without a custom instruction, the preset infers the most natural background continuation. It describes matching surfaces, perspective, materials, texture, color, lighting, shadows, reflections, and image style while avoiding phrases such as "remove the object" or "erase this area."
+Without a custom instruction, the preset infers the most natural background continuation — matching surfaces, perspective, materials, texture, color, lighting, shadows, reflections, and image style, while avoiding phrases such as "remove the object" or "erase this area."
 
 Example output:
 
 > Continuous warm beige plaster wall with subtle uneven texture, matching the existing perspective, soft window illumination, natural tonal variation, and the floor-edge shadows.
 
-#### Notes and limitations
+**Notes and limitations**
 
 - Masks apply to still images only, not video input.
 - Mask dimensions are resized automatically to match the image.
@@ -106,15 +137,9 @@ Example output:
 
 ### Transformers / HF nodes
 
-This is the recommended default path.
+This is the recommended default path: `ThinkingLLM`, `ThinkingLLM (Advanced)`, `ThinkingLLM Prompt Enhancer`. The HF path is the most straightforward option for Windows and Linux when you want the fewest install complications.
 
-- `ThinkingLLM`
-- `ThinkingLLM (Advanced)`
-- `ThinkingLLM Prompt Enhancer`
-
-The HF path is the most straightforward option for Windows and Linux when you want the fewest install complications.
-
-HF tokenizer note: some Gemma and Qwen variants need `sentencepiece` or `tiktoken` available in the ComfyUI Python environment. ThinkingLLM now declares those dependencies and will attempt to install them automatically if a tokenizer backend is missing at first load.
+HF tokenizer note: some Gemma and Qwen variants need `sentencepiece` or `tiktoken` in the ComfyUI Python environment. ThinkingLLM declares those dependencies and will attempt to install them automatically if a tokenizer backend is missing at first load.
 
 #### Shared ComfyUI text encoders
 
@@ -135,6 +160,14 @@ The MiniMax H3/Qwen3-VL 32B conditioning checkpoint is intentionally excluded be
 The GGUF path requires a multimodal-capable `llama-cpp-python` build. The normal PyPI package may not include the chat handlers needed for Qwen vision, Gemma 4, or MTMD audio. On Linux, ThinkingLLM auto-checks this at first GGUF use and attempts an automatic install of a matching JamePeng backend. Use the setup notes in [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md) if you need to override the wheel/package source.
 
 Model labels are consistent across the standard, Advanced, audio, and Prompt Enhancer selectors: `[installed]` marks a catalog model found in any configured `LLM`, `GGUF`, or `Qwen-VL` location, while `[local]` marks an uncatalogued local model. These labels are display-only and do not change saved model identities.
+
+### API node (OpenAI Compatible)
+
+`ThinkingLLM API (OpenAI Compatible)` calls approved OpenAI-compatible backends (OpenRouter, OrcaRouter, OpenAI, QwenCloud, Groq, Together, Fireworks, DeepInfra, Featherless) with credentials and endpoints bound server-side. `model_name` offers the full curated per-provider list; use `custom_model_name` for anything not listed.
+
+- Provider keys live in **server/user environment variables**, never in the workflow, profile JSON, or Git.
+- Full setup, security model, and per-provider key names: [docs/OPENAI_COMPATIBLE_API.md](docs/OPENAI_COMPATIBLE_API.md).
+- Image input: [docs/OPENAI_COMPATIBLE_API_IMAGES.md](docs/OPENAI_COMPATIBLE_API_IMAGES.md).
 
 ## Workflow tips
 
@@ -173,85 +206,34 @@ See the official [MiniMax H3 ComfyUI workflows](https://docs.comfy.org/tutorials
 
 ## Supported models
 
-ThinkingLLM supports these model families out of the box, with pre-configured entries in `hf_models.json` and `gguf_models.json`.
+ThinkingLLM ships pre-configured entries in `hf_models.json` and `gguf_models.json`. Local GGUF models in `models/LLM/GGUF/` with a matching mmproj file are auto-discovered.
 
-Commercial-release model dropdowns group entries by rights status and accept only reviewed, locked models. Community dropdowns keep their normal model names and download behavior; gated Hugging Face repositories still require the model owner's access terms and a read token.
+Commercial-release dropdowns group entries by rights status and accept only reviewed, locked models. Community dropdowns keep normal model names and download behavior; gated Hugging Face repositories still require the model owner's access terms and a read token.
 
-### Qwen — Vision-language (HF)
-- Qwen3.5 4B / 9B
-- Qwen3-VL 4B / 8B (Instruct, abliterated, unredacted)
-- Qwen3-VL 32B Heretic
-- Qwen2.5-VL 3B / 7B
+### Qwen — Vision-language
+- **HF:** Qwen3.5 4B/9B · Qwen3-VL 4B/8B (Instruct, abliterated, unredacted) · Qwen3-VL 32B Heretic · Qwen2.5-VL 3B/7B
+- **GGUF:** Qwen3.8 27B Blackfrost Abliterated (Q2–Q8, image/video) · Qwen3.5 4B/9B/27B (Q4 K M–BF16) · Qwen3-VL 4B/8B/32B (Instruct, abliterated, thinking) · Qwen2.5-VL 3B/7B
 
-### Qwen — Vision-language (GGUF)
-- Qwen3.8 27B Blackfrost Abliterated (Q2 through Q8, image/video)
-- Qwen3.5 4B / 9B / 27B (Q4 K M through BF16)
-- Qwen3-VL 4B / 8B / 32B (Instruct, abliterated, thinking)
-- Qwen2.5-VL 3B / 7B
+### Qwen — Text-only
+- **HF:** Qwen3 0.6B/4B/8B · Qwen3.5 4B/9B (base + heretic + uncensored)
+- **GGUF:** Qwen3.8 27B Blackfrost Abliterated (Q2–Q8) · Qwen3 4B/8B (abliterated, Josiefied, base) · Qwen3.5 4B/9B/27B (base + uncensored HauhauCS)
 
-### Qwen — Text-only (HF)
-- Qwen3 0.6B / 4B / 8B
-- Qwen3.5 4B / 9B (base + heretic + uncensored)
-
-### Qwen — Text-only (GGUF)
-- Qwen3.8 27B Blackfrost Abliterated (Q2 through Q8)
-- Qwen3 4B / 8B (abliterated, Josiefied, base)
-- Qwen3.5 4B / 9B / 27B (base + uncensored HauhauCS)
-
-### Gemma 4 — Vision-language (HF)
-- Gemma-4-E2B-it / Uncensored
-- Gemma-4-E4B-it / Uncensored
-- Gemma-4-12B
-- Gemma-4-26B-A4B-it / Heretic
-- Gemma-4-31B-it
-
-### Gemma 4 — Vision-language (GGUF)
-- Gemma-4-E2B / E4B (Q4 K M through BF16, uncensored)
-- Gemma-4-12B-it (Q4/Q5/Q6/Q8/BF16/UD-Q4)
-- Gemma-4-26B-A4B-it (Q4 K M through BF16)
-- Gemma-4-31B-it (Q4 K M through BF16)
-
-### Gemma 4 — Audio (GGUF)
-- Gemma-4-E2B / E4B when present in the GGUF multimodal catalog
-- Gemma-4-12B-it via `unsloth/gemma-4-12b-it-GGUF`
-
-Use `ThinkingLLM Gemma 4 Audio (GGUF)` for the clean audio-only interface. Gemma 4 audio currently depends on a recent multimodal `llama-cpp-python`/`Gemma4ChatHandler` build, so check `RAW_TRACE` if audio behaves unexpectedly.
-
-### Whisper — ASR
-- tiny
-- base
-- small
-- medium
-- large-v3
-- distil-large-v3
-
-Use `ThinkingLLM Whisper ASR` for transcription. It accepts a connected ComfyUI `AUDIO` input or an `audio_file_path` pointing to M4A, MP3, WAV, FLAC, or any FFmpeg-readable audio file. The node uses `faster-whisper`; first use may download the selected Whisper model into the Hugging Face cache. The default is `small` on CPU with `int8`, which is slower than CUDA but reliable on Windows; switch to CUDA once the local CTranslate2 CUDA runtime is confirmed working.
+### Gemma 4 — Vision-language
+- **HF:** Gemma-4-E2B/E4B-it/Uncensored · Gemma-4-12B · Gemma-4-26B-A4B-it/Heretic · Gemma-4-31B-it
+- **GGUF:** Gemma-4-E2B/E4B (Q4 K M–BF16, uncensored) · Gemma-4-12B-it (Q4/Q5/Q6/Q8/BF16/UD-Q4) · Gemma-4-26B-A4B-it · Gemma-4-31B-it (Q4 K M–BF16)
 
 ### Gemma 4 — Text-only (HF)
-- Gemma-4-E2B-it / Uncensored
-- Gemma-4-E4B-it / Uncensored
-- Gemma-4-12B
-- Gemma-4-26B-A4B-it / Heretic
-- Gemma-4-31B-it
+- Gemma-4-E2B-it / Uncensored · Gemma-4-E4B-it / Uncensored · Gemma-4-12B · Gemma-4-26B-A4B-it / Heretic · Gemma-4-31B-it
 
-Local GGUF models placed in `models/LLM/GGUF/` with a matching mmproj file are auto-discovered. Pre-configured entries live in `hf_models.json` and `gguf_models.json`.
+### Gemma 4 — Audio (GGUF)
+- Gemma-4-E2B / E4B when present in the GGUF multimodal catalog · Gemma-4-12B-it via `unsloth/gemma-4-12b-it-GGUF`
 
-## Quick install
+Use `ThinkingLLM Gemma 4 Audio (GGUF)` for the clean audio-only interface. Audio depends on a recent multimodal `llama-cpp-python`/`Gemma4ChatHandler` build — check `RAW_TRACE` if audio behaves unexpectedly.
 
-### ComfyUI Manager (recommended)
-1. Open **ComfyUI Manager** → **Install via Registry**
-2. Search for `ThinkingLLM`
-3. Click **Install**
+### Whisper — ASR
+tiny · base · small · medium · large-v3 · distil-large-v3
 
-### Manual install
-```bash
-cd ComfyUI/custom_nodes
-git clone https://github.com/goodguy1963/ComfyUI-ThinkingLLM.git
-cd ComfyUI-ThinkingLLM
-pip install -r requirements.txt
-```
-
-For GGUF vision support, follow [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md).
+Use `ThinkingLLM Whisper ASR` with a connected ComfyUI `AUDIO` input or an `audio_file_path` (M4A/MP3/WAV/FLAC/FFmpeg-readable). The node uses `faster-whisper`; first use may download the model into the Hugging Face cache. Default `small` on CPU/int8 is reliable on Windows; switch to CUDA once the local CTranslate2 CUDA runtime is confirmed working.
 
 ## Model locations
 
@@ -264,13 +246,14 @@ For local GGUF models, keep the matching mmproj file beside the model file.
 
 ## Platform notes
 
-- HF is the recommended default path and is the simplest cross-platform option.
-- GGUF on Windows needs a matching `win_amd64` vision-capable wheel.
-- GGUF on Linux now auto-installs a matching backend on first use when possible. Override with `THINKINGLLM_LLAMA_CPP_LINUX_WHEEL_URL` or `THINKINGLLM_LLAMA_CPP_LINUX_SPEC` when your server needs a different build.
-- GGUF audio needs an audio-capable multimodal backend. `Gemma4ChatHandler` is used for Gemma 4.
-- Whisper ASR needs `faster-whisper` and FFmpeg. The node returns an install hint if `faster-whisper` is missing.
-- Flash Attention support is best on Linux. The nodes fall back when it is unavailable.
-- The thinking toggle works best with Qwen3.5 and Qwen3 style models. Other architectures may ignore the steering.
+- **HF is the recommended default path** and the simplest cross-platform option.
+- **Shared ComfyUI text encoders**: compatible single-file checkpoints in `ComfyUI/models/text_encoders` appear as `[local] filename (text_encoders)` in every applicable model selector and load through ComfyUI (no duplicate Transformers snapshot). Qwen3-VL 4B/8B and Gemma 3 12B `.safetensors` are supported. The MiniMax H3/Qwen3-VL 32B conditioning checkpoint is intentionally excluded (not a complete text-generation model). Valid extension is `.safetensors`; native generation uses one-beam sampling and prints terminal output after generation.
+- **GGUF on Windows** needs a matching `win_amd64` vision-capable wheel.
+- **GGUF on Linux** auto-installs a matching backend on first use when possible. Override with `THINKINGLLM_LLAMA_CPP_LINUX_WHEEL_URL` or `THINKINGLLM_LLAMA_CPP_LINUX_SPEC` when your server needs a different build.
+- **GGUF audio** needs an audio-capable multimodal backend. `Gemma4ChatHandler` is used for Gemma 4.
+- **Whisper ASR** needs `faster-whisper` and FFmpeg. The node returns an install hint if `faster-whisper` is missing.
+- **Flash Attention** support is best on Linux. The nodes fall back when it is unavailable.
+- **The thinking toggle** works best with Qwen3.5 and Qwen3 style models. Other architectures may ignore the steering.
 
 ## Production deployment
 
@@ -289,6 +272,21 @@ Use the second `RAW_TRACE` output, or enable live terminal token streaming.
 **How do I debug prompts that seem bad or stuck?**
 
 Turn on `stream_tokens_to_terminal`. It is there specifically so you can see the generation live and catch bad prompt behavior sooner.
+
+**Can I call remote/cloud models?**
+
+Yes — the **ThinkingLLM API (OpenAI Compatible)** node calls approved OpenAI-compatible providers with credentials kept server-side. See [docs/OPENAI_COMPATIBLE_API.md](docs/OPENAI_COMPATIBLE_API.md).
+
+## Documentation index
+
+| Topic | Doc |
+| --- | --- |
+| OpenAI-compatible API node (setup, keys, security) | [docs/OPENAI_COMPATIBLE_API.md](docs/OPENAI_COMPATIBLE_API.md) |
+| API node image inputs | [docs/OPENAI_COMPATIBLE_API_IMAGES.md](docs/OPENAI_COMPATIBLE_API_IMAGES.md) |
+| GGUF / llama.cpp vision install (Windows + Linux) | [docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md) |
+| Video preset recommendation table | [docs/VIDEO_PRESET_SETTINGS.md](docs/VIDEO_PRESET_SETTINGS.md) |
+| Duration-aware video prompts | [docs/VIDEO_PROMPT_DURATION.md](docs/VIDEO_PROMPT_DURATION.md) |
+| Maintainer notes (fork lineage, publishability) | [docs/MAINTAINER_NOTES.md](docs/MAINTAINER_NOTES.md) |
 
 ## Credits and fork lineage
 
