@@ -134,6 +134,18 @@ class SecurityTests(unittest.TestCase):
             api_node._validate_sampling(float('nan'), 0.9, 1, 0)
         with self.assertRaisesRegex(ValueError, 'seed must be an integer'):
             api_node._validate_sampling(0.5, 0.9, 1.2, 0)
+        with self.assertRaisesRegex(ValueError, 'temperature must be a numeric'):
+            api_node._validate_sampling('0.5', 0.9, 1, 0)
+
+    def test_thinking_budget_has_server_side_cap(self):
+        p = self.profile(max_thinking_budget=4096)
+        self.assertEqual(api_node._validate_thinking_budget(p, 4096), 4096)
+        with self.assertRaisesRegex(ValueError, 'exceeds server-side limit'):
+            api_node._validate_thinking_budget(p, 4097)
+
+    def test_allowed_models_requires_strings(self):
+        with self.assertRaisesRegex(ValueError, 'list of strings'):
+            self.profile(allowed_models=[123])
 
     def test_profile_booleans_are_strict(self):
         with self.assertRaisesRegex(ValueError, 'JSON boolean'):
@@ -192,6 +204,20 @@ class SecurityTests(unittest.TestCase):
                 api_node.PROFILE_FILE_ENV: str(Path(tmp) / 'missing.json'),
             }, clear=False):
                 self.assertEqual(api_node._load_api_profiles(), {})
+
+    def test_invalid_custom_override_does_not_fall_back_to_builtin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'profiles.json'
+            path.write_text(json.dumps({'profiles': {'OpenRouter': {
+                'provider': 'OpenRouter',
+                'base_url': 'https://openrouter.ai/api/v1',
+                'auth': 'bearer_env',
+                'api_key_env': 'OPENROUTER_API_KEY',
+                'max_token_limit': 1
+            }}}), encoding='utf-8')
+            with mock.patch.dict(os.environ, {api_node.PROFILE_FILE_ENV: str(path)}, clear=False):
+                profiles = api_node._load_api_profiles()
+            self.assertNotIn('OpenRouter', profiles)
 
     def test_custom_profile_file_has_configuration_not_secret(self):
         with tempfile.TemporaryDirectory() as tmp:
