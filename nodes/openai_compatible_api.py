@@ -109,8 +109,12 @@ _BUILTIN_PROFILES = {
     "Featherless": _cloud_profile(
         "Featherless", "https://api.featherless.ai/v1", "FEATHERLESS_API_KEY"
     ),
+    # OrcaRouter serves reasoning-heavy models with long TTFT (e.g. obsidian/*
+    # uncensored variants) that can exceed the default 300 s deadline, so it gets
+    # a higher server-side cap. The widget still enforces a hard maximum of 3600.
     "OrcaRouter": _cloud_profile(
-        "OrcaRouter", "https://api.orcarouter.ai/v1", "ORCAROUTER_API_KEY"
+        "OrcaRouter", "https://api.orcarouter.ai/v1", "ORCAROUTER_API_KEY",
+        max_timeout_seconds=900,
     ),
     "Ollama (local)": _local_profile("Ollama", "http://127.0.0.1:11434/v1"),
     "vLLM (local)": _local_profile("vLLM", "http://127.0.0.1:8000/v1", send_seed=True),
