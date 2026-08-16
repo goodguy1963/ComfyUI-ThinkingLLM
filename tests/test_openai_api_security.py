@@ -6,6 +6,7 @@ Run from the repository root:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import sys
@@ -20,7 +21,12 @@ PKG = HERE.parent
 if str(PKG) not in sys.path:
     sys.path.insert(0, str(PKG))
 
-from nodes import openai_compatible_api as api_node
+MODULE_PATH = PKG / "nodes" / "openai_compatible_api.py"
+SPEC = importlib.util.spec_from_file_location("thinkingllm_openai_compatible_api_test", MODULE_PATH)
+if SPEC is None or SPEC.loader is None:
+    raise RuntimeError(f"Unable to load {MODULE_PATH}")
+api_node = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(api_node)
 
 
 class OpenAICompatibleAPISecurityTests(unittest.TestCase):
