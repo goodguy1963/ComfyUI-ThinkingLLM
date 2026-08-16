@@ -30,13 +30,14 @@ jobs:
       - name: Validate API model catalogs
         run: python tools/check_api_model_catalogs.py
 
-      - name: Commit refreshed catalogs
+      - name: Commit refreshed catalogs to main
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add web/api_model_catalogs.json
           git diff --cached --quiet || git commit -m "chore: refresh API model catalogs for ${GITHUB_REF_NAME}"
-          git push
+          # The tag points at a commit on main; push the catalog refresh there.
+          git push origin HEAD:main
 
   release:
     runs-on: ubuntu-latest
