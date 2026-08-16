@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import math
@@ -57,6 +58,10 @@ class SecurityTests(unittest.TestCase):
         inputs = api_node.ThinkingLLMOpenAICompatibleAPI.INPUT_TYPES()
         names = set(inputs.get('required', {})) | set(inputs.get('optional', {}))
         self.assertIn('api_profile', names)
+        self.assertIn('image', names)
+        self.assertIn('image_url', names)
+        self.assertNotIn('video', names)
+        self.assertNotIn('video_url', names)
         for forbidden in ('api_key', 'api_key_env', 'base_url', 'headers'):
             self.assertNotIn(forbidden, names)
 
@@ -150,6 +155,8 @@ class SecurityTests(unittest.TestCase):
     def test_profile_booleans_are_strict(self):
         with self.assertRaisesRegex(ValueError, 'JSON boolean'):
             self.profile(send_seed='false')
+        with self.assertRaisesRegex(ValueError, 'JSON boolean'):
+            self.profile(allow_images='true')
 
     def test_environment_variable_name_is_validated(self):
         with self.assertRaisesRegex(ValueError, 'environment-variable name'):
@@ -197,6 +204,67 @@ class SecurityTests(unittest.TestCase):
     def test_remote_node_always_reruns(self):
         self.assertTrue(math.isnan(api_node.ThinkingLLMOpenAICompatibleAPI.IS_CHANGED()))
 
+    def test_image_support_is_fail_closed_for_custom_profiles(self):
+        p = self.profile()
+        self.assertFalse(p['allow_images'])
+        self.assertFalse(p['allow_image_url'])
+        with self.assertRaisesRegex(ValueError, 'Image input is disabled'):
+            api_node._validate_image_url(p, 'https://example.com/image.png')
+
+    def test_image_url_requires_image_capability_and_https(self):
+        with self.assertRaisesRegex(ValueError, 'cannot enable allow_image_url'):
+            self.profile(allow_image_url=True)
+        p = self.profile(allow_images=True, allow_image_url=True)
+        signed = 'https://example.com/image.png?signature=abc123'
+        self.assertEqual(api_node._validate_image_url(p, signed), signed)
+        with self.assertRaisesRegex(ValueError, 'public HTTPS'):
+            api_node._validate_image_url(p, 'http://example.com/image.png')
+        with self.assertRaisesRegex(ValueError, 'public HTTPS'):
+            api_node._validate_image_url(p, 'data:image/png;base64,AAAA')
+
+    def test_comfyui_image_is_encoded_as_png_base64(self):
+        import numpy as np
+        p = self.profile(allow_images=True, max_image_pixels=4, max_image_bytes=10000)
+        image = np.zeros((1, 2, 2, 3), dtype=np.float32)
+        image[..., 0] = 1.0
+        data_url = api_node._image_to_data_url(p, image)
+        self.assertTrue(data_url.startswith('data:image/png;base64,'))
+        png = base64.b64decode(data_url.split(',', 1)[1])
+        self.assertTrue(png.startswith(b'\x89PNG\r\n\x1a\n'))
+
+    def test_image_size_and_batch_limits_are_enforced(self):
+        import numpy as np
+        p = self.profile(allow_images=True, max_image_pixels=3, max_image_bytes=10000)
+        with self.assertRaisesRegex(ValueError, 'max_image_pixels'):
+            api_node._image_to_data_url(p, np.zeros((1, 2, 2, 3), dtype=np.float32))
+        p2 = self.profile(allow_images=True)
+        with self.assertRaisesRegex(ValueError, 'exactly one IMAGE'):
+            api_node._image_to_data_url(p2, np.zeros((2, 1, 1, 3), dtype=np.float32))
+
+    def test_image_and_image_url_are_alternatives(self):
+        p = self.profile(allow_images=True, allow_image_url=True)
+        with self.assertRaisesRegex(ValueError, 'either the IMAGE input or image_url'):
+            api_node._build_user_content(p, 'describe', image=object(), image_url='https://example.com/x.png')
+
+    def test_multimodal_content_uses_text_first_then_image_url(self):
+        p = self.profile(allow_images=True, allow_image_url=True)
+        content, supplied = api_node._build_user_content(p, 'describe', image_url='https://example.com/x.png')
+        self.assertTrue(supplied)
+        self.assertEqual(content[0], {'type': 'text', 'text': 'describe'})
+        self.assertEqual(content[1]['type'], 'image_url')
+        self.assertEqual(content[1]['image_url']['url'], 'https://example.com/x.png')
+
+    def test_image_rejection_message_is_actionable(self):
+        p = self.profile(allow_images=True)
+        message = api_node._image_rejection_message(p, 'text-only/model', 400)
+        self.assertIn('Image input was rejected', message)
+        self.assertIn('vision-capable', message)
+
+    def test_builtins_enable_standard_image_transport(self):
+        profiles = api_node._load_api_profiles()
+        self.assertTrue(profiles['OpenRouter']['allow_images'])
+        self.assertTrue(profiles['OpenRouter']['allow_image_url'])
+
     def test_builtins_can_be_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {
@@ -231,6 +299,10 @@ class SecurityTests(unittest.TestCase):
                 'max_tokens_limit': 1024,
                 'max_input_chars': 10000,
                 'max_timeout_seconds': 60,
+                'allow_images': True,
+                'allow_image_url': False,
+                'max_image_pixels': 16777216,
+                'max_image_bytes': 20000000,
             }}}), encoding='utf-8')
             with mock.patch.dict(os.environ, {
                 api_node.DISABLE_BUILTINS_ENV: '1',
@@ -239,6 +311,7 @@ class SecurityTests(unittest.TestCase):
                 profiles = api_node._load_api_profiles()
             self.assertEqual(list(profiles), ['Production'])
             self.assertEqual(profiles['Production']['api_key_env'], 'TEST_API_KEY')
+            self.assertTrue(profiles['Production']['allow_images'])
             self.assertNotIn('api_key', profiles['Production'])
 
 if __name__ == '__main__':

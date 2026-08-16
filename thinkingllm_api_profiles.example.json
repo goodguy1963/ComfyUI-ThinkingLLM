@@ -6,11 +6,15 @@
       "auth": "bearer_env",
       "api_key_env": "OPENROUTER_PRODUCTION_API_KEY",
       "allowed_models": [
-        "provider/model-id"
+        "provider/vision-model-id"
       ],
       "max_tokens_limit": 8192,
       "max_input_chars": 131072,
       "max_timeout_seconds": 300,
+      "allow_images": true,
+      "allow_image_url": true,
+      "max_image_pixels": 16777216,
+      "max_image_bytes": 20000000,
       "allowed_extra_body_fields": [],
       "send_seed": false
     },
