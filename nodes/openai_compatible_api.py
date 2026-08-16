@@ -740,7 +740,7 @@ class ThinkingLLMOpenAICompatibleAPI:
                 "enable_thinking": ("BOOLEAN", {"default": True, "tooltip": "Used by profiles with thinking_mode='qwen'."}),
                 "thinking_budget": ("INT", {"default": 8192, "min": 0, "max": 262144}),
                 "stream_tokens_to_terminal": ("BOOLEAN", {"default": False, "tooltip": "Print a control-character-sanitized display copy to the ComfyUI terminal."}),
-                "timeout_seconds": ("INT", {"default": 300, "min": 1, "max": 3600, "tooltip": "Server profile enforces max_timeout_seconds (300 by default)."}),
+                "timeout_seconds": ("INT", {"default": 300, "min": 1, "max": 3600, "tooltip": "Idle timeout: aborts only if the provider sends nothing for this many seconds. Long reasoning streams are allowed to continue. Server profile enforces max_timeout_seconds (300 by default; OrcaRouter 900)."}),
             },
             "optional": {
                 "custom_model_name": ("STRING", {"default": "", "multiline": False, "tooltip": "Optional: exact model ID for anything not in the curated list. When set, it overrides model_name."}),
@@ -816,6 +816,10 @@ class ThinkingLLMOpenAICompatibleAPI:
         display = get_thinking_stream_display() if stream_tokens_to_terminal else None
         if display is not None:
             display.start_stage(_terminal_display_safe(f"API {profile['provider']} / {model}"))
+        # Idle timeout: abort only when the provider sends nothing for `timeout`
+        # seconds. A long reasoning stream that keeps emitting tokens must be
+        # allowed to run — reasoning-heavy models (e.g. obsidian/* uncensored)
+        # routinely stream for longer than the configured timeout in total.
         deadline = time.monotonic() + timeout
         try:
             with _open_request(req, timeout) as response:
@@ -828,10 +832,12 @@ class ThinkingLLMOpenAICompatibleAPI:
                         display.push_compact(_terminal_display_safe(reasoning or content))
                 else:
                     for raw_line in response:
-                        if time.monotonic() > deadline:
-                            raise TimeoutError("provider stream exceeded configured request deadline")
+                        # Idle detection: reset the deadline whenever any line arrives.
+                        deadline = time.monotonic() + timeout
                         line = raw_line.decode("utf-8", errors="replace").strip()
                         if not line or line.startswith(":"):
+                            # Heartbeat/keep-alive lines also count as activity.
+                            deadline = time.monotonic() + timeout
                             continue
                         line = line[5:].strip() if line.startswith("data:") else line
                         if line == "[DONE]":
@@ -853,6 +859,8 @@ class ThinkingLLMOpenAICompatibleAPI:
                             content_parts.append(content)
                             if display is not None:
                                 display.push_compact(_terminal_display_safe(content))
+                        if time.monotonic() > deadline:
+                            raise TimeoutError("provider stream idle timeout: no data received within the configured request deadline")
         except urllib.error.HTTPError as exc:
             detail = f"HTTP {exc.code} {exc.reason}"
             body = _redact_for_log(_read_error_body(exc), profile)
