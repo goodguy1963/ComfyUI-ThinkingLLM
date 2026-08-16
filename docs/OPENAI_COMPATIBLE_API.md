@@ -1,21 +1,19 @@
 # ThinkingLLM API (OpenAI Compatible)
 
-`ThinkingLLM API (OpenAI Compatible)` calls server-approved OpenAI-compatible `/chat/completions` endpoints while keeping the same two-output pattern used by the local ThinkingLLM nodes:
+`ThinkingLLM API (OpenAI Compatible)` lets a ComfyUI workflow call approved OpenAI-compatible chat-completions backends without exposing provider credentials to the workflow or to clients that submit ComfyUI API jobs.
 
-- `RESPONSE` — final assistant text with visible `<think>...</think>` blocks removed
-- `RAW_TRACE` — reasoning plus final text when the provider exposes a reasoning channel or literal think blocks
+The node returns:
 
-The node is designed so ComfyUI can safely be used as an API backend **without putting cloud-provider API keys into workflow JSON, prompt JSON, saved workflows, node widgets, or the ThinkingLLM Git repository**.
+- `RESPONSE` — the final assistant text, with literal `<think>...</think>` blocks removed.
+- `RAW_TRACE` — the reasoning channel plus final text when the provider exposes reasoning separately, or the raw literal think block when a compatible backend emits one.
 
 > [!IMPORTANT]
-> A provider API key is a server secret. Keep it on the machine/container that runs ComfyUI. ThinkingLLM only reads the key from the ComfyUI process environment at request time. Do not paste a real provider key into a workflow, profile JSON, README, issue, commit, Dockerfile, launch script that is tracked by Git, or any other repository file.
+> **Provider API keys are host/runtime secrets, not ThinkingLLM configuration.** A real API key should exist only in the environment or secret store of the machine/service/container that launches ComfyUI. Never put a real provider key in a workflow, ComfyUI `/prompt` request, profile JSON, repository file, Dockerfile, README, issue, PR comment, or Git commit.
 
-## TL;DR — recommended production setup
-
-For a remotely accessible ComfyUI server, use this layout:
+## Recommended production architecture
 
 ```text
-External client / app
+External client / application
         |
         | ComfyUI API request
         | api_profile = "OpenRouter Production"
@@ -24,268 +22,164 @@ External client / app
         v
      ComfyUI
         |
-        | resolves server-side profile
-        | validates model + token limit
-        | reads OPENROUTER_PRODUCTION_API_KEY from process environment
+        | loads trusted server-side profile
+        | validates model, input size, output limit and timeout
+        | reads provider credential from process environment
         v
-   OpenRouter / provider
+OpenRouter / OpenAI / QwenCloud / other provider
 ```
 
-Recommended rules:
+The external client never sends or receives the provider key. The workflow only names a server-approved profile.
 
-1. Keep the real API key only in the ComfyUI host/container environment or a host-level secret manager.
-2. Keep the real `thinkingllm_api_profiles.json` outside the Git checkout for production.
-3. Set `THINKINGLLM_DISABLE_BUILTIN_API_PROFILES=1` on public or multi-user deployments.
-4. Point `THINKINGLLM_API_PROFILES_FILE` to the external profile file.
-5. Use `allowed_models` and `max_tokens_limit` on every production cloud profile.
-6. Leave `allow_extra_body` disabled unless a provider feature specifically requires it.
-7. Protect the ComfyUI API itself with authentication/network controls and rate limiting.
+For a public or multi-user deployment, the recommended baseline is:
 
-With this arrangement, updating ThinkingLLM with `git pull`, switching branches, reinstalling the custom node, or replacing the repository directory does **not** require putting the provider secret into the repository. The secret remains owned by the host environment.
+1. Keep provider keys in the host/service/container secret environment.
+2. Keep the real profile file outside the Git checkout.
+3. Set `THINKINGLLM_API_PROFILES_FILE` to that external file.
+4. Set `THINKINGLLM_DISABLE_BUILTIN_API_PROFILES=1`.
+5. Configure exact `allowed_models` values.
+6. Configure `max_tokens_limit`, `max_input_chars`, and `max_timeout_seconds`.
+7. Keep `allowed_extra_body_fields` empty unless specific provider options are required.
+8. Protect ComfyUI itself with authentication/network controls and rate/spending limits.
 
 ---
 
-## Security model
+## Security boundaries
 
-Treat ComfyUI workflow/API input as untrusted. The workflow is therefore not allowed to provide:
+Treat workflow/API input as untrusted. A workflow is intentionally unable to provide:
 
-- API keys
-- bearer tokens
-- environment-variable names
+- API keys or bearer tokens
+- the name of the environment variable containing a key
 - arbitrary remote `base_url` values
 - custom HTTP headers
+- a provider credential directly
 
-Instead, the workflow only selects an `api_profile` alias. Each profile is resolved on the ComfyUI server and binds the provider endpoint and authentication policy together.
+Instead, the workflow provides only `api_profile`, `model_name`, prompts, and generation controls. The profile is read from trusted server configuration and binds the endpoint and authentication policy together.
 
-This prevents a workflow from combining a sensitive environment variable with an attacker-controlled URL and also removes arbitrary outbound URLs from prompt JSON.
+This design prevents a workflow from combining an arbitrary server environment variable with an attacker-controlled URL.
 
-The server-side profile file contains **configuration, not secrets**. Secrets remain in process environment variables.
+### The profile file is not a secret, but it is security-sensitive
 
-### What is protected
+`thinkingllm_api_profiles.json` must contain configuration only, never a literal API key. Nevertheless, its **integrity matters**: a profile chooses the destination endpoint and the environment-variable reference. If an untrusted user can modify this file, they could redirect an approved credential to a different endpoint.
 
-The design is intended to prevent accidental or workflow-driven disclosure of provider credentials through:
+Therefore:
 
-- exported ComfyUI workflow JSON
-- ComfyUI API `/prompt` payloads
-- node widgets
-- Git commits
-- copied example workflows
-- client-side applications that call ComfyUI
-- arbitrary workflow-controlled outbound URLs
+- only the ComfyUI administrator/service account should be able to modify the production profile file;
+- use restrictive filesystem permissions where practical;
+- for production, store the file outside the Git checkout;
+- do not let workflow/API clients choose its path;
+- restart ComfyUI after changing profile configuration.
 
-### What this does not replace
+### Redirects are deliberately rejected
 
-Protecting the provider key does not authenticate your ComfyUI installation. A user who is allowed to submit workflows using an approved profile can still consume that profile's provider quota.
+The API transport does **not follow HTTP redirects**. This is intentional. Redirecting an authenticated request is dangerous because an authorization header can otherwise be forwarded beyond the originally approved endpoint.
 
-For an Internet-facing deployment, also use appropriate controls around ComfyUI itself, for example:
+Use the provider's canonical final API base URL in the server-side profile. A 3xx response is treated as an error and should be fixed by correcting the profile URL.
 
-- VPN/private network access
-- authenticated reverse proxy
-- API gateway
-- IP allowlisting where appropriate
-- rate limits / concurrency limits
-- provider-side spending limits and alerts
+### HTTPS and local HTTP
 
----
+Authenticated profiles (`auth: "bearer_env"`) must use HTTPS.
 
-## Secret ownership: the API key must stay local to the ComfyUI server
-
-The provider key should have a simple lifecycle:
+Unauthenticated plain HTTP is accepted automatically only for loopback hosts such as:
 
 ```text
-Provider dashboard
-      |
-      | copy once during server setup / rotation
-      v
-Host secret store or process environment
-      |
-      | inherited by ComfyUI process
-      v
-ThinkingLLM API node
-      |
-      | Authorization: Bearer <secret>
-      v
-Provider
+http://127.0.0.1:8000/v1
+http://localhost:11434/v1
 ```
 
-The key should **not** travel in the opposite direction. It must not be returned to the browser/client, serialized into a workflow, or stored in `thinkingllm_api_profiles.json`.
-
-### Never put a real key in these places
-
-Do not store a real API key in:
-
-```text
-ComfyUI workflow JSON
-ComfyUI API request JSON
-thinkingllm_api_profiles.json
-thinkingllm_api_profiles.example.json
-README.md or docs/
-Python source files
-Dockerfile
-tracked docker-compose.yml
-tracked startup scripts
-GitHub issues or pull requests
-screenshots / logs shared publicly
-```
-
-### Environment-variable names are not secrets
-
-A profile may contain:
+For an intentionally cleartext LAN/internal endpoint with `auth: "none"`, the administrator must explicitly opt in:
 
 ```json
-"api_key_env": "OPENROUTER_PRODUCTION_API_KEY"
+"allow_insecure_http": true
 ```
 
-That is only the **name** of the server environment variable. The real key is stored separately in the environment:
-
-```text
-OPENROUTER_PRODUCTION_API_KEY=<real secret value>
-```
-
-ThinkingLLM resolves the name server-side and reads the value only when the node makes the provider request.
-
----
-
-## Repository safety and `.gitignore`
-
-The repository ignores the normal local secret files:
-
-```text
-.env
-.env.*
-thinkingllm_api_profiles.json
-```
-
-`.env.example` is allowed so documentation can show variable names without real values.
-
-This is a safety net, not the primary secret-storage mechanism.
-
-### Important Git rule
-
-`.gitignore` only prevents **untracked** files from being added accidentally. It does not automatically protect a file that was already committed/tracked in the past.
-
-Before storing anything sensitive inside the working tree, check that Git ignores it:
-
-```bash
-git check-ignore -v thinkingllm_api_profiles.json
-```
-
-For a production server, the safer approach is still to keep the profile file and secret material completely outside the repository.
-
-### If a real key was ever committed
-
-Deleting the line from the latest commit is not enough. Treat the key as compromised:
-
-1. Revoke/rotate the key at the provider immediately.
-2. Remove the secret from current repository content.
-3. If required, clean it from Git history using an appropriate history-rewrite process.
-4. Verify forks, CI logs, artifacts, backups, and deployment logs as appropriate.
-5. Create a new key and place it only in the server-side secret environment.
-
-Do not continue using a key that has appeared in Git history.
+Do not enable this for Internet-facing endpoints.
 
 ---
 
 ## Built-in profiles
 
-The node includes fixed convenience profiles for:
+Convenience profiles are included for:
 
-- QwenCloud (Singapore)
-- OpenRouter
-- Together AI
-- Fireworks AI
-- DeepInfra
-- Groq
-- Featherless
-- OrcaRouter
-- Ollama on `127.0.0.1:11434`
-- vLLM on `127.0.0.1:8000`
-- llama.cpp on `127.0.0.1:8080`
+| Profile | Base URL | Server environment variable |
+| --- | --- | --- |
+| OpenAI | `https://api.openai.com/v1` | `OPENAI_API_KEY` |
+| QwenCloud (Singapore) | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
+| OpenRouter | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
+| Together AI | `https://api.together.ai/v1` | `TOGETHER_API_KEY` |
+| Fireworks AI | `https://api.fireworks.ai/inference/v1` | `FIREWORKS_API_KEY` |
+| DeepInfra | `https://api.deepinfra.com/v1/openai` | `DEEPINFRA_TOKEN` |
+| Groq | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` |
+| Featherless | `https://api.featherless.ai/v1` | `FEATHERLESS_API_KEY` |
+| OrcaRouter | `https://api.orcarouter.ai/v1` | `ORCAROUTER_API_KEY` |
+| Ollama (local) | `http://127.0.0.1:11434/v1` | none |
+| vLLM (local) | `http://127.0.0.1:8000/v1` | none |
+| llama.cpp (local) | `http://127.0.0.1:8080/v1` | none |
 
-Authenticated built-in profiles use a fixed HTTPS endpoint and a fixed server-side environment-variable name. Local profiles use `auth: none` and fixed loopback addresses.
+The built-ins are convenient for local single-user use. For a remotely accessible/multi-user ComfyUI server, prefer explicit custom profiles and disable the built-ins.
 
-Built-ins are convenient for a private desktop installation. For a public or multi-user API server, explicit custom profiles with allowlists are safer.
+### QwenCloud Singapore note
 
-## Environment variables used by built-in cloud profiles
+The built-in Singapore profile uses the shared `dashscope-intl` endpoint because a built-in profile cannot know your Alibaba Model Studio workspace ID. Alibaba currently keeps that shared endpoint functional, but recommends the workspace-dedicated Singapore domain for production:
 
-| Profile | Environment variable |
-| --- | --- |
-| QwenCloud | `DASHSCOPE_API_KEY` |
-| OpenRouter | `OPENROUTER_API_KEY` |
-| Together AI | `TOGETHER_API_KEY` |
-| Fireworks AI | `FIREWORKS_API_KEY` |
-| DeepInfra | `DEEPINFRA_TOKEN` |
-| Groq | `GROQ_API_KEY` |
-| Featherless | `FEATHERLESS_API_KEY` |
-| OrcaRouter | `ORCAROUTER_API_KEY` |
+```text
+https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+```
+
+For production QwenCloud use, create a custom server-side profile with your workspace-specific URL instead of relying on the convenience built-in.
 
 ---
 
-## Recommended production file layout
+## Environment variables and secret ownership
 
-Keeping the profile file outside the Git checkout makes upgrades and reinstalls much safer.
+### Windows PowerShell — current process
 
-### Windows example
-
-```text
-D:\ComfyUI\
-  ComfyUI\
-    custom_nodes\
-      ComfyUI-ThinkingLLM\       <-- Git checkout, contains no secret
-
-D:\ComfyUI-Secrets\
-  thinkingllm_api_profiles.json   <-- server configuration, no literal API key
+```powershell
+$env:OPENROUTER_PRODUCTION_API_KEY="your-secret-key"
+$env:THINKINGLLM_DISABLE_BUILTIN_API_PROFILES="1"
+$env:THINKINGLLM_API_PROFILES_FILE="D:\ComfyUI-Secrets\thinkingllm_api_profiles.json"
+python main.py
 ```
 
-The real provider key is stored in the process/user/service environment, not in either file tree.
+The variable exists only for that PowerShell process and child processes.
 
-### Linux example
+### Windows — persistent service/user setup
 
-```text
-/opt/comfyui/ComfyUI/custom_nodes/ComfyUI-ThinkingLLM/  <-- Git checkout
-/etc/thinkingllm/api_profiles.json                      <-- root/admin-managed config
-/etc/thinkingllm/provider-secrets.env                   <-- optional service env file, mode 600
+If ComfyUI is launched by a service, task scheduler, wrapper, or another account, configure the secret in the environment of the **actual process that launches ComfyUI**. Setting a variable in your interactive terminal does not modify an already-running service.
+
+After changing persistent environment values, restart ComfyUI.
+
+### Linux/macOS shell
+
+```bash
+export OPENROUTER_PRODUCTION_API_KEY='your-secret-key'
+export THINKINGLLM_DISABLE_BUILTIN_API_PROFILES=1
+export THINKINGLLM_API_PROFILES_FILE=/etc/thinkingllm/api_profiles.json
+python main.py
 ```
 
-If an environment file is used, it is loaded by your service manager or container runtime. ThinkingLLM itself does not need to parse a `.env` file.
+### systemd/service deployments
+
+Prefer a service-specific environment file or secret mechanism with restrictive permissions. Keep it outside the Git checkout. The unit should expose the key to the ComfyUI process without copying the key into the ThinkingLLM source tree.
+
+### Containers
+
+Do **not** bake provider credentials into the image:
+
+```dockerfile
+# Do not do this
+ENV OPENROUTER_PRODUCTION_API_KEY=real-secret
+```
+
+Inject credentials at runtime through your container/orchestrator secret mechanism. Mount the profile file read-only and point `THINKINGLLM_API_PROFILES_FILE` at the mounted path.
 
 ---
 
-## Server-side custom profiles
+## Server-side profile file
 
-The repository includes:
+Start from `thinkingllm_api_profiles.example.json`, but keep your real production file outside the repository when practical.
 
-```text
-thinkingllm_api_profiles.example.json
-```
-
-For a simple local test, you may copy it to:
-
-```text
-thinkingllm_api_profiles.json
-```
-
-That real filename is ignored by Git.
-
-For production, prefer an external location and set:
-
-```text
-THINKINGLLM_API_PROFILES_FILE=/secure/path/thinkingllm_api_profiles.json
-```
-
-A profile can bind:
-
-- `provider` — display/provider label
-- `base_url` — fixed server-approved API base URL
-- `auth` — `bearer_env` or `none`
-- `api_key_env` — environment-variable name; only valid with `bearer_env`
-- `allowed_models` — optional exact model allowlist
-- `max_tokens_limit` — optional server-side output-token ceiling
-- `allow_extra_body` — whether workflow-supplied provider-specific JSON is accepted; defaults to `false`
-- `send_seed` — whether the common `seed` value is sent; defaults to `false`
-- `thinking_mode` — set to `qwen` for Qwen-compatible `enable_thinking` and `thinking_budget`
-
-Example production profile:
+Example:
 
 ```json
 {
@@ -296,190 +190,102 @@ Example production profile:
       "auth": "bearer_env",
       "api_key_env": "OPENROUTER_PRODUCTION_API_KEY",
       "allowed_models": [
-        "provider/approved-model-id"
+        "provider/model-id"
       ],
       "max_tokens_limit": 8192,
-      "allow_extra_body": false,
+      "max_input_chars": 131072,
+      "max_timeout_seconds": 300,
+      "allowed_extra_body_fields": [],
       "send_seed": false
     }
   }
 }
 ```
 
-There is deliberately no field containing the real key.
+The string `OPENROUTER_PRODUCTION_API_KEY` is only the **name** of an environment variable. The actual provider key must not appear in this JSON.
 
-### Forbidden profile fields
+### Supported profile fields
 
-Do not put a literal `api_key`, token, `Authorization` header, arbitrary headers, or secret field into the profile file. The profile loader rejects these secret/header fields.
+| Field | Meaning |
+| --- | --- |
+| `provider` | Display/log label. |
+| `base_url` | Fixed administrator-approved API base URL. |
+| `auth` | `bearer_env` or `none`. |
+| `api_key_env` | Environment-variable name used only with `bearer_env`. |
+| `allowed_models` | Optional exact model allowlist. Recommended for production. |
+| `max_tokens_limit` | Maximum output-token request accepted from a workflow. |
+| `max_input_chars` | Maximum combined `system_prompt + prompt` character count. Default: 1,000,000. |
+| `max_timeout_seconds` | Maximum timeout a workflow may request. Default: 300. |
+| `allowed_extra_body_fields` | Exact top-level provider-specific request fields allowed from `extra_body_json`. Empty means disabled. |
+| `send_seed` | Whether to send the common `seed` parameter. Must be a JSON boolean. |
+| `thinking_mode` | Currently empty or `qwen`. |
+| `max_tokens_field` | `max_tokens` or `max_completion_tokens`. |
+| `allow_insecure_http` | Explicit opt-in for unauthenticated non-loopback HTTP. |
 
-Authenticated profiles must use HTTPS. If an internal authenticated endpoint only supports HTTP, put it behind TLS/reverse proxy before using it with this node.
+Unknown profile fields are rejected instead of silently ignored. This is intentional: a typo such as `max_token_limit` must not quietly disable a security limit.
+
+Literal secret/header fields such as `api_key`, `token`, `Authorization`, `headers`, or `secret` are rejected.
 
 ---
 
 ## Production lock-down mode
 
-For a public-facing or multi-user ComfyUI backend, disable all convenience built-in profiles and explicitly define only the profiles the server is allowed to use:
+For public-facing or multi-user ComfyUI:
 
 ```text
 THINKINGLLM_DISABLE_BUILTIN_API_PROFILES=1
 ```
 
-Then create only approved entries in the external profile file, ideally with both `allowed_models` and `max_tokens_limit` configured.
+Then expose only explicit entries in your trusted profile file.
 
-Example production environment:
-
-```text
-THINKINGLLM_DISABLE_BUILTIN_API_PROFILES=1
-THINKINGLLM_API_PROFILES_FILE=/etc/thinkingllm/api_profiles.json
-OPENROUTER_PRODUCTION_API_KEY=<real secret value>
-```
-
-Only the first two values describe ThinkingLLM configuration. The third value is the actual provider secret and must remain private to the host/runtime.
-
----
-
-## Windows setup
-
-### Temporary PowerShell session
-
-Useful for testing:
-
-```powershell
-$env:OPENROUTER_PRODUCTION_API_KEY="your-real-key"
-$env:THINKINGLLM_DISABLE_BUILTIN_API_PROFILES="1"
-$env:THINKINGLLM_API_PROFILES_FILE="D:\ComfyUI-Secrets\thinkingllm_api_profiles.json"
-
-python main.py
-```
-
-The variables exist only in that PowerShell process and child processes. Closing the shell removes the temporary values.
-
-### Persistent Windows environment variable
-
-You can store a user-level variable with:
-
-```powershell
-setx OPENROUTER_PRODUCTION_API_KEY "your-real-key"
-```
-
-`setx` affects future processes. Restart the terminal/launcher/service before starting ComfyUI.
-
-For a production service, prefer configuring the secret in the account/service environment or a dedicated Windows secret-management/deployment mechanism rather than placing it in a tracked `.bat`/`.ps1` file.
-
-### Verify without printing the secret
-
-Do not `echo` the real key into shared logs. You can check only whether it exists:
-
-```powershell
-if ($env:OPENROUTER_PRODUCTION_API_KEY) { "OpenRouter key is configured" } else { "OpenRouter key is missing" }
-```
-
----
-
-## Linux setup
-
-### Interactive shell
-
-```bash
-export OPENROUTER_PRODUCTION_API_KEY='your-real-key'
-export THINKINGLLM_DISABLE_BUILTIN_API_PROFILES=1
-export THINKINGLLM_API_PROFILES_FILE=/etc/thinkingllm/api_profiles.json
-
-python main.py
-```
-
-### systemd-style deployment
-
-A common production pattern is to keep the secret in a root/admin-managed environment file outside the repository, for example:
+Recommended location examples:
 
 ```text
-/etc/thinkingllm/provider-secrets.env
+Windows: D:\ComfyUI-Secrets\thinkingllm_api_profiles.json
+Linux:   /etc/thinkingllm/api_profiles.json
 ```
 
-Example content:
+Point ThinkingLLM to the external file:
 
 ```text
-OPENROUTER_PRODUCTION_API_KEY=<real secret value>
-THINKINGLLM_DISABLE_BUILTIN_API_PROFILES=1
-THINKINGLLM_API_PROFILES_FILE=/etc/thinkingllm/api_profiles.json
+THINKINGLLM_API_PROFILES_FILE=/secure/path/thinkingllm_api_profiles.json
 ```
 
-Restrict permissions appropriately, for example:
-
-```bash
-chmod 600 /etc/thinkingllm/provider-secrets.env
-```
-
-Then configure your service manager to load that environment file for the ComfyUI process. The exact service unit depends on how ComfyUI is installed.
-
-### Verify without printing the secret
-
-```bash
-if [ -n "$OPENROUTER_PRODUCTION_API_KEY" ]; then
-  echo "OpenRouter key is configured"
-else
-  echo "OpenRouter key is missing"
-fi
-```
-
----
-
-## Container / Docker deployment
-
-The same rule applies: inject the key at runtime; do not bake it into the image.
-
-Avoid:
-
-```dockerfile
-ENV OPENROUTER_PRODUCTION_API_KEY=real-secret
-```
-
-A secret baked into an image can remain recoverable from image layers or deployment metadata.
-
-Prefer runtime secret injection, for example an external environment/secret file managed outside the Git checkout, container-orchestrator secrets, or your hosting provider's secret/environment settings.
-
-Conceptually:
-
-```text
-container runtime / secret manager
-        |
-        | injects OPENROUTER_PRODUCTION_API_KEY
-        v
-ComfyUI container process
-        |
-        v
-ThinkingLLM API node
-```
-
-The profile JSON may be mounted read-only into the container and referenced with `THINKINGLLM_API_PROFILES_FILE`.
+This also keeps credentials/profile policy independent of `git pull`, branch changes, reinstalls, or replacing the custom-node directory.
 
 ---
 
 ## ComfyUI UI usage
 
-After ComfyUI starts with the desired profiles, add:
+Add:
 
 ```text
 ThinkingLLM/API
   ThinkingLLM API (OpenAI Compatible)
 ```
 
-Select only the server-approved profile alias, for example:
+Typical values:
 
 ```text
 api_profile: OpenRouter Production
 model_name: provider/approved-model-id
+system_prompt: You are a helpful assistant.
+prompt: ...
+max_tokens: 2048
+temperature: 0.6
+top_p: 0.95
+stream_tokens_to_terminal: false
 ```
 
-The node never asks for the real provider key.
+The node never asks for the real provider credential.
 
-If the key is missing, the client-facing error is intentionally generic. The ComfyUI server terminal contains the administrator-facing detail needed to identify which environment variable is missing.
+Terminal streaming defaults to **off** for the remote API node. When enabled, ThinkingLLM prints a display-only copy with C0/C1 control characters removed; the actual `RESPONSE`/`RAW_TRACE` strings remain unchanged.
 
 ---
 
 ## ComfyUI API usage
 
-A client calling ComfyUI sends only the profile alias and normal generation inputs. Conceptually:
+A client calling ComfyUI sends only profile/model/prompt/generation settings. Conceptually:
 
 ```json
 {
@@ -489,11 +295,12 @@ A client calling ComfyUI sends only the profile alias and normal generation inpu
   "prompt": "Describe the scene",
   "max_tokens": 2048,
   "temperature": 0.6,
-  "top_p": 0.95
+  "top_p": 0.95,
+  "timeout_seconds": 120
 }
 ```
 
-The API request must **not** contain:
+It must not contain:
 
 ```text
 api_key
@@ -504,30 +311,19 @@ Authorization
 custom secret headers
 ```
 
-The ComfyUI process resolves the profile, validates the request, reads the configured environment variable, and adds the bearer header only when making the outbound provider request.
+### Remote calls always execute
 
-The external client never receives or transmits the provider API key.
+ComfyUI normally caches a custom node when its inputs have not changed. That is wrong for a remote API call because the remote service is external state and can return a different answer even for identical inputs.
 
-### Why this matters for generated API workflow JSON
-
-ComfyUI API-format workflows are often:
-
-- saved to disk
-- generated programmatically
-- logged during debugging
-- copied between machines
-- embedded in applications
-- sent over queues or HTTP
-
-Keeping the provider credential out of that JSON means all of those operations can occur without duplicating the provider secret.
+This node therefore declares itself changed on every queue run via `IS_CHANGED`, ensuring a repeated workflow actually performs a new provider request instead of reusing a previous response.
 
 ---
 
-## Model and spending controls
+## Cost and abuse controls
 
-A hidden key is not enough. A user with permission to select a profile can still spend against that provider account.
+Hiding a key is only one layer. Anyone authorized to submit a workflow that can select a cloud profile can potentially consume provider quota.
 
-Use an exact model allowlist:
+### Model allowlist
 
 ```json
 "allowed_models": [
@@ -536,29 +332,57 @@ Use an exact model allowlist:
 ]
 ```
 
-Use a server-side token ceiling:
+### Output-token ceiling
 
 ```json
 "max_tokens_limit": 8192
 ```
 
-If a workflow requests an unapproved model or a higher token limit, the node rejects the request before sending it to the provider.
+### Input-size ceiling
 
-Provider-side budget limits and alerts are also recommended where available.
+```json
+"max_input_chars": 131072
+```
+
+This limit is character based, not tokenizer based. It is a defensive bound against extremely large API payloads and uncontrolled input cost; provider/model context limits still apply separately.
+
+### Timeout ceiling
+
+```json
+"max_timeout_seconds": 300
+```
+
+A workflow may request a shorter timeout but cannot exceed the server-defined ceiling.
+
+Also use provider-side budget caps/alerts and gateway/reverse-proxy rate limiting where available.
 
 ---
 
-## `extra_body_json`
+## Provider-specific request fields (`extra_body_json`)
 
-`extra_body_json` is disabled by default for server-defined profiles. The server administrator must explicitly set:
+The old boolean `allow_extra_body` switch is intentionally **not supported**. It was too broad: once enabled, a workflow could send arbitrary top-level provider parameters.
+
+Instead, every extra top-level field must be individually approved:
 
 ```json
-"allow_extra_body": true
+"allowed_extra_body_fields": [
+  "reasoning"
+]
 ```
 
-before workflow-supplied provider-specific parameters are accepted.
+Then the workflow may send, for example:
 
-Even when enabled, `extra_body_json` cannot override protected fields including:
+```json
+{
+  "reasoning": {
+    "effort": "high"
+  }
+}
+```
+
+A field not on the allowlist is rejected.
+
+The following core fields can never be delegated through `extra_body_json`:
 
 - `model`
 - `messages`
@@ -571,108 +395,91 @@ Even when enabled, `extra_body_json` cannot override protected fields including:
 - `enable_thinking`
 - `thinking_budget`
 
-This prevents a workflow from bypassing server-side model/token controls or changing the core request contract.
-
-For production, keep it `false` unless a specific provider feature requires it.
+`extra_body_json` also has a size limit and rejects non-finite JSON constants such as `NaN`.
 
 ---
 
-## Qwen thinking
+## Thinking / reasoning traces
 
-The built-in QwenCloud profile uses Qwen-compatible thinking parameters. When `thinking_mode` is `qwen`, the node sends `enable_thinking` and, when greater than zero, `thinking_budget`.
+The node recognizes common OpenAI-compatible reasoning channels, including:
 
-For other providers, provider-specific reasoning controls should only be enabled through a server-approved profile with `allow_extra_body: true` where necessary.
+- `reasoning_content`
+- `reasoning`
+- `thinking`
+- OpenRouter-style `reasoning_details` text/summary entries
+
+For OpenRouter streaming, `reasoning_details` may appear in `choices[].delta.reasoning_details`; the node extracts readable text/summary portions for `RAW_TRACE`.
+
+If a provider returns a mid-stream error inside an HTTP-200 SSE stream, the node detects a top-level `error` / `finish_reason: "error"` event and fails the ComfyUI execution rather than returning silently truncated output.
+
+### Qwen thinking
+
+Profiles with:
+
+```json
+"thinking_mode": "qwen"
+```
+
+send `enable_thinking` and, when greater than zero, `thinking_budget`.
+
+For other providers, expose only the specific provider reasoning field you need via `allowed_extra_body_fields`.
 
 ---
 
-## Qwen3.8 27B / community variants
+## Key rotation
 
-The node deliberately does not hard-code a community model ID. Model availability and IDs can change independently at each provider.
+Rotating a provider credential should require **zero workflow changes**:
 
-Use the exact provider-published model ID in `model_name`, or lock it down with `allowed_models` in the server-side profile.
+1. Create a new provider key.
+2. Replace the value of the existing server environment variable.
+3. Restart/reload the ComfyUI process so it inherits the new value.
+4. Test the configured profile.
+5. Revoke the old provider key.
 
-The provider key remains unchanged by model selection. The key identifies/authenticates the provider account; the `model_name` identifies the requested model.
+Workflows continue using the same alias:
+
+```text
+api_profile = OpenRouter Production
+```
 
 ---
 
-## Updating ThinkingLLM without losing or committing secrets
+## Updating or reinstalling ThinkingLLM safely
 
-This is one of the main reasons to keep secrets external.
-
-### Safe update model
+Keep repository-managed source and host-managed secrets separate:
 
 ```text
 Git repository                         Host configuration
 -------------------------------        ---------------------------------
-ComfyUI-ThinkingLLM source code        API key environment variable
+ThinkingLLM source code                provider API key environment variable
 example profile                        production profile JSON
 public documentation                   service/container secret settings
 
          git pull / reinstall                 remains unchanged
 ```
 
-A normal ThinkingLLM update should only replace/update repository-managed source files. It should not need to read, modify, migrate, or commit your real provider key.
-
-### Best practice
-
-Keep production secrets and profile configuration in a separate location such as:
-
-```text
-Windows: D:\ComfyUI-Secrets\
-Linux:   /etc/thinkingllm/
-```
-
-Then point ThinkingLLM to the profile file with `THINKINGLLM_API_PROFILES_FILE`.
-
-This avoids accidental deletion if the custom-node directory is removed and recloned.
-
-### Before updating
-
-You can verify that the Git working tree contains no secret configuration:
+Before updating:
 
 ```bash
 git status
-```
-
-If you intentionally use the ignored local `thinkingllm_api_profiles.json`, verify its ignore rule:
-
-```bash
 git check-ignore -v thinkingllm_api_profiles.json
 ```
 
-Do not use `git add -f` on ignored secret/config files.
+Do not use `git add -f` on secret/config files.
 
-### After updating
+After updating, restart ComfyUI so it reloads current profiles and process environment. No provider key needs to be copied into the repository.
 
-Restart ComfyUI so it inherits the current environment and reloads profile configuration. There is no need to re-enter the provider key if the service/host environment still contains it.
+### Gitignore is a secondary safeguard, not a secret manager
 
----
+The repository ignores `.env`, `.env.*`, and local `thinkingllm_api_profiles*.json` variants while explicitly keeping `thinkingllm_api_profiles.example.json` trackable.
 
-## Key rotation
-
-Rotating a provider key should not require any workflow changes.
-
-1. Create a new provider key.
-2. Replace the value of the existing server environment variable, for example `OPENROUTER_PRODUCTION_API_KEY`.
-3. Restart/reload the ComfyUI process so it inherits the new value.
-4. Test the configured profile.
-5. Revoke the old provider key.
-
-Because workflows reference only the profile alias, they continue to use:
-
-```text
-api_profile = OpenRouter Production
-```
-
-No workflow JSON needs to contain or learn the new secret.
+Git ignore rules do not protect a file that was already committed. If a real provider key ever entered Git history, logs, an issue, or a PR comment, treat it as compromised and rotate/revoke it at the provider.
 
 ---
 
-## Adding another provider account or environment
+## Multiple environments/accounts
 
-Use separate environment-variable names and separate profile aliases.
-
-Example:
+Use distinct aliases and environment-variable names:
 
 ```json
 {
@@ -683,7 +490,9 @@ Example:
       "auth": "bearer_env",
       "api_key_env": "OPENROUTER_DEV_API_KEY",
       "allowed_models": ["provider/dev-model"],
-      "max_tokens_limit": 4096
+      "max_tokens_limit": 4096,
+      "max_input_chars": 65536,
+      "max_timeout_seconds": 120
     },
     "OpenRouter Production": {
       "provider": "OpenRouter",
@@ -691,13 +500,15 @@ Example:
       "auth": "bearer_env",
       "api_key_env": "OPENROUTER_PRODUCTION_API_KEY",
       "allowed_models": ["provider/prod-model"],
-      "max_tokens_limit": 8192
+      "max_tokens_limit": 8192,
+      "max_input_chars": 131072,
+      "max_timeout_seconds": 300
     }
   }
 }
 ```
 
-The two real keys remain separate host secrets.
+The actual keys remain separate host secrets.
 
 ---
 
@@ -707,36 +518,49 @@ The two real keys remain separate host secrets.
 
 Check:
 
-- `THINKINGLLM_API_PROFILES_FILE` points to the correct file
-- the JSON parses correctly
-- the requested alias matches exactly
-- if built-ins were disabled, the desired profile is present in the custom profile file
+- `THINKINGLLM_API_PROFILES_FILE` points to the intended file;
+- the JSON parses correctly;
+- the alias matches exactly;
+- if built-ins are disabled, the profile exists in the custom file;
+- no unknown/deprecated profile field caused the entry to be rejected.
 
-Invalid profiles are ignored and an explanation is printed to the ComfyUI server terminal.
+Invalid profiles are ignored and the reason is printed in the ComfyUI server terminal.
 
 ### `API credential is not configured for the selected server-side profile`
 
-The profile exists, but the ComfyUI process cannot see the required environment variable.
+The ComfyUI process cannot see the required environment variable. Configure it in the environment of the **actual process/service/container** that starts ComfyUI, then restart ComfyUI.
 
-Check the environment of the **actual process that launches ComfyUI**. Setting a variable in one terminal does not automatically inject it into an already-running ComfyUI process or a service launched by another account.
+### Redirect rejected
 
-Restart ComfyUI after changing persistent environment/service settings.
+The configured provider URL returned HTTP 3xx. Set `base_url` to the provider's canonical final API URL. Redirect following is intentionally disabled for credential safety.
 
-### Works in terminal but not when ComfyUI starts as a service
+### LAN HTTP profile is rejected
 
-The interactive shell and the service likely have different environments. Configure the key in the service/container/runtime secret mechanism rather than relying on your login shell.
+Plain HTTP is loopback-only by default. Prefer HTTPS. If an administrator intentionally uses an unauthenticated trusted-LAN endpoint, set `allow_insecure_http: true` in that server-side profile.
 
 ### Model rejected
 
-Check the profile's exact `allowed_models` list. Model IDs are provider-specific and must match exactly.
+The exact `model_name` is absent from `allowed_models`. Model IDs are provider-specific.
 
-### Token request rejected
+### Input rejected
 
-The requested `max_tokens` is greater than the profile's server-side `max_tokens_limit`.
+The combined system/user prompt exceeds `max_input_chars`.
 
-### Key changed but requests still use the old credential
+### Output limit rejected
 
-Restart or reload the ComfyUI process. Environment variables are normally inherited when the process starts.
+The workflow's `max_tokens` exceeds `max_tokens_limit`.
+
+### Timeout rejected
+
+The workflow's `timeout_seconds` exceeds `max_timeout_seconds`.
+
+### `extra_body_json` rejected
+
+Each top-level field must appear in `allowed_extra_body_fields`. The old `allow_extra_body` flag is deliberately rejected.
+
+### Works in a terminal but not as a service
+
+Your interactive shell and service likely have different environments. Configure secrets in the service/container/runtime environment rather than relying on the login shell.
 
 ---
 
@@ -744,20 +568,22 @@ Restart or reload the ComfyUI process. Environment variables are normally inheri
 
 Before exposing a ThinkingLLM API profile through ComfyUI:
 
-- [ ] The real provider key is not present anywhere in the Git working tree.
-- [ ] The real provider key has never been committed to Git history.
-- [ ] The real provider key is not present in workflow/API JSON.
-- [ ] The real provider key is not present in `thinkingllm_api_profiles.json`.
+- [ ] The real provider key is absent from the Git working tree and Git history.
+- [ ] The real provider key is absent from workflow/API JSON and profile JSON.
 - [ ] Production profile configuration is stored outside the repository where practical.
-- [ ] `THINKINGLLM_API_PROFILES_FILE` points to the intended server-side file.
+- [ ] The production profile file is writable only by trusted administrators/service accounts.
+- [ ] `THINKINGLLM_API_PROFILES_FILE` points to the intended trusted file.
 - [ ] `THINKINGLLM_DISABLE_BUILTIN_API_PROFILES=1` is enabled for public/multi-user deployments.
+- [ ] Every cloud profile uses HTTPS.
 - [ ] Every cloud profile has an exact `allowed_models` list.
 - [ ] Every cloud profile has a reasonable `max_tokens_limit`.
-- [ ] `allow_extra_body` is `false` unless explicitly required.
-- [ ] Authenticated remote profiles use HTTPS.
-- [ ] ComfyUI itself is protected by appropriate authentication/network controls.
+- [ ] Every cloud profile has a reasonable `max_input_chars`.
+- [ ] Every cloud profile has a reasonable `max_timeout_seconds`.
+- [ ] `allowed_extra_body_fields` is empty unless specific fields are needed.
+- [ ] Redirects are not required by the configured provider URL.
+- [ ] Terminal token streaming is disabled unless intentionally needed for debugging.
+- [ ] ComfyUI itself is protected by authentication/network controls and rate limits.
 - [ ] Provider-side spending limits/alerts are configured where available.
-- [ ] Secret files have restrictive filesystem permissions where applicable.
-- [ ] Key rotation can be performed by changing only the server secret and restarting/reloading ComfyUI.
+- [ ] Key rotation can be performed by changing only the host secret and restarting/reloading ComfyUI.
 
-Following this model keeps provider credentials local to the ComfyUI runtime and independent from ThinkingLLM source-code updates.
+Following this model keeps provider credentials local to the ComfyUI runtime, constrains what an API client can spend/change, and keeps secret ownership independent from ThinkingLLM source-code updates.
