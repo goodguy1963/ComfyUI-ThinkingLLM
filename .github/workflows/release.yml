@@ -9,8 +9,25 @@ permissions:
   contents: write
 
 jobs:
+  check:
+    name: Validate model catalogs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate API model catalogs before release
+        run: python tools/check_api_model_catalogs.py
+
   release:
     runs-on: ubuntu-latest
+    needs: check
     if: ${{ github.repository_owner == 'goodguy1963' }}
     steps:
       - name: Check out code

@@ -35,6 +35,11 @@ MAX_MODEL_NAME_CHARS = 512
 MAX_PROFILE_LABEL_CHARS = 128
 MAX_IMAGE_URL_CHARS = 8_192
 
+# Curated convenience model catalog for the node UI (see web/api_model_catalogs.json).
+# It is UX only: it never overrides a server-side profile's allowed_models allowlist.
+CATALOG_PATH = PACKAGE_DIR / "web" / "api_model_catalogs.json"
+_CATALOG_CACHE: dict | None = None
+
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _IMAGE_ERROR_RE = re.compile(
@@ -331,6 +336,43 @@ def _resolve_profile(profile_name: str) -> dict:
         print(f"[ThinkingLLM API] Unknown API profile {name!r}; profile file is {_profile_file_path()}.")
         raise ValueError("Unknown or unavailable server-side API profile.")
     return profile
+
+
+def _load_model_catalog() -> dict:
+    """Return the curated convenience model catalog (UX only, never an allowlist).
+
+    Read-only and failure-tolerant: a missing or broken catalog must never
+    block the node. The catalog only feeds the front-end dropdown; request
+    security is enforced by the profile's allowed_models, not by this file.
+    """
+    global _CATALOG_CACHE
+    if _CATALOG_CACHE is not None:
+        return _CATALOG_CACHE
+    try:
+        with CATALOG_PATH.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"[ThinkingLLM API] Failed to load model catalog from {CATALOG_PATH}: {exc}")
+        _CATALOG_CACHE = {}
+        return _CATALOG_CACHE
+    profiles = payload.get("profiles") if isinstance(payload, dict) else None
+    _CATALOG_CACHE = profiles if isinstance(profiles, dict) else {}
+    return _CATALOG_CACHE
+
+
+def _catalog_models_for_profile(profile_name: str) -> list[str]:
+    """Convenience model IDs for a profile name, used by the node UI only."""
+    entry = _load_model_catalog().get(str(profile_name or ""))
+    if not isinstance(entry, dict):
+        return []
+    models = entry.get("models")
+    if not isinstance(models, list):
+        return []
+    ids: list[str] = []
+    for item in models:
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            ids.append(item["id"])
+    return ids
 
 
 def _credential_value(profile: dict) -> str:

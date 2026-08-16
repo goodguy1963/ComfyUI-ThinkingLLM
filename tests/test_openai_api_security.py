@@ -314,5 +314,29 @@ class SecurityTests(unittest.TestCase):
             self.assertTrue(profiles['Production']['allow_images'])
             self.assertNotIn('api_key', profiles['Production'])
 
+    def test_catalog_is_ux_only_and_never_becomes_an_allowlist(self):
+        # The curated catalog must not be interpreted as a security boundary.
+        catalog = api_node._load_model_catalog()
+        self.assertIsInstance(catalog, dict)
+        self.assertIn('OrcaRouter', catalog)
+        orca = catalog['OrcaRouter']
+        self.assertIsInstance(orca.get('models'), list)
+        self.assertIn('qwen/qwen3.8-27b-free', api_node._catalog_models_for_profile('OrcaRouter'))
+
+    def test_catalog_missing_or_broken_is_failure_tolerant(self):
+        with mock.patch.object(api_node, 'CATALOG_PATH', Path('does/not/exist.json')):
+            api_node._CATALOG_CACHE = None
+            self.assertEqual(api_node._load_model_catalog(), {})
+            self.assertEqual(api_node._catalog_models_for_profile('OrcaRouter'), [])
+        api_node._CATALOG_CACHE = None
+
+    def test_catalog_does_not_replace_allowed_models(self):
+        # Even if a profile has no allowlist, a request for a non-listed model must
+        # be passed through unchanged — the catalog is UI only.
+        p = self.profile()
+        self.assertIsNone(p['allowed_models'])
+        self.assertEqual(api_node._validate_model(p, 'qwen/qwen3.8-27b-free'), 'qwen/qwen3.8-27b-free')
+        self.assertEqual(api_node._validate_model(p, 'anything/else'), 'anything/else')
+
 if __name__ == '__main__':
     unittest.main()

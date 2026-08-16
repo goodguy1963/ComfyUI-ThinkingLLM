@@ -6,6 +6,7 @@ const COLOR_THEMES = {
     QwenVLGGUF: { nodeColor: "#474539", nodeBgColor: "#2c4045", width: 340 },
     Tools: { nodeColor: "#28403f", nodeBgColor: "#233238", width: 300 },
     Enhancer: { nodeColor: "#374445", nodeBgColor: "#474539", width: 340 },
+    Api: { nodeColor: "#3a2f4a", nodeBgColor: "#2b2740", width: 360 },
 };
 
 const NODE_COLORS = {
@@ -27,6 +28,7 @@ const NODE_COLORS = {
     "AILab_QwenVL_PromptLibrary": "Tools",
     "VRAMCleanup": "Tools",
     "StorySplitNode": "Tools",
+    "ThinkingLLM_OpenAICompatibleAPI": "Api",
 };
 
 const THINKINGLLM_NODE_NAMES = new Set([
@@ -82,6 +84,11 @@ const GGUF_ADVANCED_INTERNAL_WIDGETS = new Set([
 
 const RECOMMENDATIONS_URL = new URL("../model_recommendations.json", import.meta.url);
 const PRESET_TOOLTIPS_URL = new URL("../preset_tooltips.json", import.meta.url);
+const API_MODEL_CATALOGS_URL = new URL("../api_model_catalogs.json", import.meta.url);
+const API_NODE_CLASS = "ThinkingLLM_OpenAICompatibleAPI";
+const API_PROFILE_WIDGET = "api_profile";
+const API_MODEL_WIDGET = "model_name";
+const API_CUSTOM_MODEL = "Custom…";
 const RECOMMENDATION_WIDGET_NAME = "recommended_settings";
 const RECOMMENDATION_PLACEHOLDER = "Select a model to see provider/community recommended settings. This note never changes your saved widget values.";
 const DEFAULT_DURATION_SECONDS = 5.0;
@@ -91,6 +98,7 @@ const PRESET_WIDGET_NAMES = ["preset_prompt", "enhancement_style", "preset_syste
 
 let recommendationsPromise = null;
 let presetTooltipsPromise = null;
+let apiModelCatalogsPromise = null;
 
 function loadRecommendations() {
     if (!recommendationsPromise) {
@@ -108,6 +116,24 @@ function loadRecommendations() {
             });
     }
     return recommendationsPromise;
+}
+
+function loadApiModelCatalogs() {
+    if (!apiModelCatalogsPromise) {
+        apiModelCatalogsPromise = fetch(API_MODEL_CATALOGS_URL, { cache: "no-store" })
+            .then((response) => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                return response.json();
+            })
+            .then((payload) => (payload?.profiles && typeof payload.profiles === "object" ? payload.profiles : {}))
+            .catch((error) => {
+                console.warn("[ThinkingLLM] Failed to load API model catalogs", error);
+                return {};
+            });
+    }
+    return apiModelCatalogsPromise;
 }
 
 function loadPresetTooltips() {
@@ -538,6 +564,100 @@ function queueRecommendationRefresh(node) {
     });
 }
 
+function catalogModelsForProfile(catalogs, profileName) {
+    const entry = catalogs?.[profileName];
+    const models = Array.isArray(entry?.models) ? entry.models : [];
+    return models
+        .map((model) => (model && typeof model.id === "string" ? model.id : ""))
+        .filter(Boolean);
+}
+
+function isApiNode(node) {
+    return node?.comfyClass === API_NODE_CLASS;
+}
+
+function applyApiModelCombo(node, catalogs) {
+    if (!isApiNode(node)) {
+        return;
+    }
+    const profileWidget = findWidget(node, API_PROFILE_WIDGET);
+    const modelWidget = findWidget(node, API_MODEL_WIDGET);
+    if (!profileWidget || !modelWidget) {
+        return;
+    }
+    const profileName = readComboValue(profileWidget);
+    const models = catalogModelsForProfile(catalogs, profileName);
+    const previousValue = readComboValue(modelWidget);
+    const options = models.length ? [...models, API_CUSTOM_MODEL] : null;
+
+    if (options) {
+        // Restore combo mode when a curated list exists for this profile.
+        if (modelWidget.type !== "combo") {
+            modelWidget.type = "combo";
+        }
+        if (Array.isArray(modelWidget.options?.values)) {
+            const equal = options.length === modelWidget.options.values.length
+                && options.every((option, index) => option === modelWidget.options.values[index]);
+            if (!equal) {
+                modelWidget.options.values = options;
+            }
+        }
+        const isCustomSelected = previousValue === API_CUSTOM_MODEL;
+        if (isCustomSelected) {
+            // User explicitly picked "Custom…": switch to free text, preserving typed value.
+            modelWidget.type = "text";
+            return;
+        }
+        const normalized = options.includes(previousValue) ? previousValue : options[0];
+        if (modelWidget.value !== normalized && !options.includes(previousValue)) {
+            modelWidget.value = normalized;
+        }
+    } else {
+        // No curated models for this profile: keep it a free-text field.
+        if (modelWidget.type !== "text") {
+            modelWidget.type = "text";
+        }
+    }
+    resizeNode(node);
+}
+
+function hookApiModelDropdown(node) {
+    if (!isApiNode(node) || node._thinkingllmApiModelHooked) {
+        return;
+    }
+    node._thinkingllmApiModelHooked = true;
+
+    const profileWidget = findWidget(node, API_PROFILE_WIDGET);
+    const modelWidget = findWidget(node, API_MODEL_WIDGET);
+
+    loadApiModelCatalogs().then((catalogs) => {
+        const refresh = () => applyApiModelCombo(node, catalogs);
+        if (profileWidget) {
+            const originalCallback = profileWidget.callback;
+            profileWidget.callback = function (...args) {
+                const result = originalCallback?.apply(this, args);
+                refresh();
+                return result;
+            };
+        }
+        if (modelWidget) {
+            const originalModelCallback = modelWidget.callback;
+            modelWidget.callback = function (...args) {
+                const result = originalModelCallback?.apply(this, args);
+                refresh();
+                return result;
+            };
+        }
+        const originalConfigure = node.onConfigure;
+        node.onConfigure = function (...args) {
+            const result = originalConfigure?.apply(this, args);
+            refresh();
+            return result;
+        };
+        refresh();
+    });
+}
+
 function summarizePresetTooltip(prompt) {
     const text = String(prompt || "").trim();
     if (!text) {
@@ -643,6 +763,7 @@ const ext = {
         hookRecommendationUpdates(node);
         hookPresetTooltipPreviews(node);
         clearHfTokenAfterExecution(node);
+        hookApiModelDropdown(node);
     }
 };
 
