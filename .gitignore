@@ -33,7 +33,8 @@ ENV/
 .env
 .env.*
 !.env.example
-thinkingllm_api_profiles.json
+thinkingllm_api_profiles*.json
+!thinkingllm_api_profiles.example.json
 
 # IDE
 .vscode/
