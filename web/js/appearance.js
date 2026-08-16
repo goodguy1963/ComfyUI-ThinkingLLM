@@ -88,6 +88,7 @@ const API_MODEL_CATALOGS_URL = new URL("../api_model_catalogs.json", import.meta
 const API_NODE_CLASS = "ThinkingLLM_OpenAICompatibleAPI";
 const API_PROFILE_WIDGET = "api_profile";
 const API_MODEL_WIDGET = "model_name";
+const API_HELP_WIDGET_NAME = "setup_help";
 const RECOMMENDATION_WIDGET_NAME = "recommended_settings";
 const RECOMMENDATION_PLACEHOLDER = "Select a model to see provider/community recommended settings. This note never changes your saved widget values.";
 const DEFAULT_DURATION_SECONDS = 5.0;
@@ -634,6 +635,55 @@ function hookApiModelDropdown(node) {
     });
 }
 
+function buildApiHelpText() {
+    return [
+        "SETUP (einmalig):",
+        "",
+        "Windows - API-Key als User-Umgebungsvariable (PowerShell):",
+        '  [System.Environment]::SetEnvironmentVariable("OPENROUTER_API_KEY", "sk-...", "User")',
+        "  (Variablennamen je Provider: OPENROUTER_API_KEY, OPENAI_API_KEY,",
+        "   DASHSCOPE_API_KEY, GROQ_API_KEY, ORCAROUTER_API_KEY, ...)",
+        "",
+        "Linux/macOS - export im Terminal vor dem Start:",
+        '  export OPENROUTER_API_KEY="sk-..."',
+        "",
+        "Danach ComfyUI NEU starten. Der Key liegt nur auf dem Server/Rechner -",
+        "nie im Workflow, im Profil-JSON oder in Git.",
+        "",
+        "Doku: docs/OPENAI_COMPATIBLE_API.md",
+    ].join("\n");
+}
+
+function ensureApiHelpWidget(node) {
+    if (!isApiNode(node)) {
+        return null;
+    }
+    let widget = findWidget(node, API_HELP_WIDGET_NAME);
+    if (!widget) {
+        widget = ComfyWidgets.STRING(node, API_HELP_WIDGET_NAME, ["STRING", { multiline: true }], app).widget;
+    }
+    if (widget?.inputEl) {
+        widget.inputEl.readOnly = true;
+        widget.inputEl.style.opacity = 0.75;
+        widget.inputEl.style.fontSize = "12px";
+        widget.inputEl.style.lineHeight = "1.35";
+        widget.inputEl.rows = 12;
+    }
+    widget.options = { ...(widget.options || {}), serialize: false };
+    widget.serializeValue = async () => undefined;
+    widget.value = buildApiHelpText();
+    return widget;
+}
+
+function hookApiHelp(node) {
+    if (!isApiNode(node) || node._thinkingllmApiHelpHooked) {
+        return;
+    }
+    node._thinkingllmApiHelpHooked = true;
+    ensureApiHelpWidget(node);
+    resizeNode(node);
+}
+
 function summarizePresetTooltip(prompt) {
     const text = String(prompt || "").trim();
     if (!text) {
@@ -740,6 +790,7 @@ const ext = {
         hookPresetTooltipPreviews(node);
         clearHfTokenAfterExecution(node);
         hookApiModelDropdown(node);
+        hookApiHelp(node);
     }
 };
 
