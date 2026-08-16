@@ -65,6 +65,20 @@ class SecurityTests(unittest.TestCase):
         for forbidden in ('api_key', 'api_key_env', 'base_url', 'headers'):
             self.assertNotIn(forbidden, names)
 
+    def test_model_name_is_a_curated_combo_with_custom(self):
+        inputs = api_node.ThinkingLLMOpenAICompatibleAPI.INPUT_TYPES()
+        model_def = inputs['required']['model_name']
+        options = model_def[0]
+        self.assertIsInstance(options, list)
+        self.assertIn(api_node.API_CUSTOM_MODEL, options)
+        # Curated models for the default profile should be present.
+        self.assertIn('qwen/qwen3.8-27b-free', options)
+
+    def test_custom_sentinel_is_never_sent_as_a_model(self):
+        p = self.profile()
+        with self.assertRaisesRegex(ValueError, 'type a model ID'):
+            api_node._validate_model(p, api_node.API_CUSTOM_MODEL)
+
     def test_authenticated_profiles_require_https(self):
         with self.assertRaisesRegex(ValueError, 'must use HTTPS'):
             api_node._normalize_profile('Unsafe', {

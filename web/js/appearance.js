@@ -587,13 +587,18 @@ function applyApiModelCombo(node, catalogs) {
     }
     const profileName = readComboValue(profileWidget);
     const models = catalogModelsForProfile(catalogs, profileName);
-    const previousValue = readComboValue(modelWidget);
+    const currentValue = readComboValue(modelWidget);
     const options = models.length ? [...models, API_CUSTOM_MODEL] : null;
 
-    if (options) {
+    // The model widget was switched to free-text Custom mode.
+    const customTextMode = modelWidget.type === "text"
+        && modelWidget._thinkingllmApiCustom === true;
+
+    if (options && !customTextMode) {
         // Restore combo mode when a curated list exists for this profile.
         if (modelWidget.type !== "combo") {
             modelWidget.type = "combo";
+            modelWidget.serialize = true;
         }
         if (Array.isArray(modelWidget.options?.values)) {
             const equal = options.length === modelWidget.options.values.length
@@ -602,21 +607,18 @@ function applyApiModelCombo(node, catalogs) {
                 modelWidget.options.values = options;
             }
         }
-        const isCustomSelected = previousValue === API_CUSTOM_MODEL;
-        if (isCustomSelected) {
-            // User explicitly picked "Custom…": switch to free text, preserving typed value.
-            modelWidget.type = "text";
-            return;
+        const isCustomValue = currentValue === API_CUSTOM_MODEL
+            || (options.length && !options.includes(currentValue));
+        if (isCustomValue) {
+            modelWidget.value = API_CUSTOM_MODEL;
+            modelWidget.options.value = API_CUSTOM_MODEL;
+        } else if (!options.includes(modelWidget.value)) {
+            modelWidget.value = API_CUSTOM_MODEL;
         }
-        const normalized = options.includes(previousValue) ? previousValue : options[0];
-        if (modelWidget.value !== normalized && !options.includes(previousValue)) {
-            modelWidget.value = normalized;
-        }
-    } else {
+    } else if (!options) {
         // No curated models for this profile: keep it a free-text field.
-        if (modelWidget.type !== "text") {
-            modelWidget.type = "text";
-        }
+        modelWidget.type = "text";
+        modelWidget._thinkingllmApiCustom = true;
     }
     resizeNode(node);
 }
@@ -644,16 +646,19 @@ function hookApiModelDropdown(node) {
             const originalModelCallback = modelWidget.callback;
             modelWidget.callback = function (...args) {
                 const result = originalModelCallback?.apply(this, args);
-                refresh();
+                if (readComboValue(modelWidget) === API_CUSTOM_MODEL) {
+                    // Switch to free-text so the user can type any model ID.
+                    modelWidget._thinkingllmApiCustom = true;
+                    modelWidget.type = "text";
+                    modelWidget.value = "";
+                    modelWidget.callback = modelWidget.callback; // keep chaining
+                    resizeNode(node);
+                } else {
+                    modelWidget._thinkingllmApiCustom = false;
+                }
                 return result;
             };
         }
-        const originalConfigure = node.onConfigure;
-        node.onConfigure = function (...args) {
-            const result = originalConfigure?.apply(this, args);
-            refresh();
-            return result;
-        };
         refresh();
     });
 }
