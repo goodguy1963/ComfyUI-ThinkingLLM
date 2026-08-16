@@ -23,7 +23,7 @@ External client / application
      ComfyUI
         |
         | loads trusted server-side profile
-        | validates model, input size, output limit and timeout
+        | validates model, input size, output/thinking limits and timeout
         | reads provider credential from process environment
         v
 OpenRouter / OpenAI / QwenCloud / other provider
@@ -38,7 +38,7 @@ For a public or multi-user deployment, the recommended baseline is:
 3. Set `THINKINGLLM_API_PROFILES_FILE` to that external file.
 4. Set `THINKINGLLM_DISABLE_BUILTIN_API_PROFILES=1`.
 5. Configure exact `allowed_models` values.
-6. Configure `max_tokens_limit`, `max_input_chars`, and `max_timeout_seconds`.
+6. Configure `max_tokens_limit`, `max_input_chars`, and `max_timeout_seconds`; for Qwen thinking profiles also configure `max_thinking_budget`.
 7. Keep `allowed_extra_body_fields` empty unless specific provider options are required.
 8. Protect ComfyUI itself with authentication/network controls and rate/spending limits.
 
@@ -216,6 +216,7 @@ The string `OPENROUTER_PRODUCTION_API_KEY` is only the **name** of an environmen
 | `max_tokens_limit` | Maximum output-token request accepted from a workflow. |
 | `max_input_chars` | Maximum combined `system_prompt + prompt` character count. Default: 1,000,000. |
 | `max_timeout_seconds` | Maximum timeout a workflow may request. Default: 300. |
+| `max_thinking_budget` | Maximum Qwen `thinking_budget` accepted from a workflow. Default/max: 262,144; set lower for production. |
 | `allowed_extra_body_fields` | Exact top-level provider-specific request fields allowed from `extra_body_json`. Empty means disabled. |
 | `send_seed` | Whether to send the common `seed` parameter. Must be a JSON boolean. |
 | `thinking_mode` | Currently empty or `qwen`. |
@@ -223,6 +224,8 @@ The string `OPENROUTER_PRODUCTION_API_KEY` is only the **name** of an environmen
 | `allow_insecure_http` | Explicit opt-in for unauthenticated non-loopback HTTP. |
 
 Unknown profile fields are rejected instead of silently ignored. This is intentional: a typo such as `max_token_limit` must not quietly disable a security limit.
+
+A custom profile with the same name as a built-in is treated as an override. If that override is invalid, the built-in with that name is removed rather than silently used as a fallback. This is fail-closed behavior: a broken restrictive `OpenRouter` override must not accidentally reactivate the permissive convenience built-in.
 
 Literal secret/header fields such as `api_key`, `token`, `Authorization`, `headers`, or `secret` are rejected.
 
@@ -354,6 +357,16 @@ This limit is character based, not tokenizer based. It is a defensive bound agai
 
 A workflow may request a shorter timeout but cannot exceed the server-defined ceiling.
 
+### Qwen thinking-budget ceiling
+
+For profiles using `"thinking_mode": "qwen"`, also cap the maximum thinking budget that a workflow may request:
+
+```json
+"max_thinking_budget": 8192
+```
+
+`thinking_budget` controls the maximum token budget available to Qwen's thinking process. The node enforces the profile ceiling before sending the provider request. A production deployment should choose a value appropriate to its model/cost policy rather than leaving the broad default maximum.
+
 Also use provider-side budget caps/alerts and gateway/reverse-proxy rate limiting where available.
 
 ---
@@ -420,7 +433,16 @@ Profiles with:
 "thinking_mode": "qwen"
 ```
 
-send `enable_thinking` and, when greater than zero, `thinking_budget`.
+send `enable_thinking` and, when greater than zero, `thinking_budget`. `max_thinking_budget` is the server-side ceiling on the workflow-requested thinking budget.
+
+Example production policy:
+
+```json
+{
+  "thinking_mode": "qwen",
+  "max_thinking_budget": 8192
+}
+```
 
 For other providers, expose only the specific provider reasoning field you need via `allowed_extra_body_fields`.
 
@@ -524,7 +546,7 @@ Check:
 - if built-ins are disabled, the profile exists in the custom file;
 - no unknown/deprecated profile field caused the entry to be rejected.
 
-Invalid profiles are ignored and the reason is printed in the ComfyUI server terminal.
+Invalid profiles are ignored and the reason is printed in the ComfyUI server terminal. If a custom profile uses the same name as a built-in and the custom override is invalid, that built-in name is removed rather than used as a fallback.
 
 ### `API credential is not configured for the selected server-side profile`
 
@@ -549,6 +571,10 @@ The combined system/user prompt exceeds `max_input_chars`.
 ### Output limit rejected
 
 The workflow's `max_tokens` exceeds `max_tokens_limit`.
+
+### Thinking budget rejected
+
+For a Qwen thinking profile, the workflow's `thinking_budget` exceeds `max_thinking_budget`.
 
 ### Timeout rejected
 
@@ -579,6 +605,7 @@ Before exposing a ThinkingLLM API profile through ComfyUI:
 - [ ] Every cloud profile has a reasonable `max_tokens_limit`.
 - [ ] Every cloud profile has a reasonable `max_input_chars`.
 - [ ] Every cloud profile has a reasonable `max_timeout_seconds`.
+- [ ] Every Qwen thinking profile has a reasonable `max_thinking_budget`.
 - [ ] `allowed_extra_body_fields` is empty unless specific fields are needed.
 - [ ] Redirects are not required by the configured provider URL.
 - [ ] Terminal token streaming is disabled unless intentionally needed for debugging.
