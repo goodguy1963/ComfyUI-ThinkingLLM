@@ -10,20 +10,33 @@ permissions:
 
 jobs:
   check:
-    name: Validate model catalogs
+    name: Refresh and validate model catalogs
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Validate API model catalogs before release
+      - name: Refresh API model catalogs from providers
+        run: python tools/update_api_model_catalogs.py
+
+      - name: Validate API model catalogs
         run: python tools/check_api_model_catalogs.py
+
+      - name: Commit refreshed catalogs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/api_model_catalogs.json
+          git diff --cached --quiet || git commit -m "chore: refresh API model catalogs for ${GITHUB_REF_NAME}"
+          git push
 
   release:
     runs-on: ubuntu-latest

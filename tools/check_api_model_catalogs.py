@@ -38,7 +38,8 @@ REQUIRED_PROFILE_KEYS = {
 }
 
 # Reasonable bound to catch accidental mass-paste or generated blobs.
-MAX_MODELS_PER_PROFILE = 200
+# Public providers ship full lists (OpenRouter 413, Featherless up to 500).
+MAX_MODELS_PER_PROFILE = 600
 MAX_MODEL_ID_CHARS = 512
 MAX_MODEL_LABEL_CHARS = 128
 MAX_NOTE_CHARS = 512

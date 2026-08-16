@@ -65,19 +65,23 @@ class SecurityTests(unittest.TestCase):
         for forbidden in ('api_key', 'api_key_env', 'base_url', 'headers'):
             self.assertNotIn(forbidden, names)
 
-    def test_model_name_is_a_curated_combo_with_custom(self):
+    def test_model_name_is_a_curated_combo(self):
         inputs = api_node.ThinkingLLMOpenAICompatibleAPI.INPUT_TYPES()
         model_def = inputs['required']['model_name']
         options = model_def[0]
         self.assertIsInstance(options, list)
-        self.assertIn(api_node.API_CUSTOM_MODEL, options)
-        # Curated models for the default profile should be present.
-        self.assertIn('qwen/qwen3.8-27b-free', options)
+        self.assertGreaterEqual(len(options), 1)
+        # The dropdown should carry real curated models, not a placeholder.
+        self.assertNotIn('provider/model-id', options)
+        # OrcaRouter's catalog includes the free Qwen model.
+        self.assertIn('qwen/qwen3.8-27b-free', api_node._catalog_models_for_profile('OrcaRouter'))
 
-    def test_custom_sentinel_is_never_sent_as_a_model(self):
+    def test_custom_model_field_overrides_dropdown(self):
+        inputs = api_node.ThinkingLLMOpenAICompatibleAPI.INPUT_TYPES()
+        self.assertIn('custom_model_name', inputs.get('optional', {}))
         p = self.profile()
-        with self.assertRaisesRegex(ValueError, 'type a model ID'):
-            api_node._validate_model(p, api_node.API_CUSTOM_MODEL)
+        self.assertEqual(api_node._validate_model(p, 'qwen/qwen3.8-27b-free'), 'qwen/qwen3.8-27b-free')
+        self.assertEqual(api_node._validate_model(p, 'any/custom-id'), 'any/custom-id')
 
     def test_authenticated_profiles_require_https(self):
         with self.assertRaisesRegex(ValueError, 'must use HTTPS'):

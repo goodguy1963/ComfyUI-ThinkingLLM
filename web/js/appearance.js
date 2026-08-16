@@ -88,7 +88,7 @@ const API_MODEL_CATALOGS_URL = new URL("../api_model_catalogs.json", import.meta
 const API_NODE_CLASS = "ThinkingLLM_OpenAICompatibleAPI";
 const API_PROFILE_WIDGET = "api_profile";
 const API_MODEL_WIDGET = "model_name";
-const API_CUSTOM_MODEL = "Custom…";
+const API_HELP_WIDGET_NAME = "setup_help";
 const RECOMMENDATION_WIDGET_NAME = "recommended_settings";
 const RECOMMENDATION_PLACEHOLDER = "Select a model to see provider/community recommended settings. This note never changes your saved widget values.";
 const DEFAULT_DURATION_SECONDS = 5.0;
@@ -587,15 +587,10 @@ function applyApiModelCombo(node, catalogs) {
     }
     const profileName = readComboValue(profileWidget);
     const models = catalogModelsForProfile(catalogs, profileName);
-    const currentValue = readComboValue(modelWidget);
-    const options = models.length ? [...models, API_CUSTOM_MODEL] : null;
+    const options = models.length ? [...new Set(models)] : null;
 
-    // The model widget was switched to free-text Custom mode.
-    const customTextMode = modelWidget.type === "text"
-        && modelWidget._thinkingllmApiCustom === true;
-
-    if (options && !customTextMode) {
-        // Restore combo mode when a curated list exists for this profile.
+    if (options) {
+        // Always keep a native combo when a curated list exists for this profile.
         if (modelWidget.type !== "combo") {
             modelWidget.type = "combo";
             modelWidget.serialize = true;
@@ -607,18 +602,12 @@ function applyApiModelCombo(node, catalogs) {
                 modelWidget.options.values = options;
             }
         }
-        const isCustomValue = currentValue === API_CUSTOM_MODEL
-            || (options.length && !options.includes(currentValue));
-        if (isCustomValue) {
-            modelWidget.value = API_CUSTOM_MODEL;
-            modelWidget.options.value = API_CUSTOM_MODEL;
-        } else if (!options.includes(modelWidget.value)) {
-            modelWidget.value = API_CUSTOM_MODEL;
+        // Keep the current value if it is still a valid option; otherwise fall back to the first.
+        const currentValue = readComboValue(modelWidget);
+        if (!options.includes(currentValue)) {
+            modelWidget.value = options[0];
+            modelWidget.options.value = options[0];
         }
-    } else if (!options) {
-        // No curated models for this profile: keep it a free-text field.
-        modelWidget.type = "text";
-        modelWidget._thinkingllmApiCustom = true;
     }
     resizeNode(node);
 }
@@ -642,25 +631,57 @@ function hookApiModelDropdown(node) {
                 return result;
             };
         }
-        if (modelWidget) {
-            const originalModelCallback = modelWidget.callback;
-            modelWidget.callback = function (...args) {
-                const result = originalModelCallback?.apply(this, args);
-                if (readComboValue(modelWidget) === API_CUSTOM_MODEL) {
-                    // Switch to free-text so the user can type any model ID.
-                    modelWidget._thinkingllmApiCustom = true;
-                    modelWidget.type = "text";
-                    modelWidget.value = "";
-                    modelWidget.callback = modelWidget.callback; // keep chaining
-                    resizeNode(node);
-                } else {
-                    modelWidget._thinkingllmApiCustom = false;
-                }
-                return result;
-            };
-        }
         refresh();
     });
+}
+
+function buildApiHelpText() {
+    return [
+        "SETUP (einmalig):",
+        "",
+        "Windows - API-Key als User-Umgebungsvariable (PowerShell):",
+        '  [System.Environment]::SetEnvironmentVariable("OPENROUTER_API_KEY", "sk-...", "User")',
+        "  (Variablennamen je Provider: OPENROUTER_API_KEY, OPENAI_API_KEY,",
+        "   DASHSCOPE_API_KEY, GROQ_API_KEY, ORCAROUTER_API_KEY, ...)",
+        "",
+        "Linux/macOS - export im Terminal vor dem Start:",
+        '  export OPENROUTER_API_KEY="sk-..."',
+        "",
+        "Danach ComfyUI NEU starten. Der Key liegt nur auf dem Server/Rechner -",
+        "nie im Workflow, im Profil-JSON oder in Git.",
+        "",
+        "Doku: docs/OPENAI_COMPATIBLE_API.md",
+    ].join("\n");
+}
+
+function ensureApiHelpWidget(node) {
+    if (!isApiNode(node)) {
+        return null;
+    }
+    let widget = findWidget(node, API_HELP_WIDGET_NAME);
+    if (!widget) {
+        widget = ComfyWidgets.STRING(node, API_HELP_WIDGET_NAME, ["STRING", { multiline: true }], app).widget;
+    }
+    if (widget?.inputEl) {
+        widget.inputEl.readOnly = true;
+        widget.inputEl.style.opacity = 0.75;
+        widget.inputEl.style.fontSize = "12px";
+        widget.inputEl.style.lineHeight = "1.35";
+        widget.inputEl.rows = 12;
+    }
+    widget.options = { ...(widget.options || {}), serialize: false };
+    widget.serializeValue = async () => undefined;
+    widget.value = buildApiHelpText();
+    return widget;
+}
+
+function hookApiHelp(node) {
+    if (!isApiNode(node) || node._thinkingllmApiHelpHooked) {
+        return;
+    }
+    node._thinkingllmApiHelpHooked = true;
+    ensureApiHelpWidget(node);
+    resizeNode(node);
 }
 
 function summarizePresetTooltip(prompt) {
@@ -769,6 +790,7 @@ const ext = {
         hookPresetTooltipPreviews(node);
         clearHfTokenAfterExecution(node);
         hookApiModelDropdown(node);
+        hookApiHelp(node);
     }
 };
 
