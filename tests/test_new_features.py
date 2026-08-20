@@ -1345,6 +1345,34 @@ class TestModelRecommendations(unittest.TestCase):
         cleaned = clean_model_output(raw, OutputCleanConfig(mode="prompt"))
         self.assertEqual(cleaned, "A cinematic close-up of a dancer in rain.")
 
+    def test_output_cleaner_returns_only_final_channel_content(self):
+        from AILab_OutputCleaner import OutputCleanConfig, clean_model_output
+
+        raw = (
+            "<|start|>assistant<|channel|>analysis<|message|>I should inspect the image first."
+            "<|end|><|start|>assistant<|channel|>final<|message|>The image shows a red fox."
+            "<|end|>"
+        )
+        cleaned = clean_model_output(raw, OutputCleanConfig(mode="text"))
+
+        self.assertEqual(cleaned, "The image shows a red fox.")
+
+    def test_output_cleaner_removes_mirrored_channel_thinking_block(self):
+        from AILab_OutputCleaner import OutputCleanConfig, clean_model_output
+
+        raw = "<|channel>I should inspect the image first.<channel|>The image shows a red fox."
+        cleaned = clean_model_output(raw, OutputCleanConfig(mode="text"))
+
+        self.assertEqual(cleaned, "The image shows a red fox.")
+
+    def test_output_cleaner_drops_channel_reasoning_without_final(self):
+        from AILab_OutputCleaner import OutputCleanConfig, clean_model_output
+
+        raw = "<|start|>assistant<|channel|>analysis<|message|>I should inspect the image first.<|end|>"
+        cleaned = clean_model_output(raw, OutputCleanConfig(mode="text"))
+
+        self.assertEqual(cleaned, "")
+
     def test_llm_input_logging_is_complete_and_shared(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             module = load_module_from_file("AILab_QwenVL.py", "thinkingllm_input_logging_test")

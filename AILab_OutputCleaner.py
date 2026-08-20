@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 
-OUTPUT_CLEANER_VERSION = 4
+OUTPUT_CLEANER_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,23 @@ _CODE_FENCE_RE = re.compile(r"^\s*```[\w-]*\s*$", re.IGNORECASE)
 _THINK_BLOCK_RE = re.compile(r"<think[^>]*>.*?</think>", flags=re.IGNORECASE | re.DOTALL)
 _THINK_OPEN_RE = re.compile(r"<think[^>]*>", flags=re.IGNORECASE)
 _THINK_CLOSE_RE = re.compile(r"</think\s*>", flags=re.IGNORECASE)
+_CHANNEL_FINAL_RE = re.compile(
+    r"<\|channel\|?>\s*final\s*<\|message\|?>",
+    flags=re.IGNORECASE,
+)
+_CHANNEL_REASONING_OPEN_RE = re.compile(
+    r"(?:<\|start\|?>\s*assistant\s*)?"
+    r"<\|channel\|?>\s*(?:analysis|thinking|reasoning)\s*<\|message\|?>",
+    flags=re.IGNORECASE,
+)
+_CHANNEL_END_RE = re.compile(r"<\|end\|?>", flags=re.IGNORECASE)
+_MIRRORED_CHANNEL_BLOCK_RE = re.compile(
+    r"<\|channel>.*?<channel\|>",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_CHANNEL_CONTROL_RE = re.compile(
+    r"(?i)<\|?(?:start|end|message|channel)\|?>|<(?:start|end|message|channel)\|>",
+)
 _MARKER_RE = re.compile(
     r"(?im)^\s*(final|final answer|answer|output|result|prompt)\s*[:\-]\s*",
 )
@@ -55,6 +72,7 @@ def clean_model_output(text: str, config: OutputCleanConfig | None = None) -> st
     cleaned = _IM_TOKEN_RE.sub("", cleaned).strip()
 
     if cfg.strip_think:
+        cleaned = _strip_channel_reasoning(cleaned)
         cleaned = _THINK_BLOCK_RE.sub("", cleaned)
         cleaned = _THINK_CLOSE_RE.sub("", cleaned)
         unclosed_think = _THINK_OPEN_RE.search(cleaned)
@@ -97,6 +115,22 @@ def clean_model_output(text: str, config: OutputCleanConfig | None = None) -> st
         cleaned = parts[0].strip()
 
     return cleaned
+
+
+def _strip_channel_reasoning(text: str) -> str:
+    final_channels = list(_CHANNEL_FINAL_RE.finditer(text))
+    if final_channels:
+        text = text[final_channels[-1].end():]
+    else:
+        while reasoning_open := _CHANNEL_REASONING_OPEN_RE.search(text):
+            reasoning_end = _CHANNEL_END_RE.search(text, reasoning_open.end())
+            if reasoning_end is None:
+                text = text[:reasoning_open.start()]
+                break
+            text = text[:reasoning_open.start()] + text[reasoning_end.end():]
+
+    text = _MIRRORED_CHANNEL_BLOCK_RE.sub("", text)
+    return _CHANNEL_CONTROL_RE.sub("", text).strip()
 
 
 def _extract_from_json(text: str, mode: str) -> str | None:
