@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Curated convenience model lists for the ThinkingLLM API node. These are suggestions only and never override a server-side profile allowed_models allowlist. Maintained by hand; validated by tools/check_api_model_catalogs.py on every PR, push, and release.",
-  "updated_at": "2026-08-16",
+  "updated_at": "2026-08-21",
   "profiles": {
     "OpenAI": {
       "provider": "OpenAI",
@@ -78,8 +78,18 @@
           "vision": false
         },
         {
+          "id": "deepseek/deepseek-v4-flash-0731",
+          "label": "deepseek/deepseek-v4-flash-0731",
+          "vision": false
+        },
+        {
           "id": "meta-llama/llama-4-scout",
           "label": "meta-llama/llama-4-scout",
+          "vision": false
+        },
+        {
+          "id": "~deepseek/deepseek-v4-flash-latest",
+          "label": "~deepseek/deepseek-v4-flash-latest",
           "vision": false
         },
         {
@@ -205,11 +215,6 @@
         {
           "id": "deepseek/deepseek-v4-flash",
           "label": "deepseek/deepseek-v4-flash",
-          "vision": false
-        },
-        {
-          "id": "deepseek/deepseek-v4-flash-0731",
-          "label": "deepseek/deepseek-v4-flash-0731",
           "vision": false
         },
         {
@@ -393,8 +398,18 @@
           "vision": false
         },
         {
+          "id": "stealth/ox-alpha",
+          "label": "stealth/ox-alpha",
+          "vision": false
+        },
+        {
           "id": "thinkingmachines/inkling",
           "label": "thinkingmachines/inkling",
+          "vision": false
+        },
+        {
+          "id": "thinkingmachines/inkling-small",
+          "label": "thinkingmachines/inkling-small",
           "vision": false
         },
         {
@@ -403,8 +418,8 @@
           "vision": false
         },
         {
-          "id": "~deepseek/deepseek-v4-flash-latest",
-          "label": "~deepseek/deepseek-v4-flash-latest",
+          "id": "z-ai/glm-5.3",
+          "label": "z-ai/glm-5.3",
           "vision": false
         },
         {
@@ -420,6 +435,16 @@
         {
           "id": "~moonshotai/kimi-latest",
           "label": "~moonshotai/kimi-latest",
+          "vision": false
+        },
+        {
+          "id": "~z-ai/glm-latest",
+          "label": "~z-ai/glm-latest",
+          "vision": false
+        },
+        {
+          "id": "z-ai/glm-5.2:batch",
+          "label": "z-ai/glm-5.2:batch",
           "vision": false
         },
         {
@@ -593,11 +618,6 @@
           "vision": false
         },
         {
-          "id": "nvidia/nemotron-3.5-lightning",
-          "label": "nvidia/nemotron-3.5-lightning",
-          "vision": false
-        },
-        {
           "id": "nvidia/nemotron-3.5-lightning:free",
           "label": "nvidia/nemotron-3.5-lightning:free",
           "vision": false
@@ -673,6 +693,11 @@
           "vision": false
         },
         {
+          "id": "qwen/qwen3.8-27b",
+          "label": "qwen/qwen3.8-27b",
+          "vision": false
+        },
+        {
           "id": "qwen/qwen3.8-max",
           "label": "qwen/qwen3.8-max",
           "vision": false
@@ -708,11 +733,6 @@
           "vision": false
         },
         {
-          "id": "thinkingmachines/inkling-small",
-          "label": "thinkingmachines/inkling-small",
-          "vision": false
-        },
-        {
           "id": "thinkingmachines/inkling:batch",
           "label": "thinkingmachines/inkling:batch",
           "vision": false
@@ -735,11 +755,6 @@
         {
           "id": "dots-studio/dots-3-note-preview:free",
           "label": "dots-studio/dots-3-note-preview:free",
-          "vision": false
-        },
-        {
-          "id": "z-ai/glm-5.2:batch",
-          "label": "z-ai/glm-5.2:batch",
           "vision": false
         },
         {
@@ -1078,6 +1093,11 @@
           "vision": false
         },
         {
+          "id": "nvidia/nemotron-3.5-lightning",
+          "label": "nvidia/nemotron-3.5-lightning",
+          "vision": false
+        },
+        {
           "id": "poolside/laguna-s-2.1:free",
           "label": "poolside/laguna-s-2.1:free",
           "vision": false
@@ -1203,11 +1223,6 @@
           "vision": false
         },
         {
-          "id": "qwen/qwen3.8-27b",
-          "label": "qwen/qwen3.8-27b",
-          "vision": false
-        },
-        {
           "id": "sakana/sakana-namazu",
           "label": "sakana/sakana-namazu",
           "vision": false
@@ -1230,11 +1245,6 @@
         {
           "id": "tencent/hy3-preview",
           "label": "tencent/hy3-preview",
-          "vision": false
-        },
-        {
-          "id": "ai21/jamba-large-1.7",
-          "label": "ai21/jamba-large-1.7",
           "vision": false
         },
         {
@@ -1290,6 +1300,11 @@
         {
           "id": "x-ai/grok-build-0.1",
           "label": "x-ai/grok-build-0.1",
+          "vision": false
+        },
+        {
+          "id": "z-ai/glm-5.2:free",
+          "label": "z-ai/glm-5.2:free",
           "vision": false
         },
         {
@@ -1788,8 +1803,8 @@
           "vision": false
         },
         {
-          "id": "liquid/lfm-2.5-2.6b:free",
-          "label": "liquid/lfm-2.5-2.6b:free",
+          "id": "mistralai/ministral-8b",
+          "label": "mistralai/ministral-8b",
           "vision": false
         },
         {
@@ -1948,6 +1963,11 @@
           "vision": false
         },
         {
+          "id": "liquid/lfm-2.5-2.6b:free",
+          "label": "liquid/lfm-2.5-2.6b:free",
+          "vision": false
+        },
+        {
           "id": "minimax/minimax-m2-her",
           "label": "minimax/minimax-m2-her",
           "vision": false
@@ -2090,6 +2110,16 @@
         {
           "id": "sao10k/l3-lunaris-8b",
           "label": "sao10k/l3-lunaris-8b",
+          "vision": false
+        },
+        {
+          "id": "tencent/hy-mt2-1.8b",
+          "label": "tencent/hy-mt2-1.8b",
+          "vision": false
+        },
+        {
+          "id": "tencent/hy-mt2-30b-a3b",
+          "label": "tencent/hy-mt2-30b-a3b",
           "vision": false
         },
         {
@@ -2793,11 +2823,6 @@
           "vision": false
         },
         {
-          "id": "Qwen/Qwen3-235B-A22B-Thinking-2507",
-          "label": "Qwen/Qwen3-235B-A22B-Thinking-2507",
-          "vision": false
-        },
-        {
           "id": "Qwen/Qwen3-30B-A3B",
           "label": "Qwen/Qwen3-30B-A3B",
           "vision": false
@@ -2915,6 +2940,11 @@
         {
           "id": "Qwen/Qwen3.8-2.4T-A95B",
           "label": "Qwen/Qwen3.8-2.4T-A95B",
+          "vision": false
+        },
+        {
+          "id": "Qwen/Qwen3.8-27B",
+          "label": "Qwen/Qwen3.8-27B",
           "vision": false
         },
         {
@@ -5973,6 +6003,21 @@
           "vision": false
         },
         {
+          "id": "obsidian/gemma-4-26B-A4B",
+          "label": "obsidian/gemma-4-26B-A4B",
+          "vision": false
+        },
+        {
+          "id": "obsidian/Qwen3.6-35B-A3B",
+          "label": "obsidian/Qwen3.6-35B-A3B",
+          "vision": false
+        },
+        {
+          "id": "obsidian/Qwen3.8-27B",
+          "label": "obsidian/Qwen3.8-27B",
+          "vision": false
+        },
+        {
           "id": "openai/gpt-3.5-turbo",
           "label": "openai/gpt-3.5-turbo",
           "vision": false
@@ -6508,6 +6553,11 @@
           "vision": false
         },
         {
+          "id": "tencent/hy3-free",
+          "label": "tencent/hy3-free",
+          "vision": false
+        },
+        {
           "id": "z-ai/glm-4.5",
           "label": "z-ai/glm-4.5",
           "vision": false
@@ -6540,6 +6590,11 @@
         {
           "id": "z-ai/glm-5.2",
           "label": "z-ai/glm-5.2",
+          "vision": false
+        },
+        {
+          "id": "z-ai/glm-5.3",
+          "label": "z-ai/glm-5.3",
           "vision": false
         },
         {
