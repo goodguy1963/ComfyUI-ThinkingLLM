@@ -689,21 +689,11 @@ def ensure_model(model_name, require_processor=False, node_id=None, progress_lab
     _download_model_snapshot(
         repo_id,
         target,
+        require_processor=require_processor,
         node_id=node_id,
         progress_label=progress_label or f"QwenVL HF Download: {model_name}",
         hf_token=hf_token,
     )
-
-    if not _model_snapshot_has_required_files(target, require_processor=require_processor):
-        print(f"[QwenVL] Refreshed snapshot is still incomplete, retrying clean download: {target}")
-        _download_model_snapshot(
-            repo_id,
-            target,
-            force_clean_target=True,
-            node_id=node_id,
-            progress_label=progress_label or f"QwenVL HF Download: {model_name}",
-            hf_token=hf_token,
-        )
 
     if not _model_snapshot_has_required_files(target, require_processor=require_processor):
         missing = []

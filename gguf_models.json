@@ -366,6 +366,46 @@
             "defaults": {
                 "context_length": 131072
             }
+        },
+        "Gemma-4-E4B-Uncensored-Aggressive-GGUF [Q2:4.4GB|Q3:4.7-4.9GB|Q4:5.1-5.4GB|Q5:5.8GB|Q6:6.3GB|Q8:8.1GB|VRAM:~7GB]": {
+            "author": "HauhauCS",
+            "repo_name": "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive",
+            "repo_id": "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
+            "model_files": [
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-IQ3_M.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q2_K_P.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q3_K_M.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q3_K_P.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q5_K_M.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q5_K_P.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q6_K_P.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf"
+            ],
+            "defaults": {
+                "context_length": 131072
+            }
+        },
+        "Gemma-4-E2B-Uncensored-Aggressive-GGUF [Q2:3GB|Q3:3.1GB|Q4:3.4GB|Q5:3.7GB|Q6:3.9GB|Q8:5GB|VRAM:~5GB]": {
+            "author": "HauhauCS",
+            "repo_name": "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
+            "repo_id": "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
+            "model_files": [
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-IQ3_M.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q2_K_P.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q3_K_P.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q5_K_P.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q6_K_P.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf"
+            ],
+            "defaults": {
+                "context_length": 131072
+            }
         }
     },
     "qwenVL_model": {
@@ -602,6 +642,58 @@
             "mmproj_local_filenames": {
                 "mmproj-google_gemma-4-E4B-it-f16.gguf": ["mmproj-F16.gguf", "mmproj-BF16.gguf"]
             },
+            "defaults": {
+                "context_length": 131072,
+                "image_max_tokens": 4096,
+                "n_batch": 512,
+                "gpu_layers": -1,
+                "top_k": 64,
+                "pool_size": 4194304
+            }
+        },
+        "Gemma-4-E4B-Uncensored-Aggressive-GGUF [Q2:4.4GB|Q3:4.7-4.9GB|Q4:5.1-5.4GB|Q5:5.8GB|Q6:6.3GB|Q8:8.1GB|VRAM:~7GB]": {
+            "author": "HauhauCS",
+            "repo_name": "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive",
+            "repo_id": "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
+            "mmproj_file": "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf",
+            "model_files": [
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-IQ3_M.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-IQ4_XS.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q2_K_P.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q3_K_M.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q3_K_P.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q5_K_M.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q5_K_P.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q6_K_P.gguf",
+                "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf"
+            ],
+            "defaults": {
+                "context_length": 131072,
+                "image_max_tokens": 4096,
+                "n_batch": 512,
+                "gpu_layers": -1,
+                "top_k": 64,
+                "pool_size": 4194304
+            }
+        },
+        "Gemma-4-E2B-Uncensored-Aggressive-GGUF [Q2:3GB|Q3:3.1GB|Q4:3.4GB|Q5:3.7GB|Q6:3.9GB|Q8:5GB|VRAM:~5GB]": {
+            "author": "HauhauCS",
+            "repo_name": "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
+            "repo_id": "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive",
+            "commercial_status": "unclear",
+            "mmproj_file": "mmproj-Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-f16.gguf",
+            "model_files": [
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-IQ3_M.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q2_K_P.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q3_K_P.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q5_K_P.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q6_K_P.gguf",
+                "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q8_K_P.gguf"
+            ],
             "defaults": {
                 "context_length": 131072,
                 "image_max_tokens": 4096,

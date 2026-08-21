@@ -3,13 +3,15 @@
 import inspect
 import os
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
 try:
-    from huggingface_hub import hf_hub_download, snapshot_download
+    from huggingface_hub import HfApi, hf_hub_download, snapshot_download
 except ImportError:
     from huggingface_hub import snapshot_download
+    HfApi = None
     hf_hub_download = None
 try:
     from tqdm.auto import tqdm
@@ -37,6 +39,12 @@ MODEL_STATUS_PRESENTATION = {
 }
 MODEL_INSTALLED_SUFFIX = " [installed]"
 MODEL_LOCAL_PREFIX = "[local] "
+_PROCESSOR_CONFIG_FILENAMES = (
+    "preprocessor_config.json",
+    "processor_config.json",
+    "image_processor_config.json",
+    "video_preprocessor_config.json",
+)
 
 
 def _format_download_size(num_bytes) -> str:
@@ -403,43 +411,73 @@ def _model_snapshot_has_required_files(target: Path, require_processor: bool = F
         return False
     if not (target / "config.json").exists():
         return False
-    if require_processor:
-        processor_files = (
-            "preprocessor_config.json",
-            "processor_config.json",
-            "image_processor_config.json",
-            "video_preprocessor_config.json",
-        )
-        if not any((target / name).exists() for name in processor_files):
-            return False
+    if require_processor and not any((target / name).exists() for name in _PROCESSOR_CONFIG_FILENAMES):
+        return False
     return True
 
 
-def _download_model_snapshot(repo_id: str, target: Path, *, force_clean_target: bool = False, node_id=None, progress_label: str | None = None, hf_token: str | None = None) -> None:
+def _validate_transformers_repo_files(repo_id: str, repo_files: list[str], *, require_processor: bool = False) -> None:
+    root_files = {Path(str(filename)).as_posix() for filename in repo_files if filename}
+    missing = []
+    if "config.json" not in root_files:
+        missing.append("config.json")
+    if not any("/" not in filename and filename.endswith((".safetensors", ".bin")) for filename in root_files):
+        missing.append("Transformers model weights")
+    if require_processor and not any(filename in root_files for filename in _PROCESSOR_CONFIG_FILENAMES):
+        missing.append("processor metadata")
+    if not missing:
+        return
+
+    gguf_hint = " The repository contains GGUF files; select it through a ThinkingLLM GGUF node instead." if any(
+        filename.lower().endswith(".gguf") for filename in root_files
+    ) else ""
+    raise ValueError(
+        f"[QwenVL] {repo_id} is not a compatible Transformers snapshot: missing {', '.join(missing)}.{gguf_hint}"
+    )
+
+
+def _download_model_snapshot(repo_id: str, target: Path, *, require_processor: bool = False, node_id=None, progress_label: str | None = None, hf_token: str | None = None) -> None:
     if COMMERCIAL_RELEASE:
         raise RuntimeError("[QwenVL] Commercial release mode only permits preinstalled, hash-locked models.")
     reporter = _DownloadProgressReporter(node_id=node_id, label=progress_label or "QwenVL HF Download", repo_id=repo_id)
     token_for_download = _clean_hf_token(hf_token)
     download_kwargs = {}
-    if force_clean_target and target.exists() and target.is_dir():
-        print(f"[QwenVL] Removing incomplete model snapshot before retry: {target}")
-        reporter.stage("Cleaning incomplete snapshot", detail=target.name)
-        shutil.rmtree(target, ignore_errors=False)
-    reporter.stage("Preparing download", detail=target.name)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    reporter.stage("Checking repository", detail=target.name)
     try:
-        download_kwargs = {
-            "repo_id": repo_id,
-            "local_dir": str(target),
-            "ignore_patterns": ["*.md", ".git*"],
-            "force_download": force_clean_target,
-        }
-        if token_for_download:
-            download_kwargs["token"] = token_for_download
-        tqdm_cls = reporter.make_tqdm_class()
-        if tqdm_cls is not None:
-            download_kwargs["tqdm_class"] = tqdm_cls
-        snapshot_download(**download_kwargs)
-        _cleanup_unneeded_snapshot_weights(target)
+        if HfApi is None:
+            raise RuntimeError("huggingface_hub.HfApi is unavailable; update huggingface-hub before downloading models")
+        api = HfApi(token=token_for_download) if token_for_download else HfApi()
+        repo_files = api.list_repo_files(repo_id=repo_id, repo_type="model")
+        _validate_transformers_repo_files(repo_id, repo_files, require_processor=require_processor)
+
+        with tempfile.TemporaryDirectory(prefix=f".{target.name}.download-", dir=target.parent) as temp_dir:
+            staging_target = Path(temp_dir) / "snapshot"
+            reporter.stage("Preparing download", detail=target.name)
+            download_kwargs = {
+                "repo_id": repo_id,
+                "local_dir": str(staging_target),
+                "ignore_patterns": ["*.md", ".git*"],
+            }
+            if token_for_download:
+                download_kwargs["token"] = token_for_download
+            tqdm_cls = reporter.make_tqdm_class()
+            if tqdm_cls is not None:
+                download_kwargs["tqdm_class"] = tqdm_cls
+            snapshot_download(**download_kwargs)
+            _cleanup_unneeded_snapshot_weights(staging_target)
+            if not _model_snapshot_has_required_files(staging_target, require_processor=require_processor):
+                raise FileNotFoundError(
+                    f"[QwenVL] Downloaded model snapshot is incomplete for {repo_id}; the existing target was preserved"
+                )
+
+            reporter.stage("Installing validated snapshot", detail=target.name)
+            if target.exists():
+                if not target.is_dir():
+                    raise FileExistsError(f"[QwenVL] Model target exists and is not a directory: {target}")
+                shutil.copytree(staging_target, target, dirs_exist_ok=True)
+            else:
+                shutil.move(str(staging_target), str(target))
     except Exception as exc:
         reporter.fail(_hf_download_error_message(exc, repo_id=repo_id, hf_token=token_for_download))
         raise RuntimeError(_hf_download_error_message(exc, repo_id=repo_id, hf_token=token_for_download)) from exc

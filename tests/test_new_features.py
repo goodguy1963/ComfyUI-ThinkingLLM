@@ -106,6 +106,18 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
         ),
         "huggingface_hub": build_stub_module(
             "huggingface_hub",
+            HfApi=type(
+                "HfApi",
+                (),
+                {
+                    "__init__": lambda self, *args, **kwargs: None,
+                    "list_repo_files": lambda self, *args, **kwargs: [
+                        "config.json",
+                        "model.safetensors",
+                        "processor_config.json",
+                    ],
+                },
+            ),
             hf_hub_download=lambda *args, **kwargs: "",
             snapshot_download=lambda *args, **kwargs: "",
         ),
@@ -759,7 +771,11 @@ class TestModelRecommendations(unittest.TestCase):
 
     def test_gemma4_e2b_text_catalog_uses_current_hugging_face_files(self):
         payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
-        entries = [entry for key, entry in (payload.get("Qwen_model") or {}).items() if "Gemma-4-E2B" in key]
+        entries = [
+            entry
+            for key, entry in (payload.get("Qwen_model") or {}).items()
+            if "Gemma-4-E2B" in key and "Aggressive" not in key
+        ]
 
         self.assertTrue(entries)
         for entry in entries:
@@ -769,6 +785,33 @@ class TestModelRecommendations(unittest.TestCase):
                 "google_gemma-4-E2B-it-Q8_0.gguf",
                 "google_gemma-4-E2B-it-bf16.gguf",
             ])
+
+    def test_hauhaucs_gemma4_gguf_only_models_are_not_in_transformers_catalogs(self):
+        hf_payload = json.loads((PKG / "hf_models.json").read_text(encoding="utf-8"))
+        gguf_payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
+        expected = {
+            "HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive": {
+                "model": "Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
+                "mmproj": "mmproj-Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-f16.gguf",
+            },
+            "HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive": {
+                "model": "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q4_K_P.gguf",
+                "mmproj": "mmproj-Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-f16.gguf",
+            },
+        }
+
+        for hf_section in ("hf_vl_models", "hf_text_models"):
+            repo_ids = {entry.get("repo_id") for entry in (hf_payload.get(hf_section) or {}).values()}
+            self.assertTrue(expected.keys().isdisjoint(repo_ids))
+
+        for repo_id, filenames in expected.items():
+            text_entries = [entry for entry in (gguf_payload.get("Qwen_model") or {}).values() if entry.get("repo_id") == repo_id]
+            vision_entries = [entry for entry in (gguf_payload.get("qwenVL_model") or {}).values() if entry.get("repo_id") == repo_id]
+            self.assertEqual(1, len(text_entries))
+            self.assertEqual(1, len(vision_entries))
+            self.assertIn(filenames["model"], text_entries[0]["model_files"])
+            self.assertIn(filenames["model"], vision_entries[0]["model_files"])
+            self.assertEqual(filenames["mmproj"], vision_entries[0]["mmproj_file"])
 
     def test_qwen3_asr_gguf_catalog_is_removed(self):
         gguf_payload = json.loads((PKG / "gguf_models.json").read_text(encoding="utf-8"))
@@ -2102,6 +2145,94 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
         self.assertNotIn("hf_env_secret", message)
         self.assertIn("<redacted HF token>", message)
         self.assertIn("access was rejected", message)
+
+    def test_hf_snapshot_rejects_gguf_only_repo_before_download_and_preserves_target(self):
+        module = self._load_qwenvl_with_stubs()
+        access_globals = module._download_model_snapshot.__globals__
+        snapshot_download_mock = mock.Mock(side_effect=AssertionError("GGUF-only repository must not be downloaded as Transformers"))
+
+        class FakeHfApi:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def list_repo_files(self, **kwargs):
+                return ["README.md", "model-Q4_K_M.gguf", "mmproj-f16.gguf"]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "existing-model"
+            target.mkdir()
+            sentinel = target / "user-file.gguf"
+            sentinel.write_bytes(b"preserve me")
+            with mock.patch.dict(access_globals, {"HfApi": FakeHfApi, "snapshot_download": snapshot_download_mock}):
+                with self.assertRaisesRegex(RuntimeError, "ThinkingLLM GGUF node"):
+                    module._download_model_snapshot("example/gguf-only", target)
+
+            self.assertEqual(b"preserve me", sentinel.read_bytes())
+            snapshot_download_mock.assert_not_called()
+
+    def test_hf_snapshot_stages_validation_and_preserves_existing_files(self):
+        module = self._load_qwenvl_with_stubs()
+        access_globals = module._download_model_snapshot.__globals__
+        download_targets = []
+
+        class FakeHfApi:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def list_repo_files(self, **kwargs):
+                return ["config.json", "model.safetensors", "processor_config.json"]
+
+        def fake_snapshot_download(**kwargs):
+            staging = Path(kwargs["local_dir"])
+            download_targets.append(staging)
+            staging.mkdir(parents=True)
+            (staging / "config.json").write_text("{}", encoding="utf-8")
+            (staging / "processor_config.json").write_text("{}", encoding="utf-8")
+            (staging / "model.safetensors").write_bytes(b"weights")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "existing-model"
+            target.mkdir()
+            sentinel = target / "user-note.txt"
+            sentinel.write_text("preserve me", encoding="utf-8")
+            with mock.patch.dict(access_globals, {"HfApi": FakeHfApi, "snapshot_download": mock.Mock(side_effect=fake_snapshot_download)}):
+                module._download_model_snapshot("example/transformers", target, require_processor=True)
+
+            self.assertEqual("preserve me", sentinel.read_text(encoding="utf-8"))
+            self.assertEqual(b"weights", (target / "model.safetensors").read_bytes())
+            self.assertEqual(1, len(download_targets))
+            self.assertNotEqual(target, download_targets[0])
+
+    def test_hf_snapshot_validation_failure_does_not_modify_existing_target(self):
+        module = self._load_qwenvl_with_stubs()
+        access_globals = module._download_model_snapshot.__globals__
+
+        class FakeHfApi:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def list_repo_files(self, **kwargs):
+                return ["config.json", "model.safetensors"]
+
+        def fake_incomplete_download(**kwargs):
+            staging = Path(kwargs["local_dir"])
+            staging.mkdir(parents=True)
+            (staging / "config.json").write_text("{}", encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "existing-model"
+            target.mkdir()
+            sentinel = target / "user-note.txt"
+            sentinel.write_text("preserve me", encoding="utf-8")
+            with mock.patch.dict(
+                access_globals,
+                {"HfApi": FakeHfApi, "snapshot_download": mock.Mock(side_effect=fake_incomplete_download)},
+            ):
+                with self.assertRaisesRegex(RuntimeError, "existing target was preserved"):
+                    module._download_model_snapshot("example/incomplete", target)
+
+            self.assertEqual([sentinel], list(target.iterdir()))
+            self.assertEqual("preserve me", sentinel.read_text(encoding="utf-8"))
 
     def test_hf_file_download_failure_raises_redacted_message(self):
         module = self._load_qwenvl_with_stubs()
