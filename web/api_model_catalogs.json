@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Curated convenience model lists for the ThinkingLLM API node. These are suggestions only and never override a server-side profile allowed_models allowlist. Maintained by hand; validated by tools/check_api_model_catalogs.py on every PR, push, and release.",
-  "updated_at": "2026-08-21",
+  "updated_at": "2026-08-22",
   "profiles": {
     "OpenAI": {
       "provider": "OpenAI",
@@ -218,6 +218,11 @@
           "vision": false
         },
         {
+          "id": "deepseek/deepseek-v4-flash-vision-exp",
+          "label": "deepseek/deepseek-v4-flash-vision-exp",
+          "vision": false
+        },
+        {
           "id": "deepseek/deepseek-v4-pro",
           "label": "deepseek/deepseek-v4-pro",
           "vision": false
@@ -375,6 +380,11 @@
         {
           "id": "meta/muse-spark-1.2",
           "label": "meta/muse-spark-1.2",
+          "vision": false
+        },
+        {
+          "id": "meta/muse-spark-1.2-contributor",
+          "label": "meta/muse-spark-1.2-contributor",
           "vision": false
         },
         {
@@ -1248,6 +1258,16 @@
           "vision": false
         },
         {
+          "id": "thinkingmachines/inkling-small:free",
+          "label": "thinkingmachines/inkling-small:free",
+          "vision": false
+        },
+        {
+          "id": "thinkingmachines/inkling:free",
+          "label": "thinkingmachines/inkling:free",
+          "vision": false
+        },
+        {
           "id": "cohere/command-a",
           "label": "cohere/command-a",
           "vision": false
@@ -1270,11 +1290,6 @@
         {
           "id": "mistralai/codestral-2508",
           "label": "mistralai/codestral-2508",
-          "vision": false
-        },
-        {
-          "id": "mistralai/mistral-small-3.2-24b-instruct",
-          "label": "mistralai/mistral-small-3.2-24b-instruct",
           "vision": false
         },
         {
@@ -1633,6 +1648,11 @@
           "vision": false
         },
         {
+          "id": "mistralai/mistral-small-3.2-24b-instruct",
+          "label": "mistralai/mistral-small-3.2-24b-instruct",
+          "vision": false
+        },
+        {
           "id": "moonshotai/kimi-k2",
           "label": "moonshotai/kimi-k2",
           "vision": false
@@ -1665,11 +1685,6 @@
         {
           "id": "openai/gpt-oss-20b",
           "label": "openai/gpt-oss-20b",
-          "vision": false
-        },
-        {
-          "id": "openai/gpt-oss-20b:free",
-          "label": "openai/gpt-oss-20b:free",
           "vision": false
         },
         {
@@ -1790,11 +1805,6 @@
         {
           "id": "cohere/command-r7b-12-2024",
           "label": "cohere/command-r7b-12-2024",
-          "vision": false
-        },
-        {
-          "id": "deepcogito/cogito-v2.1-671b",
-          "label": "deepcogito/cogito-v2.1-671b",
           "vision": false
         },
         {
@@ -5720,6 +5730,11 @@
         {
           "id": "deepseek/deepseek-v4-flash-free",
           "label": "deepseek/deepseek-v4-flash-free",
+          "vision": false
+        },
+        {
+          "id": "deepseek/deepseek-v4-flash-vision-exp",
+          "label": "deepseek/deepseek-v4-flash-vision-exp",
           "vision": false
         },
         {
