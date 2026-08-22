@@ -10,6 +10,13 @@ MASK_FOCUS_INSTRUCTION = (
     "surroundings only for spatial context and do not describe them."
 )
 
+MASK_RECONSTRUCTION_INSTRUCTION = (
+    "The selected area is deliberately concealed and contains no usable information about its former "
+    "contents. Never identify or describe anything that may have occupied it. Use only the visible "
+    "surroundings to infer the most natural scene continuation through that area, and describe the "
+    "completed scene without mentioning masks, removal, editing, or missing content."
+)
+
 
 def tensor_to_pil(tensor):
     """Convert tensor to PIL Image with memory optimization"""
@@ -58,8 +65,8 @@ def get_image_hash(image):
         return None
 
 
-def apply_mask_highlight(image, mask):
-    """Dim pixels outside the first ComfyUI mask while preserving image shape and alpha."""
+def apply_mask_highlight(image, mask, mode="focus"):
+    """Prepare a masked image for focus analysis or background reconstruction."""
     if mask is None:
         return image, None
     if image is None:
@@ -68,6 +75,8 @@ def apply_mask_highlight(image, mask):
         raise ValueError("[QwenVL] IMAGE must have shape [H,W,C] or [B,H,W,C].")
     if not torch.is_tensor(mask):
         raise ValueError("[QwenVL] MASK must be a tensor.")
+    if mode not in {"focus", "reconstruct"}:
+        raise ValueError("[QwenVL] mask mode must be 'focus' or 'reconstruct'.")
 
     if mask.ndim == 2:
         selected_mask = mask
@@ -89,11 +98,32 @@ def apply_mask_highlight(image, mask):
         mode="bilinear",
         align_corners=False,
     )[0, 0].to(device=frame.device, dtype=frame.dtype)
-    brightness = 0.2 + 0.8 * resized_mask
-
     highlighted_frame = frame.clone()
     color_channels = min(int(frame.shape[-1]), 3)
-    highlighted_frame[..., :color_channels] *= brightness.unsqueeze(-1)
+    if mode == "reconstruct":
+        # Fully hide the selected subject, including anti-aliased mask edges, so the
+        # vision model can reason from the surrounding scene instead of naming it.
+        binary_mask = (resized_mask > 0.01).to(dtype=frame.dtype)
+        expanded_mask = torch.nn.functional.max_pool2d(
+            binary_mask[None, None], kernel_size=9, stride=1, padding=4,
+        )[0, 0]
+        visible = 1.0 - expanded_mask
+        visible_weight = visible.sum()
+        if float(visible_weight.detach().cpu()) > 0:
+            fill = (
+                frame[..., :color_channels] * visible.unsqueeze(-1)
+            ).sum(dim=(0, 1)) / visible_weight
+        else:
+            fill = torch.full(
+                (color_channels,), 0.5, device=frame.device, dtype=frame.dtype,
+            )
+        highlighted_frame[..., :color_channels] = (
+            frame[..., :color_channels] * visible.unsqueeze(-1)
+            + fill.view(1, 1, -1) * expanded_mask.unsqueeze(-1)
+        )
+    else:
+        brightness = 0.2 + 0.8 * resized_mask
+        highlighted_frame[..., :color_channels] *= brightness.unsqueeze(-1)
     highlighted = image.clone()
     if image.ndim == 4:
         highlighted[0] = highlighted_frame
@@ -101,6 +131,7 @@ def apply_mask_highlight(image, mask):
         highlighted = highlighted_frame
 
     digest = hashlib.md5()
+    digest.update(mode.encode("ascii"))
     digest.update(str(tuple(mask.shape)).encode("ascii"))
     digest.update(mask.detach().contiguous().cpu().numpy().tobytes())
     return highlighted, digest.hexdigest()[:16]

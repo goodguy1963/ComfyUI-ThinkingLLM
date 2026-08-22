@@ -413,17 +413,42 @@ class TestMaskFocusedImageAnalysis(unittest.TestCase):
             self.apply_mask_highlight(None, torch.ones((1, 2, 2)))
         with self.assertRaisesRegex(ValueError, "MASK is empty"):
             self.apply_mask_highlight(torch.ones((1, 2, 2, 3)), torch.zeros((1, 2, 2)))
+        with self.assertRaisesRegex(ValueError, "mask mode"):
+            self.apply_mask_highlight(
+                torch.ones((1, 2, 2, 3)),
+                torch.ones((1, 2, 2)),
+                mode="unsupported",
+            )
+
+    def test_reconstruct_mode_conceals_selected_pixels_and_preserves_alpha(self):
+        image = torch.zeros((1, 16, 16, 4), dtype=torch.float32)
+        image[..., :3] = 0.25
+        image[:, 7:9, 7:9, :3] = 1.0
+        image[..., 3] = 0.75
+        mask = torch.zeros((1, 16, 16), dtype=torch.float32)
+        mask[:, 7:9, 7:9] = 1.0
+
+        concealed, reconstruct_hash = self.apply_mask_highlight(image, mask, mode="reconstruct")
+        _, focus_hash = self.apply_mask_highlight(image, mask, mode="focus")
+
+        torch.testing.assert_close(concealed[0, 8, 8, :3], torch.full((3,), 0.25))
+        torch.testing.assert_close(concealed[..., 3], image[..., 3])
+        self.assertNotEqual(reconstruct_hash, focus_hash)
 
     def test_both_backends_apply_the_shared_focus_instruction(self):
         hf_source = read_source("thinkingllm_core/hf_runtime.py")
         gguf_source = read_source("AILab_QwenVL_GGUF.py")
 
         self.assertIn("image, mask_hash = apply_mask_highlight(image, mask)", hf_source)
-        self.assertIn("image, mask_hash = apply_mask_highlight(image, mask)", gguf_source)
+        self.assertIn("image, mask_hash = apply_mask_highlight(image, mask, mode=mask_mode)", gguf_source)
         self.assertIn('image_hash = f"{image_hash}:{mask_hash}"', hf_source)
         self.assertIn('image_hash = f"{image_hash}:{mask_hash}"', gguf_source)
         self.assertIn('prompt = f"{prompt}\\n\\n{MASK_FOCUS_INSTRUCTION}".strip()', hf_source)
-        self.assertIn('prompt = f"{prompt}\\n\\n{MASK_FOCUS_INSTRUCTION}".strip()', gguf_source)
+        self.assertIn("MASK_RECONSTRUCTION_INSTRUCTION", gguf_source)
+        self.assertIn(
+            "mask_preview, _ = apply_mask_highlight(image, mask, mode=mask_mode)",
+            gguf_source,
+        )
 
 
 class TestTerminalDisplayHelper(unittest.TestCase):
@@ -2611,8 +2636,8 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
             "ThinkingLLM_QwenVL": {"image", "video", "mask", "duration_seconds"},
             "ThinkingLLM_QwenVL_Advanced": {"image", "video", "mask", "duration_seconds"},
             "ThinkingLLM_QwenVL_PromptEnhancer": {"duration_seconds"},
-            "ThinkingLLM_QwenVL_GGUF": {"image", "video", "mask", "audio", "audio_file_path", "duration_seconds"},
-            "ThinkingLLM_QwenVL_GGUF_Advanced": {"image", "video", "mask", "audio", "audio_file_path", "duration_seconds"},
+            "ThinkingLLM_QwenVL_GGUF": {"image", "video", "mask", "mask_mode", "audio", "audio_file_path", "duration_seconds"},
+            "ThinkingLLM_QwenVL_GGUF_Advanced": {"image", "video", "mask", "mask_mode", "audio", "audio_file_path", "duration_seconds"},
             "ThinkingLLM_Gemma4_Audio_GGUF": {"audio", "audio_file_path"},
             "ThinkingLLM_Whisper_ASR": {"audio", "audio_file_path"},
             "ThinkingLLM_QwenVL_GGUF_PromptEnhancer": {"duration_seconds"},
@@ -3643,7 +3668,7 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
 
         self.assertEqual(enter_events[0:3], [
             "enter",
-            ("chat", ["clip_model_path", "force_reasoning", "image_max_tokens", "verbose"]),
+            ("chat", ["clip_model_path", "force_reasoning", "image_max_tokens", "image_min_tokens", "verbose"]),
             "exit",
         ])
         self.assertEqual(enter_events[3], "enter")

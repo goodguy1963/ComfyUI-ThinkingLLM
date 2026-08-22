@@ -117,7 +117,7 @@ ThinkingLLM does not edit the image itself — it examines the masked area and s
 
 **Previewing the LLM mask view**
 
-`ThinkingLLM (Advanced)` and `ThinkingLLM (GGUF Advanced)` return a third output `MASK_PREVIEW` — connect it to a ComfyUI **Preview Image** node to inspect the exact highlighted image used for analysis (selected area at full brightness, surrounding scene dimmed to 20%; original image when no mask is connected).
+`ThinkingLLM (Advanced)` and `ThinkingLLM (GGUF Advanced)` return a third output `MASK_PREVIEW` — connect it to a ComfyUI **Preview Image** node to inspect the exact image used for analysis. The GGUF nodes also expose `mask_mode`: `focus` keeps the selected area at full brightness and dims the surroundings to 20%, while `reconstruct` conceals the selected area and asks the model to infer a natural continuation from the visible surroundings. With no mask connected, the preview remains the original image.
 
 Without a custom instruction, the preset infers the most natural background continuation — matching surfaces, perspective, materials, texture, color, lighting, shadows, reflections, and image style, while avoiding phrases such as "remove the object" or "erase this area."
 

@@ -53,6 +53,7 @@ sys.path.append(str(Path(__file__).parent))
 from thinkingllm_core.hf_models import ensure_cuda_vram_headroom
 from thinkingllm_core.media import (
     MASK_FOCUS_INSTRUCTION,
+    MASK_RECONSTRUCTION_INSTRUCTION,
     apply_mask_highlight,
     get_image_hash,
     get_video_hash,
@@ -1470,6 +1471,7 @@ class QwenVLGGUFBase:
 
             mmproj_kwargs = {
                 "clip_model_path": str(mmproj_path),
+                "image_min_tokens": 1024,
                 "image_max_tokens": img_max,
                 "force_reasoning": False,
                 "verbose": False,
@@ -1980,6 +1982,7 @@ class QwenVLGGUFBase:
         auto_finalization_retry=False,
         hf_token="",
         duration_seconds=5.0,
+        mask_mode="focus",
     ):
         model_name = resolve_model_catalog_name(GGUF_VL_CATALOG.get("models") or {}, model_name)
         validate_minimax_reference_request(preset_prompt, custom_prompt)
@@ -1991,7 +1994,7 @@ class QwenVLGGUFBase:
             "video_prompt_contract_version": resolved_duration.get("contract_version"),
         } if resolved_duration else {})
         print(f"[QwenVL GGUF DEBUG] Starting run with seed={seed}")
-        image, mask_hash = apply_mask_highlight(image, mask)
+        image, mask_hash = apply_mask_highlight(image, mask, mode=mask_mode)
         image_hash = get_image_hash(image)
         if mask_hash:
             image_hash = f"{image_hash}:{mask_hash}"
@@ -2022,6 +2025,7 @@ class QwenVLGGUFBase:
             ctx_checkpoints=ctx_checkpoints,
             enable_thinking=bool(enable_thinking),
             auto_finalization_retry=bool(auto_finalization_retry),
+            mask_mode=mask_mode,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -2076,7 +2080,12 @@ class QwenVLGGUFBase:
         else:
             prompt = prompt_template
         if mask_hash:
-            prompt = f"{prompt}\n\n{MASK_FOCUS_INSTRUCTION}".strip()
+            mask_instruction = (
+                MASK_RECONSTRUCTION_INSTRUCTION
+                if mask_mode == "reconstruct"
+                else MASK_FOCUS_INSTRUCTION
+            )
+            prompt = f"{prompt}\n\n{mask_instruction}".strip()
         prompt = apply_video_duration_context(prompt, preset_prompt, duration_seconds)
 
         print(f"[QwenVL GGUF DEBUG] Final prompt: {prompt[:100]}...")
@@ -2289,6 +2298,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
                 "image": ("IMAGE",),
                 "video": ("IMAGE",),
                 "mask": ("MASK",),
+                "mask_mode": (["focus", "reconstruct"], {"default": "focus", "tooltip": "Focus describes the selected area; reconstruct conceals it and infers the surrounding scene continuation."}),
                 "audio": ("AUDIO",),
                 "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["audio_file_path"]}),
                 "duration_seconds": VIDEO_DURATION_INPUT,
@@ -2324,6 +2334,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
         auto_finalization_retry=False,
         hf_token="",
         duration_seconds=5.0,
+        mask_mode="focus",
     ):
         result = self.run(
             model_name=model_name,
@@ -2362,6 +2373,7 @@ class ThinkingLLM_QwenVL_GGUF(QwenVLGGUFBase):
             auto_finalization_retry=auto_finalization_retry,
             hf_token=hf_token,
             duration_seconds=duration_seconds,
+            mask_mode=mask_mode,
         )
         hf_token = ""
         return result
@@ -2507,6 +2519,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
                 "image": ("IMAGE",),
                 "video": ("IMAGE",),
                 "mask": ("MASK",),
+                "mask_mode": (["focus", "reconstruct"], {"default": "focus", "tooltip": "Focus describes the selected area; reconstruct conceals it and infers the surrounding scene continuation."}),
                 "audio": ("AUDIO",),
                 "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": GGUF_TOOLTIPS["audio_file_path"]}),
                 "duration_seconds": VIDEO_DURATION_INPUT,
@@ -2561,6 +2574,7 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
         auto_finalization_retry=False,
         hf_token="",
         duration_seconds=5.0,
+        mask_mode="focus",
     ):
         _ = legacy_seed_mode
         _ = legacy_unload_after_run
@@ -2601,9 +2615,10 @@ class ThinkingLLM_QwenVL_GGUF_Advanced(QwenVLGGUFBase):
             auto_finalization_retry=auto_finalization_retry,
             hf_token=hf_token,
             duration_seconds=duration_seconds,
+            mask_mode=mask_mode,
         )
         hf_token = ""
-        mask_preview, _ = apply_mask_highlight(image, mask)
+        mask_preview, _ = apply_mask_highlight(image, mask, mode=mask_mode)
         return (*result, mask_preview)
 
 
