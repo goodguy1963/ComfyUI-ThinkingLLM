@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 
-OUTPUT_CLEANER_VERSION = 4
+OUTPUT_CLEANER_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,17 @@ _CODE_FENCE_RE = re.compile(r"^\s*```[\w-]*\s*$", re.IGNORECASE)
 _THINK_BLOCK_RE = re.compile(r"<think[^>]*>.*?</think>", flags=re.IGNORECASE | re.DOTALL)
 _THINK_OPEN_RE = re.compile(r"<think[^>]*>", flags=re.IGNORECASE)
 _THINK_CLOSE_RE = re.compile(r"</think\s*>", flags=re.IGNORECASE)
+_CHANNEL_OPEN_RE = re.compile(
+    r"(?:<\|?start\|?>\s*assistant\s*)?"
+    r"<\|?channel\|?>\s*(?P<channel>analysis|thinking|reasoning|final)\s*"
+    r"<\|?message\|?>",
+    flags=re.IGNORECASE,
+)
+_CHANNEL_END_RE = re.compile(r"<\|?end\|?>", flags=re.IGNORECASE)
+_MIRRORED_REASONING_WITH_FINAL_RE = re.compile(
+    r"^<\|channel>.*?<channel\|>(?P<final>\s*\S[\s\S]*)$",
+    flags=re.IGNORECASE | re.DOTALL,
+)
 _MARKER_RE = re.compile(
     r"(?im)^\s*(final|final answer|answer|output|result|prompt)\s*[:\-]\s*",
 )
@@ -55,6 +66,7 @@ def clean_model_output(text: str, config: OutputCleanConfig | None = None) -> st
     cleaned = _IM_TOKEN_RE.sub("", cleaned).strip()
 
     if cfg.strip_think:
+        cleaned = _strip_channel_protocol(cleaned)
         cleaned = _THINK_BLOCK_RE.sub("", cleaned)
         cleaned = _THINK_CLOSE_RE.sub("", cleaned)
         unclosed_think = _THINK_OPEN_RE.search(cleaned)
@@ -97,6 +109,40 @@ def clean_model_output(text: str, config: OutputCleanConfig | None = None) -> st
         cleaned = parts[0].strip()
 
     return cleaned
+
+
+def _strip_channel_protocol(text: str) -> str:
+    """Remove reasoning only when the whole output starts as a channel transcript."""
+    candidate = (text or "").strip()
+    channel_opens = list(_CHANNEL_OPEN_RE.finditer(candidate))
+    if channel_opens and channel_opens[0].start() == 0:
+        final_segments: list[str] = []
+        non_channel_text: list[str] = []
+
+        for index, channel_open in enumerate(channel_opens):
+            chunk_end = (
+                channel_opens[index + 1].start()
+                if index + 1 < len(channel_opens)
+                else len(candidate)
+            )
+            chunk = candidate[channel_open.end():chunk_end]
+            channel_end = _CHANNEL_END_RE.search(chunk)
+            content = chunk[:channel_end.start()] if channel_end else chunk
+
+            if channel_open.group("channel").lower() == "final":
+                final_segments.append(content.strip())
+            elif channel_end:
+                non_channel_text.append(chunk[channel_end.end():])
+
+        if final_segments:
+            return final_segments[-1]
+        return "".join(non_channel_text).strip()
+
+    mirrored = _MIRRORED_REASONING_WITH_FINAL_RE.fullmatch(candidate)
+    if mirrored:
+        return mirrored.group("final").strip()
+
+    return candidate
 
 
 def _extract_from_json(text: str, mode: str) -> str | None:
