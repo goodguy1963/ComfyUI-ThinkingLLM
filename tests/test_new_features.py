@@ -4174,8 +4174,9 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         loader.current_batch_size = 1120
         loader.current_ubatch_size = 1120
         loader.current_image_token_budget = 1120
+        loader.current_backend_info = {"version": "0.3.35"}
 
-        with self.assertRaisesRegex(RuntimeError, "Gemma 4 GGUF audio input is disabled"):
+        with self.assertRaisesRegex(RuntimeError, "requires llama-cpp-python >=0.3.36"):
             loader._invoke(
                 system_prompt="You are helpful.",
                 user_prompt="Transcribe this audio.",
@@ -4192,6 +4193,87 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
                 auto_finalization_retry=False,
                 top_k=64,
             )
+
+    def test_gemma4_audio_runs_when_backend_and_mmproj_report_support(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gemma4_audio_supported_backend_test",
+            )
+
+        captured_messages = []
+
+        class DummyChatHandler:
+            def __init__(self):
+                self.is_support_audio = None
+                self.initialized_with = None
+
+            def _init_mtmd_context(self, llama):
+                self.initialized_with = llama
+                self.is_support_audio = True
+
+        class DummyLlama:
+            def reset(self):
+                return None
+
+            def create_chat_completion(self, **kwargs):
+                captured_messages.append(kwargs["messages"])
+                return iter([{"choices": [{"delta": {"content": "audio understood"}}]}])
+
+        loader = module.QwenVLGGUFBase()
+        loader.llm = DummyLlama()
+        loader.chat_handler = DummyChatHandler()
+        loader.gguf_arch = "gemma4"
+        loader.current_backend_info = {"version": "0.3.36+cu130"}
+        loader.current_context_length = 32768
+        loader.current_batch_size = 1120
+        loader.current_ubatch_size = 1120
+        loader.current_image_token_budget = 1120
+
+        text, _raw_trace = loader._invoke(
+            system_prompt="You are helpful.",
+            user_prompt="Transcribe this audio.",
+            images_b64=[],
+            audio_b64=["BASE64WAV"],
+            max_tokens=256,
+            temperature=0.0,
+            top_p=1.0,
+            repetition_penalty=1.0,
+            seed=1,
+            model_name="google_gemma-4-E4B-it-Q8_0.gguf",
+            stream_to_terminal=False,
+            enable_thinking=False,
+            auto_finalization_retry=False,
+            top_k=64,
+        )
+
+        self.assertEqual(text, "audio understood")
+        self.assertIs(loader.chat_handler.initialized_with, loader.llm)
+        audio_item = captured_messages[0][1]["content"][1]
+        self.assertEqual(audio_item["type"], "input_audio")
+        self.assertEqual(audio_item["input_audio"], {"data": "BASE64WAV", "format": "wav"})
+
+    def test_gemma4_audio_guard_blocks_mmproj_without_audio_support(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gemma4_audio_unsupported_mmproj_test",
+            )
+
+        class DummyChatHandler:
+            is_support_audio = None
+
+            def _init_mtmd_context(self, _llama):
+                self.is_support_audio = False
+
+        loader = module.QwenVLGGUFBase()
+        loader.llm = object()
+        loader.chat_handler = DummyChatHandler()
+        loader.gguf_arch = "gemma4"
+        loader.current_backend_info = {"version": "0.3.36"}
+
+        with self.assertRaisesRegex(RuntimeError, "does not report audio support"):
+            loader._raise_if_unsafe_native_multimodal_path([], ["BASE64WAV"])
 
     def test_gguf_thinking_toggle_updates_without_reload_signature(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):

@@ -55,6 +55,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+.firecrawl/
 
 # ComfyUI specific
 models/

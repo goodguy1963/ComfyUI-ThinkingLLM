@@ -104,6 +104,14 @@ load_node_prompt_state()
 _GEMMA4_MULTIMODAL_MAX_CTX = 32768
 _GEMMA4_MULTIMODAL_IMAGE_TOKENS = 1120
 _GEMMA4_MULTIMODAL_MAX_BATCH = 2048
+_GEMMA4_AUDIO_MIN_BACKEND_VERSION = (0, 3, 36)
+
+
+def _version_tuple(version: str) -> tuple[int, int, int] | None:
+    match = re.match(r"\s*(\d+)\.(\d+)\.(\d+)", str(version or ""))
+    if match is None:
+        return None
+    return tuple(int(part) for part in match.groups())
 
 
 def read_gguf_architecture(filepath: Path) -> str | None:
@@ -1166,6 +1174,7 @@ class QwenVLGGUFBase:
         self.current_ubatch_size = None
         self.current_image_token_budget = None
         self.current_context_length = None
+        self.current_backend_info = None
         self.gguf_arch = None
         register_active_gguf_loader(self)
 
@@ -1286,6 +1295,7 @@ class QwenVLGGUFBase:
     ):
         Llama = self._load_backend()
         backend_info = get_last_llama_cpp_backend_info()
+        self.current_backend_info = dict(backend_info) if backend_info else None
 
         resolved = _resolve_model_entry(model_name)
         access_info = {"commercial_status": resolved.commercial_status}
@@ -1595,11 +1605,35 @@ class QwenVLGGUFBase:
         if arch != "gemma4":
             return
         if audio_b64:
-            raise RuntimeError(
-                "Gemma 4 GGUF audio input is disabled because the installed llama.cpp backend can abort the "
-                "ComfyUI process for Gemma 4 audio. Use image/text input with Gemma 4 GGUF, or use a backend "
-                "that explicitly supports Gemma 4 audio."
-            )
+            backend_info = getattr(self, "current_backend_info", None) or {}
+            backend_version = str(backend_info.get("version") or "unknown")
+            parsed_version = _version_tuple(backend_version)
+            if parsed_version is None or parsed_version < _GEMMA4_AUDIO_MIN_BACKEND_VERSION:
+                minimum = ".".join(str(part) for part in _GEMMA4_AUDIO_MIN_BACKEND_VERSION)
+                raise RuntimeError(
+                    "Gemma 4 GGUF audio requires llama-cpp-python "
+                    f">={minimum}; detected {backend_version}. Older or unknown backends remain blocked because "
+                    "their native Gemma 4 audio path can abort ComfyUI. Update the multimodal backend and restart ComfyUI."
+                )
+
+            initialize_mtmd = getattr(self.chat_handler, "_init_mtmd_context", None)
+            if not callable(initialize_mtmd):
+                raise RuntimeError(
+                    "The installed Gemma4ChatHandler cannot verify native audio support. "
+                    "Update llama-cpp-python and restart ComfyUI."
+                )
+            try:
+                initialize_mtmd(self.llm)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Gemma 4 GGUF audio could not initialize the selected multimodal projector: "
+                    f"{exc}"
+                ) from exc
+            if getattr(self.chat_handler, "is_support_audio", None) is not True:
+                raise RuntimeError(
+                    "The selected Gemma 4 multimodal projector does not report audio support. "
+                    "Use an audio-capable mmproj (BF16 is recommended for Gemma 4 E2B/E4B)."
+                )
         context_length = int(getattr(self, "current_context_length", 0) or 0)
         batch_size = int(getattr(self, "current_batch_size", 0) or 0)
         ubatch_size = int(getattr(self, "current_ubatch_size", 0) or 0)

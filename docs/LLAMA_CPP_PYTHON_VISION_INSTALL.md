@@ -4,6 +4,7 @@ This plugin’s **QwenVL (GGUF)** vision nodes require a `llama-cpp-python` buil
 
 - `Qwen3VLChatHandler`
 - `Qwen25VLChatHandler`
+- `Gemma4ChatHandler` (`llama-cpp-python` 0.3.36 or newer for Gemma 4 audio)
 
 The upstream `llama-cpp-python` from PyPI often does **not** include these vision handlers. Use a fork/build that provides them (e.g. JamePeng’s fork) and install a **Release wheel**.
 
