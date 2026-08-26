@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Curated convenience model lists for the ThinkingLLM API node. These are suggestions only and never override a server-side profile allowed_models allowlist. Maintained by hand; validated by tools/check_api_model_catalogs.py on every PR, push, and release.",
-  "updated_at": "2026-08-24",
+  "updated_at": "2026-08-26",
   "profiles": {
     "OpenAI": {
       "provider": "OpenAI",
@@ -368,11 +368,6 @@
           "vision": false
         },
         {
-          "id": "meta-llama/llama-guard-4-12b",
-          "label": "meta-llama/llama-guard-4-12b",
-          "vision": false
-        },
-        {
           "id": "meta/muse-spark-1.1",
           "label": "meta/muse-spark-1.1",
           "vision": false
@@ -390,6 +385,11 @@
         {
           "id": "minimax/minimax-m3",
           "label": "minimax/minimax-m3",
+          "vision": false
+        },
+        {
+          "id": "minimax/minimax-m3:free",
+          "label": "minimax/minimax-m3:free",
           "vision": false
         },
         {
@@ -420,6 +420,16 @@
         {
           "id": "thinkingmachines/inkling-small",
           "label": "thinkingmachines/inkling-small",
+          "vision": false
+        },
+        {
+          "id": "thinkingmachines/inkling-small:free",
+          "label": "thinkingmachines/inkling-small:free",
+          "vision": false
+        },
+        {
+          "id": "thinkingmachines/inkling:free",
+          "label": "thinkingmachines/inkling:free",
           "vision": false
         },
         {
@@ -645,11 +655,6 @@
         {
           "id": "qwen/qwen-plus-2025-07-28",
           "label": "qwen/qwen-plus-2025-07-28",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen-plus-2025-07-28:thinking",
-          "label": "qwen/qwen-plus-2025-07-28:thinking",
           "vision": false
         },
         {
@@ -1243,16 +1248,6 @@
           "vision": false
         },
         {
-          "id": "thinkingmachines/inkling-small:free",
-          "label": "thinkingmachines/inkling-small:free",
-          "vision": false
-        },
-        {
-          "id": "thinkingmachines/inkling:free",
-          "label": "thinkingmachines/inkling:free",
-          "vision": false
-        },
-        {
           "id": "cohere/command-a",
           "label": "cohere/command-a",
           "vision": false
@@ -1498,6 +1493,11 @@
           "vision": false
         },
         {
+          "id": "minimax/minimax-m2.7:free",
+          "label": "minimax/minimax-m2.7:free",
+          "vision": false
+        },
+        {
           "id": "deepseek/deepseek-chat",
           "label": "deepseek/deepseek-chat",
           "vision": false
@@ -1530,6 +1530,11 @@
         {
           "id": "deepseek/deepseek-v3.2-exp",
           "label": "deepseek/deepseek-v3.2-exp",
+          "vision": false
+        },
+        {
+          "id": "meta-llama/llama-guard-4-12b",
+          "label": "meta-llama/llama-guard-4-12b",
           "vision": false
         },
         {
@@ -2005,11 +2010,6 @@
         {
           "id": "google/gemini-2.5-flash-image",
           "label": "google/gemini-2.5-flash-image",
-          "vision": false
-        },
-        {
-          "id": "google/gemma-3n-e4b-it",
-          "label": "google/gemma-3n-e4b-it",
           "vision": false
         },
         {
@@ -2535,6 +2535,21 @@
         {
           "id": "hexgrad/Kokoro-82M",
           "label": "hexgrad/Kokoro-82M",
+          "vision": false
+        },
+        {
+          "id": "ibm-granite/granite-4.2-30b",
+          "label": "ibm-granite/granite-4.2-30b",
+          "vision": false
+        },
+        {
+          "id": "ibm-granite/granite-4.2-3b",
+          "label": "ibm-granite/granite-4.2-3b",
+          "vision": false
+        },
+        {
+          "id": "ibm-granite/granite-4.2-8b",
+          "label": "ibm-granite/granite-4.2-8b",
           "vision": false
         },
         {
@@ -3133,6 +3148,11 @@
           "vision": false
         },
         {
+          "id": "0k9d0h1/reranker1.5b-sft",
+          "label": "0k9d0h1/reranker1.5b-sft",
+          "vision": false
+        },
+        {
           "id": "0xA50C1A1/Llama-3.3-70B-Instruct-SOM-MPOA",
           "label": "0xA50C1A1/Llama-3.3-70B-Instruct-SOM-MPOA",
           "vision": false
@@ -3143,8 +3163,38 @@
           "vision": false
         },
         {
+          "id": "0xA50C1A1/Phi-4-mini-instruct-heretic",
+          "label": "0xA50C1A1/Phi-4-mini-instruct-heretic",
+          "vision": false
+        },
+        {
+          "id": "0xA50C1A1/Qwen3-4B-Instruct-2507-SOM-MPOA",
+          "label": "0xA50C1A1/Qwen3-4B-Instruct-2507-SOM-MPOA",
+          "vision": false
+        },
+        {
           "id": "0xfaskety/Qwen-Qwen1.5-1.8B-1716777053",
           "label": "0xfaskety/Qwen-Qwen1.5-1.8B-1716777053",
+          "vision": false
+        },
+        {
+          "id": "1024m/gemma-2-2b-it-Base",
+          "label": "1024m/gemma-2-2b-it-Base",
+          "vision": false
+        },
+        {
+          "id": "1024m/Llama-3.2-3B-Instruct-Base",
+          "label": "1024m/Llama-3.2-3B-Instruct-Base",
+          "vision": false
+        },
+        {
+          "id": "123-cao/Qwen2-0.5B-Instruct",
+          "label": "123-cao/Qwen2-0.5B-Instruct",
+          "vision": false
+        },
+        {
+          "id": "2121-8/TinySlime-1.1B-Chat-v1.0",
+          "label": "2121-8/TinySlime-1.1B-Chat-v1.0",
           "vision": false
         },
         {
@@ -3153,8 +3203,23 @@
           "vision": false
         },
         {
+          "id": "2kfi/MedGemma-4B-it-finetuned_V2.0",
+          "label": "2kfi/MedGemma-4B-it-finetuned_V2.0",
+          "vision": false
+        },
+        {
+          "id": "2ndBestKiller/Llama-3.2-1B-Instruct-cardio-semi-synth-annotation_r1_O1_f1_LT_zcr_bf16",
+          "label": "2ndBestKiller/Llama-3.2-1B-Instruct-cardio-semi-synth-annotation_r1_O1_f1_LT_zcr_bf16",
+          "vision": false
+        },
+        {
           "id": "2stacks/gemma3-12b-it-comedy-v3",
           "label": "2stacks/gemma3-12b-it-comedy-v3",
+          "vision": false
+        },
+        {
+          "id": "2stacks/gemma3-4b-it-comedy-v2",
+          "label": "2stacks/gemma3-4b-it-comedy-v2",
           "vision": false
         },
         {
@@ -3183,6 +3248,11 @@
           "vision": false
         },
         {
+          "id": "5ivatej/qwen2.5-1.5B-india-finetuned",
+          "label": "5ivatej/qwen2.5-1.5B-india-finetuned",
+          "vision": false
+        },
+        {
           "id": "922-Narra/llama-2-7b-chat-cebuano-v0.1",
           "label": "922-Narra/llama-2-7b-chat-cebuano-v0.1",
           "vision": false
@@ -3195,6 +3265,11 @@
         {
           "id": "922-Narra/llama-2-7b-chat-tagalog-v0.3a",
           "label": "922-Narra/llama-2-7b-chat-tagalog-v0.3a",
+          "vision": false
+        },
+        {
+          "id": "9Tobi/Qwen_3B_Instruct_2_lvl12_less_steps",
+          "label": "9Tobi/Qwen_3B_Instruct_2_lvl12_less_steps",
           "vision": false
         },
         {
@@ -3258,6 +3333,11 @@
           "vision": false
         },
         {
+          "id": "Abdul-Hadi-Jalil/Llama-3.2-1B-Instruct",
+          "label": "Abdul-Hadi-Jalil/Llama-3.2-1B-Instruct",
+          "vision": false
+        },
+        {
           "id": "abdulmannan-01/qwen-2.5-1.5b-finetuned-for-function-calling-combined-dataset",
           "label": "abdulmannan-01/qwen-2.5-1.5b-finetuned-for-function-calling-combined-dataset",
           "vision": false
@@ -3293,6 +3373,11 @@
           "vision": false
         },
         {
+          "id": "Abhaykoul/Qwen1.5-0.5B-vortex",
+          "label": "Abhaykoul/Qwen1.5-0.5B-vortex",
+          "vision": false
+        },
+        {
           "id": "abhi696/llama-3.2-3b-it-Ecommerce-ChatBot",
           "label": "abhi696/llama-3.2-3b-it-Ecommerce-ChatBot",
           "vision": false
@@ -3310,6 +3395,11 @@
         {
           "id": "Abhishek898/Llama-2-7b-chat-finetune",
           "label": "Abhishek898/Llama-2-7b-chat-finetune",
+          "vision": false
+        },
+        {
+          "id": "AbleCredit/AbleCredit-R0-Qwen-2.5-3B-Instruct",
+          "label": "AbleCredit/AbleCredit-R0-Qwen-2.5-3B-Instruct",
           "vision": false
         },
         {
@@ -3360,6 +3450,16 @@
         {
           "id": "adalbertojunior/Llama-3-8B-Instruct-Portuguese-v0.4",
           "label": "adalbertojunior/Llama-3-8B-Instruct-Portuguese-v0.4",
+          "vision": false
+        },
+        {
+          "id": "Adanato/qwen25_3b_instruct_qwen25_qwen3_rank_only-qwen25_qwen3_rank_only_cluster_0",
+          "label": "Adanato/qwen25_3b_instruct_qwen25_qwen3_rank_only-qwen25_qwen3_rank_only_cluster_0",
+          "vision": false
+        },
+        {
+          "id": "Adanato/qwen25_3b_instruct_qwen25_qwen3_rank_only-qwen25_qwen3_rank_only_cluster_3",
+          "label": "Adanato/qwen25_3b_instruct_qwen25_qwen3_rank_only-qwen25_qwen3_rank_only_cluster_3",
           "vision": false
         },
         {
@@ -3563,6 +3663,11 @@
           "vision": false
         },
         {
+          "id": "AI-MO/Kimina-Prover-Preview-Distill-1.5B",
+          "label": "AI-MO/Kimina-Prover-Preview-Distill-1.5B",
+          "vision": false
+        },
+        {
           "id": "ai-nexuz/llama-3.2-1b-instruct-fine-tuned",
           "label": "ai-nexuz/llama-3.2-1b-instruct-fine-tuned",
           "vision": false
@@ -3570,6 +3675,11 @@
         {
           "id": "AI-Sweden-Models/Llama-3-8B-instruct",
           "label": "AI-Sweden-Models/Llama-3-8B-instruct",
+          "vision": false
+        },
+        {
+          "id": "AiCloser/Qwen2.5-0.5B-Instruct-Thinking",
+          "label": "AiCloser/Qwen2.5-0.5B-Instruct-Thinking",
           "vision": false
         },
         {
@@ -3623,6 +3733,16 @@
           "vision": false
         },
         {
+          "id": "Aikyam-Lab/CURE-MED-1.5B",
+          "label": "Aikyam-Lab/CURE-MED-1.5B",
+          "vision": false
+        },
+        {
+          "id": "Aimin12/Qwen2.5-Coder-3B-Instruct-Distill-Qwen3-Coder-Next-abliterated",
+          "label": "Aimin12/Qwen2.5-Coder-3B-Instruct-Distill-Qwen3-Coder-Next-abliterated",
+          "vision": false
+        },
+        {
           "id": "aipib/karasu-lora-jp-qa-chat",
           "label": "aipib/karasu-lora-jp-qa-chat",
           "vision": false
@@ -3630,6 +3750,16 @@
         {
           "id": "aipib/llama3_2-1B-instruct-sft-merged",
           "label": "aipib/llama3_2-1B-instruct-sft-merged",
+          "vision": false
+        },
+        {
+          "id": "AIR-hl/Llama-3.2-1B-ultrachat200k",
+          "label": "AIR-hl/Llama-3.2-1B-ultrachat200k",
+          "vision": false
+        },
+        {
+          "id": "AIR-hl/Qwen2.5-1.5B-ultrachat200k",
+          "label": "AIR-hl/Qwen2.5-1.5B-ultrachat200k",
           "vision": false
         },
         {
@@ -3670,6 +3800,11 @@
         {
           "id": "aisingapore/Qwen-SEA-LION-v4-32B-IT",
           "label": "aisingapore/Qwen-SEA-LION-v4-32B-IT",
+          "vision": false
+        },
+        {
+          "id": "AITeamVN/Vi-Qwen2-1.5B-RAG",
+          "label": "AITeamVN/Vi-Qwen2-1.5B-RAG",
           "vision": false
         },
         {
@@ -3783,6 +3918,31 @@
           "vision": false
         },
         {
+          "id": "AlanWuxm/Qwen2.5-1.5B-Open-R1-Distill",
+          "label": "AlanWuxm/Qwen2.5-1.5B-Open-R1-Distill",
+          "vision": false
+        },
+        {
+          "id": "AlbertShu/Qwen2-1.5B-gsm8k",
+          "label": "AlbertShu/Qwen2-1.5B-gsm8k",
+          "vision": false
+        },
+        {
+          "id": "Aletheia-Bench/DPO-Think-1.5B",
+          "label": "Aletheia-Bench/DPO-Think-1.5B",
+          "vision": false
+        },
+        {
+          "id": "Aletheia-Bench/GRPO-Think-1.5B-16k",
+          "label": "Aletheia-Bench/GRPO-Think-1.5B-16k",
+          "vision": false
+        },
+        {
+          "id": "Aletheia-Bench/RAFT-1.5B",
+          "label": "Aletheia-Bench/RAFT-1.5B",
+          "vision": false
+        },
+        {
           "id": "alex2020/Qwen2-0.5-Instruct",
           "label": "alex2020/Qwen2-0.5-Instruct",
           "vision": false
@@ -3790,6 +3950,11 @@
         {
           "id": "alex43219/Mistral-Small-24B-Instruct-2501-Reasoner-SFT",
           "label": "alex43219/Mistral-Small-24B-Instruct-2501-Reasoner-SFT",
+          "vision": false
+        },
+        {
+          "id": "AlexanderWang915/qwen2.5-1.5b-moloptins",
+          "label": "AlexanderWang915/qwen2.5-1.5b-moloptins",
           "vision": false
         },
         {
@@ -3833,6 +3998,11 @@
           "vision": false
         },
         {
+          "id": "Alfaxad/gemma2-2b-swahili-it",
+          "label": "Alfaxad/gemma2-2b-swahili-it",
+          "vision": false
+        },
+        {
           "id": "alfredplpl/Llama-3-8B-Instruct-Ja",
           "label": "alfredplpl/Llama-3-8B-Instruct-Ja",
           "vision": false
@@ -3845,6 +4015,11 @@
         {
           "id": "ali-elganzory/Qwen2.5-1.5B-SFT-Tulu3-decontaminated",
           "label": "ali-elganzory/Qwen2.5-1.5B-SFT-Tulu3-decontaminated",
+          "vision": false
+        },
+        {
+          "id": "Alibaba-NLP/ZeroSearch_wiki_V2_Qwen2.5_3B_Instruct",
+          "label": "Alibaba-NLP/ZeroSearch_wiki_V2_Qwen2.5_3B_Instruct",
           "vision": false
         },
         {
@@ -3918,8 +4093,33 @@
           "vision": false
         },
         {
+          "id": "AliMaatouk/Gemma-2B-Tele-it",
+          "label": "AliMaatouk/Gemma-2B-Tele-it",
+          "vision": false
+        },
+        {
           "id": "AliMaatouk/LLama-3-8B-Tele-it",
           "label": "AliMaatouk/LLama-3-8B-Tele-it",
+          "vision": false
+        },
+        {
+          "id": "AliMaatouk/Llama-3.2-1B-Tele-it",
+          "label": "AliMaatouk/Llama-3.2-1B-Tele-it",
+          "vision": false
+        },
+        {
+          "id": "AliMaatouk/Llama-3.2-3B-Tele-it",
+          "label": "AliMaatouk/Llama-3.2-3B-Tele-it",
+          "vision": false
+        },
+        {
+          "id": "AliMaatouk/Phi-1.5-Tele",
+          "label": "AliMaatouk/Phi-1.5-Tele",
+          "vision": false
+        },
+        {
+          "id": "ALIN-LLM/llama-3.2-1b-instruct-gsm240k-epoch1-lr1e-4-v1",
+          "label": "ALIN-LLM/llama-3.2-1b-instruct-gsm240k-epoch1-lr1e-4-v1",
           "vision": false
         },
         {
@@ -3955,6 +4155,11 @@
         {
           "id": "allura-forge/Llama-3.3-8B-Instruct",
           "label": "allura-forge/Llama-3.3-8B-Instruct",
+          "vision": false
+        },
+        {
+          "id": "Almheiri/Llama-3.2-1B-Instruct-QLORA_INT4_EO8",
+          "label": "Almheiri/Llama-3.2-1B-Instruct-QLORA_INT4_EO8",
           "vision": false
         },
         {
@@ -4020,6 +4225,11 @@
         {
           "id": "AlvianKhairi/Llama-2-7b-chat-finetune-25k-no_link",
           "label": "AlvianKhairi/Llama-2-7b-chat-finetune-25k-no_link",
+          "vision": false
+        },
+        {
+          "id": "AlvinY34/Llama-3.2-1B-Instruct_fine_tune",
+          "label": "AlvinY34/Llama-3.2-1B-Instruct_fine_tune",
           "vision": false
         },
         {
@@ -4118,8 +4328,188 @@
           "vision": false
         },
         {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a100_layer11",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a100_layer11",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a100_layer15",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a100_layer15",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a100_layer7",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a100_layer7",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a1200_layer11",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a1200_layer11",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a1200_layer15",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a1200_layer15",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a1200_layer3",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a1200_layer3",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a300_layer11",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a300_layer11",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a300_layer15",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a300_layer15",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a300_layer3",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a300_layer3",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a300_layer7",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a300_layer7",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a500_layer11",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a500_layer11",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a500_layer3",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a500_layer3",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s100_a500_layer7",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s100_a500_layer7",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a100_layer11",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a100_layer11",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a100_layer7",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a100_layer7",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a1200_layer11",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a1200_layer11",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a1200_layer15",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a1200_layer15",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a1200_layer3",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a1200_layer3",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a1200_layer7",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a1200_layer7",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a300_layer11",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a300_layer11",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a300_layer3",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a300_layer3",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a500_layer11",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a500_layer11",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a500_layer15",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a500_layer15",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a500_layer3",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a500_layer3",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s200_a500_layer7",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s200_a500_layer7",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s400_a100_layer15",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s400_a100_layer15",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s400_a100_layer3",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s400_a100_layer3",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s400_a1200_layer11",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s400_a1200_layer11",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s400_a1200_layer15",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s400_a1200_layer15",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s400_a1200_layer3",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s400_a1200_layer3",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s400_a1200_layer7",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s400_a1200_layer7",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s400_a300_layer3",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s400_a300_layer3",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s400_a300_layer7",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s400_a300_layer7",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s400_a500_layer11",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s400_a500_layer11",
+          "vision": false
+        },
+        {
+          "id": "AMindToThink/gemma-2-2b-it_RMU_s400_a500_layer15",
+          "label": "AMindToThink/gemma-2-2b-it_RMU_s400_a500_layer15",
+          "vision": false
+        },
+        {
           "id": "amirbhat/Llama-3.1-8B-Instruct-Mental-Health-Classification",
           "label": "amirbhat/Llama-3.1-8B-Instruct-Mental-Health-Classification",
+          "vision": false
+        },
+        {
+          "id": "AmmarA22/Llama-3.2-1B-Instruct",
+          "label": "AmmarA22/Llama-3.2-1B-Instruct",
           "vision": false
         },
         {
@@ -4180,6 +4570,26 @@
         {
           "id": "andykcheng/unitrend_model_8b_vllm",
           "label": "andykcheng/unitrend_model_8b_vllm",
+          "vision": false
+        },
+        {
+          "id": "AngelRaychev/0.5B-policy-iteration_1",
+          "label": "AngelRaychev/0.5B-policy-iteration_1",
+          "vision": false
+        },
+        {
+          "id": "AngelRaychev/0.5B-policy-iteration_2",
+          "label": "AngelRaychev/0.5B-policy-iteration_2",
+          "vision": false
+        },
+        {
+          "id": "AngelRaychev/0.5B-policy-iteration_3",
+          "label": "AngelRaychev/0.5B-policy-iteration_3",
+          "vision": false
+        },
+        {
+          "id": "AngelRaychev/1.5B-value-iteration_4",
+          "label": "AngelRaychev/1.5B-value-iteration_4",
           "vision": false
         },
         {
@@ -4478,6 +4888,11 @@
           "vision": false
         },
         {
+          "id": "ArindamSingh/gemma-3-1b-it-medical-o1-reasoning-finetune-16bit",
+          "label": "ArindamSingh/gemma-3-1b-it-medical-o1-reasoning-finetune-16bit",
+          "vision": false
+        },
+        {
           "id": "arjunssat/Llama-2-7b-chat-finetune",
           "label": "arjunssat/Llama-2-7b-chat-finetune",
           "vision": false
@@ -4513,6 +4928,11 @@
           "vision": false
         },
         {
+          "id": "ArRENCEAI/Qwen2.5-7B-Instruct-OBLITERATED",
+          "label": "ArRENCEAI/Qwen2.5-7B-Instruct-OBLITERATED",
+          "vision": false
+        },
+        {
           "id": "arsalanaa/Llama-3.2-1B-Instruct-hikaye",
           "label": "arsalanaa/Llama-3.2-1B-Instruct-hikaye",
           "vision": false
@@ -4530,6 +4950,11 @@
         {
           "id": "Artples/L-MChat-7b",
           "label": "Artples/L-MChat-7b",
+          "vision": false
+        },
+        {
+          "id": "Artples/L-MChat-Small",
+          "label": "Artples/L-MChat-Small",
           "vision": false
         },
         {
@@ -4638,6 +5063,11 @@
           "vision": false
         },
         {
+          "id": "AswanthCManoj/azma-tinyllama-instruct-adapter",
+          "label": "AswanthCManoj/azma-tinyllama-instruct-adapter",
+          "vision": false
+        },
+        {
           "id": "atharvapawar/Llama-2-7b-chat-finetune-app",
           "label": "atharvapawar/Llama-2-7b-chat-finetune-app",
           "vision": false
@@ -4715,6 +5145,11 @@
         {
           "id": "AugustasM/vicuna-v1.5-rl-qnli-v1",
           "label": "AugustasM/vicuna-v1.5-rl-qnli-v1",
+          "vision": false
+        },
+        {
+          "id": "AugustLight/LLight-3.2-3B-Instruct",
+          "label": "AugustLight/LLight-3.2-3B-Instruct",
           "vision": false
         },
         {
@@ -5078,6 +5513,11 @@
           "vision": false
         },
         {
+          "id": "Avik08/llama-3.2-1b-instruct-app-reviews",
+          "label": "Avik08/llama-3.2-1b-instruct-app-reviews",
+          "vision": false
+        },
+        {
           "id": "avk20/Llama-3.2-1B-Instruct",
           "label": "avk20/Llama-3.2-1B-Instruct",
           "vision": false
@@ -5113,8 +5553,18 @@
           "vision": false
         },
         {
+          "id": "AXCXEPT/EZO-Common-T2-2B-gemma-2-it",
+          "label": "AXCXEPT/EZO-Common-T2-2B-gemma-2-it",
+          "vision": false
+        },
+        {
           "id": "AXCXEPT/EZO-Humanities-9B-gemma-2-it",
           "label": "AXCXEPT/EZO-Humanities-9B-gemma-2-it",
+          "vision": false
+        },
+        {
+          "id": "AXCXEPT/EZO-Llama-3.2-3B-Instruct-dpoE",
+          "label": "AXCXEPT/EZO-Llama-3.2-3B-Instruct-dpoE",
           "vision": false
         },
         {
@@ -5190,441 +5640,6 @@
         {
           "id": "aysukaymak/Llama-3.2-1B-Instruct-tune",
           "label": "aysukaymak/Llama-3.2-1B-Instruct-tune",
-          "vision": false
-        },
-        {
-          "id": "azherali/Qwen2.5-1.5B-Instruct-dpo",
-          "label": "azherali/Qwen2.5-1.5B-Instruct-dpo",
-          "vision": false
-        },
-        {
-          "id": "BAAI/Infinity-Instruct-3M-0613-Llama3-70B",
-          "label": "BAAI/Infinity-Instruct-3M-0613-Llama3-70B",
-          "vision": false
-        },
-        {
-          "id": "BAAI/Infinity-Instruct-3M-0613-Mistral-7B",
-          "label": "BAAI/Infinity-Instruct-3M-0613-Mistral-7B",
-          "vision": false
-        },
-        {
-          "id": "BAAI/Infinity-Instruct-3M-0625-Llama3-8B",
-          "label": "BAAI/Infinity-Instruct-3M-0625-Llama3-8B",
-          "vision": false
-        },
-        {
-          "id": "BAAI/Infinity-Instruct-3M-0625-Mistral-7B",
-          "label": "BAAI/Infinity-Instruct-3M-0625-Mistral-7B",
-          "vision": false
-        },
-        {
-          "id": "BAAI/Infinity-Instruct-3M-0625-Qwen2-7B",
-          "label": "BAAI/Infinity-Instruct-3M-0625-Qwen2-7B",
-          "vision": false
-        },
-        {
-          "id": "BAAI/Infinity-Instruct-7M-Gen-Llama3_1-70B",
-          "label": "BAAI/Infinity-Instruct-7M-Gen-Llama3_1-70B",
-          "vision": false
-        },
-        {
-          "id": "BAAI/Infinity-Instruct-7M-Gen-Llama3_1-8B",
-          "label": "BAAI/Infinity-Instruct-7M-Gen-Llama3_1-8B",
-          "vision": false
-        },
-        {
-          "id": "BAAI/Infinity-Instruct-7M-Gen-mistral-7B",
-          "label": "BAAI/Infinity-Instruct-7M-Gen-mistral-7B",
-          "vision": false
-        },
-        {
-          "id": "bababababooey/llama-3-8b-instruct-toxic",
-          "label": "bababababooey/llama-3-8b-instruct-toxic",
-          "vision": false
-        },
-        {
-          "id": "Babsie/Llama3.3-8B-Instruct-Thinking-Heretic-Uncensored-Claude-4.5-Opus-High-Reasoning",
-          "label": "Babsie/Llama3.3-8B-Instruct-Thinking-Heretic-Uncensored-Claude-4.5-Opus-High-Reasoning",
-          "vision": false
-        },
-        {
-          "id": "bachthetrollface/qwen1.5-1.8B-teacher-dolly",
-          "label": "bachthetrollface/qwen1.5-1.8B-teacher-dolly",
-          "vision": false
-        },
-        {
-          "id": "bachthetrollface/qwen2.5-math-1.5B-base",
-          "label": "bachthetrollface/qwen2.5-math-1.5B-base",
-          "vision": false
-        },
-        {
-          "id": "Bahushruth/gemma-4-E4B-it-abliterated",
-          "label": "Bahushruth/gemma-4-E4B-it-abliterated",
-          "vision": false
-        },
-        {
-          "id": "Bala2223/finetune_Llama-2-7b-chat-hf",
-          "label": "Bala2223/finetune_Llama-2-7b-chat-hf",
-          "vision": false
-        },
-        {
-          "id": "Balaaditya/Llama-3.1-1B-Instruct-Emotion-Classification",
-          "label": "Balaaditya/Llama-3.1-1B-Instruct-Emotion-Classification",
-          "vision": false
-        },
-        {
-          "id": "Balaaditya/Llama-3.1-1B-Instruct-Finetuned-Emotion-Classification",
-          "label": "Balaaditya/Llama-3.1-1B-Instruct-Finetuned-Emotion-Classification",
-          "vision": false
-        },
-        {
-          "id": "Banana304343/Quantum-Specialist-1.5B",
-          "label": "Banana304343/Quantum-Specialist-1.5B",
-          "vision": false
-        },
-        {
-          "id": "BanglaLLM/Bangla-s1k-qwen-2.5-3B-Instruct",
-          "label": "BanglaLLM/Bangla-s1k-qwen-2.5-3B-Instruct",
-          "vision": false
-        },
-        {
-          "id": "BanglaLLM/BanglaLLama-3-8b-bangla-alpaca-orca-instruct-v0.0.1",
-          "label": "BanglaLLM/BanglaLLama-3-8b-bangla-alpaca-orca-instruct-v0.0.1",
-          "vision": false
-        },
-        {
-          "id": "BanglaLLM/BanglaLLama-3.1-8b-bangla-alpaca-orca-instruct-v0.0.1",
-          "label": "BanglaLLM/BanglaLLama-3.1-8b-bangla-alpaca-orca-instruct-v0.0.1",
-          "vision": false
-        },
-        {
-          "id": "BanglaLLM/BanglaLLama-3.2-3b-bangla-alpaca-orca-instruct-v0.0.1",
-          "label": "BanglaLLM/BanglaLLama-3.2-3b-bangla-alpaca-orca-instruct-v0.0.1",
-          "vision": false
-        },
-        {
-          "id": "baohao/GRPO_Qwen3-4B-Instruct-2507",
-          "label": "baohao/GRPO_Qwen3-4B-Instruct-2507",
-          "vision": false
-        },
-        {
-          "id": "baohao/LUFFY_Qwen3-4B-Instruct-2507",
-          "label": "baohao/LUFFY_Qwen3-4B-Instruct-2507",
-          "vision": false
-        },
-        {
-          "id": "baohao/SAGE_Llama-3.2-3B-Instruct",
-          "label": "baohao/SAGE_Llama-3.2-3B-Instruct",
-          "vision": false
-        },
-        {
-          "id": "baohao/Scaf-GRPO_Qwen3-4B-Instruct-2507",
-          "label": "baohao/Scaf-GRPO_Qwen3-4B-Instruct-2507",
-          "vision": false
-        },
-        {
-          "id": "Baon2024/Qwen2.5-0.5B-Instruct-sft-77",
-          "label": "Baon2024/Qwen2.5-0.5B-Instruct-sft-77",
-          "vision": false
-        },
-        {
-          "id": "barc0/llama3.2-1b-instruct-fft-transduction-engineer_lr1e-5_epoch4",
-          "label": "barc0/llama3.2-1b-instruct-fft-transduction-engineer_lr1e-5_epoch4",
-          "vision": false
-        },
-        {
-          "id": "baseten/Llama-3.2-3B-Instruct-pythonic",
-          "label": "baseten/Llama-3.2-3B-Instruct-pythonic",
-          "vision": false
-        },
-        {
-          "id": "Battogtokh/Qwen3-4B-Instruct-unsloth-FinAdvisor-16bit",
-          "label": "Battogtokh/Qwen3-4B-Instruct-unsloth-FinAdvisor-16bit",
-          "vision": false
-        },
-        {
-          "id": "bau0221/Enlighten_Instruct_merged",
-          "label": "bau0221/Enlighten_Instruct_merged",
-          "vision": false
-        },
-        {
-          "id": "bedobedo/Qwen2.5-0.5B-Instruct-Dir",
-          "label": "bedobedo/Qwen2.5-0.5B-Instruct-Dir",
-          "vision": false
-        },
-        {
-          "id": "beezza/Qwen3.5-instruct-ja",
-          "label": "beezza/Qwen3.5-instruct-ja",
-          "vision": false
-        },
-        {
-          "id": "BEGADE/llama-3.2-3b-it-ChatBot",
-          "label": "BEGADE/llama-3.2-3b-it-ChatBot",
-          "vision": false
-        },
-        {
-          "id": "BEGADE/llama-3.2-3b-it-IT-ChatBot",
-          "label": "BEGADE/llama-3.2-3b-it-IT-ChatBot",
-          "vision": false
-        },
-        {
-          "id": "behbudiy/Mistral-7B-Instruct-Uz",
-          "label": "behbudiy/Mistral-7B-Instruct-Uz",
-          "vision": false
-        },
-        {
-          "id": "bekhzod-olimov/Qwen3-0.6B-Instruct-Uz",
-          "label": "bekhzod-olimov/Qwen3-0.6B-Instruct-Uz",
-          "vision": false
-        },
-        {
-          "id": "BELLE-2/BELLE-Llama2-13B-chat-0.4M",
-          "label": "BELLE-2/BELLE-Llama2-13B-chat-0.4M",
-          "vision": false
-        },
-        {
-          "id": "benbird316/gemma-4-E2B-it-uncensored",
-          "label": "benbird316/gemma-4-E2B-it-uncensored",
-          "vision": false
-        },
-        {
-          "id": "benchang1110/Qwen2.5-Taiwan-3B-Instruct",
-          "label": "benchang1110/Qwen2.5-Taiwan-3B-Instruct",
-          "vision": false
-        },
-        {
-          "id": "benchang1110/Qwen2.5-Taiwan-7B-Instruct",
-          "label": "benchang1110/Qwen2.5-Taiwan-7B-Instruct",
-          "vision": false
-        },
-        {
-          "id": "Bender1011001/Qwen2.5-3B-Instruct-ABLITERATED",
-          "label": "Bender1011001/Qwen2.5-3B-Instruct-ABLITERATED",
-          "vision": false
-        },
-        {
-          "id": "BenevolenceMessiah/Qwen2.5-Coder-32B-Instruct-abliterated-Rombo-TIES-v1.0",
-          "label": "BenevolenceMessiah/Qwen2.5-Coder-32B-Instruct-abliterated-Rombo-TIES-v1.0",
-          "vision": false
-        },
-        {
-          "id": "Benholl94/Llama-3.2-3B-Instruct-abliterated",
-          "label": "Benholl94/Llama-3.2-3B-Instruct-abliterated",
-          "vision": false
-        },
-        {
-          "id": "BennyDaBall/Qwen3-4b-Z-Image-Turbo-AbliteratedV1",
-          "label": "BennyDaBall/Qwen3-4b-Z-Image-Turbo-AbliteratedV1",
-          "vision": false
-        },
-        {
-          "id": "benzart/gemma-2b-it-fine-tuning-for-code-test",
-          "label": "benzart/gemma-2b-it-fine-tuning-for-code-test",
-          "vision": false
-        },
-        {
-          "id": "beomi/Llama-3-KoEn-8B-Instruct-preview",
-          "label": "beomi/Llama-3-KoEn-8B-Instruct-preview",
-          "vision": false
-        },
-        {
-          "id": "beomi/Llama-3-Open-Ko-8B-Instruct-preview",
-          "label": "beomi/Llama-3-Open-Ko-8B-Instruct-preview",
-          "vision": false
-        },
-        {
-          "id": "beowolx/CodeNinja-1.0-OpenChat-7B",
-          "label": "beowolx/CodeNinja-1.0-OpenChat-7B",
-          "vision": false
-        },
-        {
-          "id": "bestler/Code-Summary-Llama-3.2-3B-Instruct",
-          "label": "bestler/Code-Summary-Llama-3.2-3B-Instruct",
-          "vision": false
-        },
-        {
-          "id": "bfavro73/qwen2.5-coder-1.5b-pandas-dpo-aligned",
-          "label": "bfavro73/qwen2.5-coder-1.5b-pandas-dpo-aligned",
-          "vision": false
-        },
-        {
-          "id": "bgg1996/Melinoe-Magistral-24B-Thinking-VL-broken-v0",
-          "label": "bgg1996/Melinoe-Magistral-24B-Thinking-VL-broken-v0",
-          "vision": false
-        },
-        {
-          "id": "bilalRahib/TinyLLama-NSFW-Chatbot",
-          "label": "bilalRahib/TinyLLama-NSFW-Chatbot",
-          "vision": false
-        },
-        {
-          "id": "Bingsu/exaone-3.0-7.8b-it",
-          "label": "Bingsu/exaone-3.0-7.8b-it",
-          "vision": false
-        },
-        {
-          "id": "bingwork/llama-2-7b-chat-mimiguanaco-1k",
-          "label": "bingwork/llama-2-7b-chat-mimiguanaco-1k",
-          "vision": false
-        },
-        {
-          "id": "BinxNet/gemma-4-26B-A4B-it-heretic",
-          "label": "BinxNet/gemma-4-26B-A4B-it-heretic",
-          "vision": false
-        },
-        {
-          "id": "bkholyday/Qwen2.5-0.5B-Instruct-medicalLLM-sft-jmle_cot_ryu",
-          "label": "bkholyday/Qwen2.5-0.5B-Instruct-medicalLLM-sft-jmle_cot_ryu",
-          "vision": false
-        },
-        {
-          "id": "BKM1804/Qwen2-0.5B-Instruct-238eef0f-6d85-4b49-b057-e5bb0ed45a7f-dpo-tuned-merged",
-          "label": "BKM1804/Qwen2-0.5B-Instruct-238eef0f-6d85-4b49-b057-e5bb0ed45a7f-dpo-tuned-merged",
-          "vision": false
-        },
-        {
-          "id": "BleachNick/Llama-3.2-1B-Instruct-GRPO-45k_RAG",
-          "label": "BleachNick/Llama-3.2-1B-Instruct-GRPO-45k_RAG",
-          "vision": false
-        },
-        {
-          "id": "BleachNick/Llama-3.2-1B-Instruct-GRPO-45k_RAGv1.5",
-          "label": "BleachNick/Llama-3.2-1B-Instruct-GRPO-45k_RAGv1.5",
-          "vision": false
-        },
-        {
-          "id": "BleachNick/Llama-3.2-1B-Instruct-GRPO-45k_RAGv2",
-          "label": "BleachNick/Llama-3.2-1B-Instruct-GRPO-45k_RAGv2",
-          "vision": false
-        },
-        {
-          "id": "BlossomsAI/Qwen2.5-Coder-14B-Instruct-Uncensored",
-          "label": "BlossomsAI/Qwen2.5-Coder-14B-Instruct-Uncensored",
-          "vision": false
-        },
-        {
-          "id": "BlossomsAI/Qwen2.5-Coder-7B-Instruct-Uncensored",
-          "label": "BlossomsAI/Qwen2.5-Coder-7B-Instruct-Uncensored",
-          "vision": false
-        },
-        {
-          "id": "BlossomsAI/SeaLLMs-v3-1.5B-Chat-Uncensored",
-          "label": "BlossomsAI/SeaLLMs-v3-1.5B-Chat-Uncensored",
-          "vision": false
-        },
-        {
-          "id": "blueintell/Llama-3.2-1B-Instruct-cp-finetuned",
-          "label": "blueintell/Llama-3.2-1B-Instruct-cp-finetuned",
-          "vision": false
-        },
-        {
-          "id": "BlueMoonlight/Qwen3-4B-Instruct-2507-mlx-fp16",
-          "label": "BlueMoonlight/Qwen3-4B-Instruct-2507-mlx-fp16",
-          "vision": false
-        },
-        {
-          "id": "bofenghuang/vigogne-2-13b-chat",
-          "label": "bofenghuang/vigogne-2-13b-chat",
-          "vision": false
-        },
-        {
-          "id": "bofenghuang/vigogne-2-13b-instruct",
-          "label": "bofenghuang/vigogne-2-13b-instruct",
-          "vision": false
-        },
-        {
-          "id": "bofenghuang/vigogne-2-7b-chat",
-          "label": "bofenghuang/vigogne-2-7b-chat",
-          "vision": false
-        },
-        {
-          "id": "bofenghuang/vigogne-2-7b-instruct",
-          "label": "bofenghuang/vigogne-2-7b-instruct",
-          "vision": false
-        },
-        {
-          "id": "bofenghuang/vigogne-7b-instruct",
-          "label": "bofenghuang/vigogne-7b-instruct",
-          "vision": false
-        },
-        {
-          "id": "Boltuzamaki/TinyLlama-1.1B-Chat-v1.0-bf16-push-demo",
-          "label": "Boltuzamaki/TinyLlama-1.1B-Chat-v1.0-bf16-push-demo",
-          "vision": false
-        },
-        {
-          "id": "bonamt11/Llama-3.2-1B-Instruct-bnb-4bit-Classification-model",
-          "label": "bonamt11/Llama-3.2-1B-Instruct-bnb-4bit-Classification-model",
-          "vision": false
-        },
-        {
-          "id": "bonamt11/Llama-3.2-1B-Instruct-bnb-4bit-Patent-Classification",
-          "label": "bonamt11/Llama-3.2-1B-Instruct-bnb-4bit-Patent-Classification",
-          "vision": false
-        },
-        {
-          "id": "bonamt11/Llama-3.2-1B-Instruct-bnb-4bit-Patent-Classifier",
-          "label": "bonamt11/Llama-3.2-1B-Instruct-bnb-4bit-Patent-Classifier",
-          "vision": false
-        },
-        {
-          "id": "bonamt11/Llama-3.2-1B-Instruct-bnb-4bit-Patent-Classifier-model",
-          "label": "bonamt11/Llama-3.2-1B-Instruct-bnb-4bit-Patent-Classifier-model",
-          "vision": false
-        },
-        {
-          "id": "bootplus/gemma-3-1b-it-Math-SFT-Math-SFT",
-          "label": "bootplus/gemma-3-1b-it-Math-SFT-Math-SFT",
-          "vision": false
-        },
-        {
-          "id": "Bradarr/Qwen2.5-0.5B-Instruct-abliterated",
-          "label": "Bradarr/Qwen2.5-0.5B-Instruct-abliterated",
-          "vision": false
-        },
-        {
-          "id": "braindao/gemma-3-12b-it-uncensored",
-          "label": "braindao/gemma-3-12b-it-uncensored",
-          "vision": false
-        },
-        {
-          "id": "braindao/gemma-3-27b-it-uncensored",
-          "label": "braindao/gemma-3-27b-it-uncensored",
-          "vision": false
-        },
-        {
-          "id": "braindao/gemma-3-4b-it-uncensored-v2",
-          "label": "braindao/gemma-3-4b-it-uncensored-v2",
-          "vision": false
-        },
-        {
-          "id": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.0",
-          "label": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.0",
-          "vision": false
-        },
-        {
-          "id": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.0-100",
-          "label": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.0-100",
-          "vision": false
-        },
-        {
-          "id": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.0-150",
-          "label": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.0-150",
-          "vision": false
-        },
-        {
-          "id": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.0-193",
-          "label": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.0-193",
-          "vision": false
-        },
-        {
-          "id": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.0-50",
-          "label": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.0-50",
-          "vision": false
-        },
-        {
-          "id": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.3",
-          "label": "braindao/iq-code-evmind-0.5b-instruct-v0.2411.3",
           "vision": false
         }
       ]

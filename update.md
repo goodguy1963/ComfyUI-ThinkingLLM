@@ -1,5 +1,19 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.5.7 (2026/08/26) - Safe Gemma 4 GGUF Audio
+
+### 2.5.7 Changes
+
+- Fixed the dedicated Gemma 4 Audio GGUF node so supported audio no longer hits the obsolete unconditional safety block reported in issue #18.
+- Kept the native crash protection for older or unknown llama.cpp backends, and now require `llama-cpp-python` 0.3.36 or newer.
+- Added a positive runtime capability check: the selected `Gemma4ChatHandler` must initialize its multimodal context and the mmproj must report audio support before inference begins.
+- Reorganized the README into a concise project entry point and moved detailed feature, workflow, model, backend, and troubleshooting explanations into dedicated documentation guides.
+
+### 2.5.7 Validation
+
+- Added regression coverage for legacy backends, modern audio-capable backends, the OpenAI-compatible `input_audio` payload, and mmproj files without audio support.
+- All 153 feature and compatibility tests pass in the bundled ComfyUI Python 3.12 runtime.
+
 ## Version 2.4.0 (2026/08/12) - Duration-Aware Video Prompting and QwenVL Core
 
 ### 2.4.0 Changes
