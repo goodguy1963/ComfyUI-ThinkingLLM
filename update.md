@@ -1,5 +1,18 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 2.5.8 (2026/09/27) - ROCm SageAttention 1 Support
+
+### 2.5.8 Changes
+
+- Added a SageAttention 1.x Triton path for Hugging Face Qwen nodes on ROCm, including SageAttention 1.0.6. Select `attention_mode=sage`, or use `auto` to try Sage before Flash Attention 2 and SDPA.
+- Retained NVIDIA CUDA kernel selection. Unsupported attention masks, head sizes, and model layers use the original SDPA forward.
+- Protected the KV cache from SageAttention 1's in-place key smoothing and documented that the GGUF `flash_attn` setting is separate from Hugging Face attention selection.
+
+### 2.5.8 Validation
+
+- Seven focused SageAttention tests and all 153 feature and compatibility tests pass on the local Windows CPU test path.
+- End-to-end inference on ROCm hardware remains unverified.
+
 ## Version 2.5.7 (2026/08/26) - Safe Gemma 4 GGUF Audio
 
 ### 2.5.7 Changes
