@@ -1,6 +1,7 @@
 """Hugging Face model configuration, discovery, device, and attention support."""
 
 import gc
+import importlib.metadata
 import json
 import os
 import platform
@@ -39,6 +40,11 @@ except Exception:
     sageattn_qk_int8_pv_fp8_cuda_sm90 = None
     SAGE_ATTENTION_AVAILABLE = False
 
+try:
+    from sageattention import sageattn as sageattn_triton
+except Exception:
+    sageattn_triton = None
+
 NODE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = NODE_DIR / ("hf_models.commercial.json" if COMMERCIAL_RELEASE else "hf_models.json")
 SYSTEM_PROMPTS_PATH = NODE_DIR / "AILab_System_Prompts.json"
@@ -53,7 +59,7 @@ PRESET_PROMPTS: list[str] = [NO_PRESET_PROMPT, "Describe this image in detail."]
 TOOLTIPS = {
     "model_name": "Pick the checkpoint. [installed] means a catalog model is available in a configured LLM location; [local] means an uncatalogued local model, including compatible ComfyUI text_encoders. Missing catalog models download on first use.",
     "quantization": "Precision vs VRAM. FP16 gives the best quality if memory allows; 8-bit suits 8–16 GB GPUs; 4-bit fits 6 GB or lower but is slower.",
-    "attention_mode": "auto tries SageAttention → FlashAttention 2 → SDPA in order. SDPA is stable and recommended. Only override when debugging attention backends.",
+    "attention_mode": "auto tries compatible SageAttention (including Triton Sage 1 on ROCm) → FlashAttention 2 → SDPA in order. SDPA is stable and recommended. Only override when debugging attention backends.",
     "preset_prompt": "Built-in instruction describing how Qwen-VL should analyze the media input.",
     "custom_prompt": "Additional user input that gets combined with the preset template. Leave empty to use only the template.",
     "max_tokens": "Maximum number of new tokens to decode. Larger values yield longer answers but consume more time and memory.",
@@ -195,8 +201,11 @@ ATTENTION_MODES = ["auto", "sage", "flash_attention_2", "sdpa"]
 # Debug: Check SageAttention availability
 print(f"[QwenVL Debug] SAGE_ATTENTION_AVAILABLE: {SAGE_ATTENTION_AVAILABLE}")
 if torch.cuda.is_available():
-    major, minor = torch.cuda.get_device_capability()
-    print(f"[QwenVL Debug] CUDA capability: {major}.{minor}")
+    if getattr(torch.version, "hip", None):
+        print(f"[QwenVL Debug] ROCm/HIP: {torch.version.hip}")
+    else:
+        major, minor = torch.cuda.get_device_capability()
+        print(f"[QwenVL Debug] CUDA capability: {major}.{minor}")
 else:
     print("[QwenVL Debug] CUDA not available")
 print(f"[QwenVL Debug] Final ATTENTION_MODES: {ATTENTION_MODES}")
@@ -549,23 +558,30 @@ def flash_attn_available():
 
 def sage_attn_available():
     """Check if SageAttention is available and GPU supports it."""
-    if not SAGE_ATTENTION_AVAILABLE:
-        return False
-    if not torch.cuda.is_available():
-        return False
-    major, _ = torch.cuda.get_device_capability()
-    if major < 8:
-        return False
-    return True
+    return get_sage_attention_config()[0] is not None
 
 
 def get_sage_attention_config():
     """Get the appropriate SageAttention kernel based on GPU architecture."""
-    if not sage_attn_available():
+    if not torch.cuda.is_available():
+        return None, None, None
+
+    if getattr(torch.version, "hip", None):
+        try:
+            is_v1 = importlib.metadata.version("sageattention").split(".", 1)[0] == "1"
+        except importlib.metadata.PackageNotFoundError:
+            is_v1 = False
+        if is_v1 and callable(sageattn_triton):
+            return sageattn_triton, None, None
+        return None, None, None
+
+    if not SAGE_ATTENTION_AVAILABLE:
         return None, None, None
 
     major, minor = torch.cuda.get_device_capability()
     arch_code = major * 10 + minor
+    if arch_code < 80:
+        return None, None, None
 
     attn_func = None
     pv_accum_dtype = "fp32"
@@ -590,7 +606,7 @@ def get_sage_attention_config():
         print(f"[QwenVL] SageAttention not supported on SM{arch_code}")
         return None, None, None
 
-    return attn_func, "per_warp", pv_accum_dtype
+    return (attn_func, "per_warp", pv_accum_dtype) if callable(attn_func) else (None, None, None)
 
 def is_fp8_model(model_name: str) -> bool:
     """Check if model name indicates it's a pre-quantized FP8 model."""

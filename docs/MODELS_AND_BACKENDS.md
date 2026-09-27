@@ -108,6 +108,7 @@ Commercial-release dropdowns include only reviewed, locked models and group entr
 - **Linux GGUF:** ThinkingLLM checks the backend at first use and can install a verified matching JamePeng wheel. Environment overrides are documented in the installation guide.
 - **Gemma 4 audio:** requires multimodal `llama-cpp-python` 0.3.36 or newer and an mmproj that reports audio support.
 - **Whisper:** requires `faster-whisper`; file-path decoding also requires FFmpeg.
+- **Hugging Face attention:** set `attention_mode` to `sage` to request SageAttention instead of Flash Attention 2. `auto` tries SageAttention, then Flash Attention 2, then PyTorch SDPA. On ROCm, SageAttention 1.0.6 uses its Triton backend when available in the same Python environment as ComfyUI. Unsupported models or attention inputs use SDPA. The GGUF node's `flash_attn` setting belongs to llama.cpp and does not select SageAttention.
 - **Flash Attention:** support is strongest on Linux and falls back when unavailable.
 - **Thinking controls:** Qwen3/Qwen3.5-style models generally respond most consistently to explicit thinking steering; other architectures may interpret it differently.
 
