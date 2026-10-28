@@ -12,6 +12,14 @@ Audio-capable GGUF nodes use the same box to distinguish models with curated aud
 
 The complete video recommendation table and its rationale are in [Video preset settings](VIDEO_PRESET_SETTINGS.md).
 
+## Decision Router
+
+The Image and Text Decision Router are separate nodes with statically typed `IMAGE` and `STRING` route outputs. Each classifies its input batch independently and routes the original items to one of up to 52 user-defined labels. Connect an image-producing or text-producing node, or enter text in the multiline input. Labels and descriptions are general-purpose: use them for intent, document types, product states, content categories, or other choices. The editable system prompt describes the decision criterion.
+
+Enter a route name in the last visible route row to reveal another row. Empty names are not offered to the model; at least two unique names are required. The node displays the routes that have values, followed by `decision_json`. That string contains each item's chosen label and normalized probabilities. Items selected for the same label are grouped in their original relative order. An unselected route emits an `ExecutionBlocker`, so downstream nodes connected only to that route are skipped.
+
+The models run in-process through llama.cpp and are retained by each node for reuse. The available models are Clef-Flash 9B, Clef 27B, and OpenJev 27B, all Q4_K_M. Text routing needs no vision projector; image routing downloads one on first use. Runtime capability checks happen before downloads. Image and text route outputs keep their native ComfyUI types. See [Decision Router llama.cpp requirements](LLAMA_CPP_SYSTEMONE_INSTALL.md). OpenJev is licensed CC BY-NC 4.0 and is excluded from commercial builds; the Clef models are Apache-2.0.
+
 ## Thinking mode
 
 Every inference node exposes `enable_thinking`.

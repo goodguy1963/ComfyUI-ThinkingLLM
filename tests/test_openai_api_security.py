@@ -73,14 +73,16 @@ class SecurityTests(unittest.TestCase):
         self.assertGreaterEqual(len(options), 1)
         # The dropdown should carry real curated models, not a placeholder.
         self.assertNotIn('provider/model-id', options)
-        # OrcaRouter's catalog includes the free Qwen model.
-        self.assertIn('qwen/qwen3.8-27b-free', api_node._catalog_models_for_profile('OrcaRouter'))
+        # The dropdown should contain at least one model from the current provider catalog.
+        catalog_models = api_node._catalog_models_for_profile('OrcaRouter')
+        self.assertTrue(catalog_models)
+        self.assertIn(catalog_models[0], options)
 
     def test_custom_model_field_overrides_dropdown(self):
         inputs = api_node.ThinkingLLMOpenAICompatibleAPI.INPUT_TYPES()
         self.assertIn('custom_model_name', inputs.get('optional', {}))
         p = self.profile()
-        self.assertEqual(api_node._validate_model(p, 'qwen/qwen3.8-27b-free'), 'qwen/qwen3.8-27b-free')
+        self.assertEqual(api_node._validate_model(p, 'custom/provider-model'), 'custom/provider-model')
         self.assertEqual(api_node._validate_model(p, 'any/custom-id'), 'any/custom-id')
 
     def test_authenticated_profiles_require_https(self):
@@ -339,7 +341,12 @@ class SecurityTests(unittest.TestCase):
         self.assertIn('OrcaRouter', catalog)
         orca = catalog['OrcaRouter']
         self.assertIsInstance(orca.get('models'), list)
-        self.assertIn('qwen/qwen3.8-27b-free', api_node._catalog_models_for_profile('OrcaRouter'))
+        catalog_models = api_node._catalog_models_for_profile('OrcaRouter')
+        self.assertTrue(catalog_models)
+        self.assertTrue(any(
+            isinstance(model, dict) and model.get('id') == catalog_models[0]
+            for model in orca['models']
+        ))
 
     def test_catalog_missing_or_broken_is_failure_tolerant(self):
         with mock.patch.object(api_node, 'CATALOG_PATH', Path('does/not/exist.json')):
@@ -353,7 +360,7 @@ class SecurityTests(unittest.TestCase):
         # be passed through unchanged — the catalog is UI only.
         p = self.profile()
         self.assertIsNone(p['allowed_models'])
-        self.assertEqual(api_node._validate_model(p, 'qwen/qwen3.8-27b-free'), 'qwen/qwen3.8-27b-free')
+        self.assertEqual(api_node._validate_model(p, 'custom/provider-model'), 'custom/provider-model')
         self.assertEqual(api_node._validate_model(p, 'anything/else'), 'anything/else')
 
 if __name__ == '__main__':

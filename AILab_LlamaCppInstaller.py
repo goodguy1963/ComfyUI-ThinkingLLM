@@ -1,4 +1,5 @@
 import contextlib
+import ctypes
 import importlib
 import importlib.metadata
 import os
@@ -46,6 +47,63 @@ KNOWN_LINUX_WHEEL_SPECS = {
     ),
 }
 VISION_HANDLER_NAMES = ("Qwen3VLChatHandler", "Qwen25VLChatHandler", "Gemma4ChatHandler", "MTMDChatHandler")
+DECISION_COMMON_SYMBOLS = (
+    "llama_batch_ext_init",
+    "llama_batch_ext_add_token",
+    "llama_batch_ext_add_embd",
+    "llama_batch_ext_set_pos",
+    "llama_batch_ext_set_output_embd",
+    "llama_batch_ext_free",
+    "llama_process",
+    "llama_get_embeddings_ith",
+    "llama_model_n_embd_inp",
+    "llama_set_causal_attn",
+)
+DECISION_ORDER_SYMBOLS = (
+    "llama_batch_ext_set_decision_order",
+    "?llama_batch_ext_set_decision_order@@YA_NPEAUllama_batch_ext@@HW4llama_decision_order@@@Z",
+    "__Z34llama_batch_ext_set_decision_orderP15llama_batch_exti20llama_decision_order",
+    "_Z34llama_batch_ext_set_decision_orderP15llama_batch_exti20llama_decision_order",
+)
+OPENJEV_LLAMA_SYMBOLS = (
+    "llama_get_logits_ith",
+    "llama_memory_clear",
+    "llama_pos",
+    "llama_seq_id",
+)
+OPENJEV_TEXT_SYMBOLS = ("llama_get_logits_ith",)
+OPENJEV_MTMD_SYMBOLS = (
+    "mtmd_input_chunks_init",
+    "mtmd_input_chunks_size",
+    "mtmd_input_chunks_get",
+    "mtmd_helper_eval_chunk_single",
+    "mtmd_helper_bitmap_init_from_buf",
+    "mtmd_input_chunk_get_tokens_text",
+    "mtmd_input_chunk_get_type",
+    "mtmd_input_chunks_free",
+    "mtmd_bitmap_free",
+    "mtmd_tokenize",
+)
+OPENJEV_HANDLER_METHODS = ("_process_mtmd_prompt", "_init_mtmd_context")
+CLEF_MTMD_SYMBOLS = (
+    "mtmd_input_chunks_init",
+    "mtmd_input_chunks_size",
+    "mtmd_input_chunks_get",
+    "mtmd_input_chunk_get_tokens_text",
+    "mtmd_input_chunk_get_tokens_image",
+    "mtmd_input_chunk_get_type",
+    "mtmd_input_chunk_get_n_tokens",
+    "mtmd_input_chunk_get_n_pos",
+    "mtmd_input_chunks_free",
+    "mtmd_tokenize",
+    "mtmd_helper_bitmap_init_from_buf",
+    "mtmd_bitmap_free",
+    "mtmd_encode_chunk",
+    "mtmd_get_output_embd",
+    "mtmd_decode_use_mrope",
+    "mtmd_image_tokens_get_n_tokens",
+    "mtmd_image_tokens_get_decoder_pos",
+)
 _LAST_BACKEND_INFO: dict | None = None
 _PRINTED_BACKEND_LINES: set[str] = set()
 
@@ -314,6 +372,20 @@ def _probe_gpu_offload_support() -> bool | None:
     except Exception:
         return None
 
+    # Newer llama-cpp-python wheels ship CUDA as a dynamic backend. Register
+    # those backends before asking the core library whether GPU offload exists.
+    try:
+        package = importlib.import_module("llama_cpp")
+        ggml = importlib.import_module("llama_cpp._ggml")
+        load_backends = getattr(ggml, "ggml_backend_load_all_from_path", None)
+        package_file = getattr(package, "__file__", None)
+        if callable(load_backends) and package_file:
+            backend_dir = os.path.join(os.path.dirname(package_file), "lib")
+            if os.path.isdir(backend_dir):
+                load_backends(ctypes.c_char_p(os.fsencode(backend_dir)))
+    except Exception:
+        pass
+
     candidates = [low_level]
     lib = getattr(low_level, "_lib", None)
     if lib is not None:
@@ -339,6 +411,7 @@ def _package_version() -> str:
 
 def _collect_llama_cpp_backend_info(llama_cpp, vision_handlers: list[str]) -> dict:
     cuda_versions = _detect_cuda_versions()
+    vision_api = _probe_mtmd_vision_api()
     return {
         "version": str(getattr(llama_cpp, "__version__", "") or _package_version()),
         "module_path": str(getattr(llama_cpp, "__file__", "") or "unknown"),
@@ -351,8 +424,134 @@ def _collect_llama_cpp_backend_info(llama_cpp, vision_handlers: list[str]) -> di
         "selected_cuda": cuda_versions.get("selected", ""),
         "selected_cuda_source": cuda_versions.get("selected_source", "unknown"),
         "vision_handlers": list(vision_handlers),
+        "systemone_symbols": list(_probe_systemone_symbols()),
+        "mtmd_api_symbols": list(vision_api["symbols"]),
+        "mtmd_handler_methods": list(vision_api["handler_methods"]),
         "gpu_offload": _probe_gpu_offload_support(),
     }
+
+
+def _probe_systemone_symbols() -> tuple[str, ...]:
+    """Return native decision API symbols actually exported by the loaded backend."""
+    try:
+        low_level = importlib.import_module("llama_cpp.llama_cpp")
+    except Exception:
+        return ()
+
+    candidates = [low_level]
+    native_library = getattr(low_level, "_lib", None)
+    if native_library is not None:
+        candidates.append(native_library)
+
+    found = set()
+    for name in (*DECISION_COMMON_SYMBOLS, *OPENJEV_LLAMA_SYMBOLS, *DECISION_ORDER_SYMBOLS):
+        for candidate in candidates:
+            if getattr(candidate, name, None) is not None:
+                found.add(name)
+                break
+    return tuple(sorted(found))
+
+
+def _probe_mtmd_vision_api() -> dict[str, tuple[str, ...]]:
+    """Return the low-level MTMD calls used by the in-process image adapter."""
+    try:
+        mtmd = importlib.import_module("llama_cpp.mtmd_cpp")
+        chat_format = importlib.import_module("llama_cpp.llama_chat_format")
+        handler = getattr(chat_format, "MTMDChatHandler", None)
+    except Exception:
+        return {"symbols": (), "handler_methods": ()}
+
+    required_symbols = dict.fromkeys((*OPENJEV_MTMD_SYMBOLS, *CLEF_MTMD_SYMBOLS))
+    symbols = tuple(name for name in required_symbols if getattr(mtmd, name, None) is not None)
+    handler_methods = tuple(
+        name for name in OPENJEV_HANDLER_METHODS if callable(getattr(handler, name, None))
+    )
+    return {"symbols": symbols, "handler_methods": handler_methods}
+
+
+def _decision_capabilities_from_info(info: dict) -> dict[str, object]:
+    handlers = set(info.get("vision_handlers") or ())
+    symbols = set(info.get("systemone_symbols") or ())
+    mtmd_symbols = set(info.get("mtmd_api_symbols") or ())
+    handler_methods = set(info.get("mtmd_handler_methods") or ())
+
+    missing_clef = [name for name in DECISION_COMMON_SYMBOLS if name not in symbols]
+    if not any(name in symbols for name in DECISION_ORDER_SYMBOLS):
+        missing_clef.append("llama_batch_ext_set_decision_order")
+
+    missing_openjev = [name for name in OPENJEV_TEXT_SYMBOLS if name not in symbols]
+    missing_openjev_vision = [name for name in OPENJEV_MTMD_SYMBOLS if name not in mtmd_symbols]
+    missing_openjev_vision.extend(name for name in OPENJEV_HANDLER_METHODS if name not in handler_methods)
+    missing_clef_vision = [name for name in CLEF_MTMD_SYMBOLS if name not in mtmd_symbols]
+    missing_clef_vision.extend(name for name in OPENJEV_HANDLER_METHODS if name not in handler_methods)
+    has_vision = "MTMDChatHandler" in handlers
+
+    return {
+        "vision": has_vision,
+        "openjev": not missing_openjev,
+        "clef": not missing_clef,
+        "openjev_vision": has_vision and not missing_openjev and not missing_openjev_vision,
+        "clef_vision": has_vision and not missing_clef and not missing_clef_vision,
+        "missing_openjev_capabilities": missing_openjev,
+        "missing_clef_symbols": missing_clef,
+        "missing_openjev_vision_capabilities": missing_openjev_vision,
+        "missing_clef_vision_symbols": missing_clef_vision,
+    }
+
+
+def get_llama_cpp_decision_capabilities() -> dict[str, object]:
+    """Describe in-process requirements for the decision models without loading weights."""
+    info = dict(_LAST_BACKEND_INFO or {})
+    if not info:
+        try:
+            chat_format = importlib.import_module("llama_cpp.llama_chat_format")
+            info["vision_handlers"] = [name for name in VISION_HANDLER_NAMES if hasattr(chat_format, name)]
+        except Exception:
+            info["vision_handlers"] = []
+        info["systemone_symbols"] = list(_probe_systemone_symbols())
+        vision_api = _probe_mtmd_vision_api()
+        info["mtmd_api_symbols"] = list(vision_api["symbols"])
+        info["mtmd_handler_methods"] = list(vision_api["handler_methods"])
+    return _decision_capabilities_from_info(info)
+
+
+def ensure_llama_cpp_decision_backend(model_key: str, *, require_vision: bool = False):
+    """Check in-process decision APIs and, for image mode, the required vision path."""
+    ensure_llama_cpp_backend(require_vision_handlers=require_vision)
+    capabilities = get_llama_cpp_decision_capabilities()
+    openjev_capability = "openjev_vision" if require_vision else "openjev"
+    clef_capability = "clef_vision" if require_vision else "clef"
+    if model_key == "openjev" and capabilities[openjev_capability]:
+        return get_last_llama_cpp_backend_info()
+    if model_key in {"clef_flash", "clef_27b"} and capabilities[clef_capability]:
+        return get_last_llama_cpp_backend_info()
+
+    if model_key == "openjev":
+        mode_name = "image" if require_vision else "text"
+        missing_items = capabilities["missing_openjev_capabilities"]
+        if require_vision:
+            missing_items = [*missing_items, *capabilities["missing_openjev_vision_capabilities"]]
+        missing = ", ".join(missing_items)
+        hint = (
+            f"OpenJev {mode_name} routing needs the in-process llama.cpp decision APIs. "
+            f"Missing: {missing or 'llama.cpp logits or MTMD vision support'}. Install a llama-cpp-python build with those APIs "
+            "and restart ComfyUI; no separate llama-server is used."
+        )
+    elif model_key in {"clef_flash", "clef_27b"}:
+        mode_name = "image" if require_vision else "text"
+        missing_items = capabilities["missing_clef_symbols"]
+        if require_vision:
+            missing_items = [*missing_items, *capabilities["missing_clef_vision_symbols"]]
+        missing = ", ".join(missing_items)
+        hint = (
+            f"Clef {mode_name} routing needs an in-process llama.cpp build that exports the native decision-head API. "
+            f"Missing: {missing or 'native decision-head or MTMD vision symbols'}. "
+            "Install a compatible JamePeng llama-cpp-python source build and restart ComfyUI; "
+            "do not install a separate llama-server. See docs/LLAMA_CPP_SYSTEMONE_INSTALL.md."
+        )
+    else:
+        raise ValueError(f"Unknown ThinkingLLM decision model key: {model_key}")
+    raise RuntimeError(f"[ThinkingLLM Decision Router] In-process runtime is incompatible. {hint}")
 
 
 def _format_bool_status(value) -> str:

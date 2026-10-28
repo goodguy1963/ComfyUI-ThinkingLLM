@@ -650,7 +650,7 @@ class TestModelRecommendations(unittest.TestCase):
         enhancer_source = read_source("AILab_QwenVL_PromptEnhancer.py")
 
         self.assertIn('os.environ.get("THINKINGLLM_COMMERCIAL_RELEASE") == "1"', init_source)
-        self.assertIn('WEB_DIRECTORY = None if COMMERCIAL_RELEASE else "./web"', init_source)
+        self.assertIn('WEB_DIRECTORY = "./web_commercial" if COMMERCIAL_RELEASE else "./web"', init_source)
         self.assertNotIn('"AILab_QwenVL_GGUF"', re.search(r"COMMERCIAL_MODULES = \{.*?\}", init_source, re.DOTALL).group(0))
         commercial_node_modules = re.search(
             r"COMMERCIAL_NODE_MODULES\s*=\s*(\{.*?\})",
@@ -660,7 +660,7 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertIsNotNone(commercial_node_modules)
         self.assertEqual(
             ast.literal_eval(commercial_node_modules.group(1)),
-            {"story_split_node", "system_prompt_preset", "vram_cleanup"},
+            {"decision_router", "story_split_node", "system_prompt_preset", "vram_cleanup"},
         )
         self.assertIn("only permits preinstalled, hash-locked models", access_source)
         self.assertIn("if custom.exists() and not COMMERCIAL_RELEASE", hf_models_source)
@@ -2479,7 +2479,7 @@ class TestLoaderModuleRegistration(unittest.TestCase):
         self.assertIn("ThinkingLLM_QwenVL_PromptEnhancer", package.NODE_CLASS_MAPPINGS)
         self.assertNotIn("ThinkingLLM_QwenVL_GGUF", package.NODE_CLASS_MAPPINGS)
         self.assertNotIn("ThinkingLLM_Whisper_ASR", package.NODE_CLASS_MAPPINGS)
-        self.assertIsNone(package.WEB_DIRECTORY)
+        self.assertEqual(package.WEB_DIRECTORY, "./web_commercial")
 
     def test_loader_registers_qwenvl_modules_with_stubbed_dependencies(self):
         package = load_thinkingllm_loader_subset(

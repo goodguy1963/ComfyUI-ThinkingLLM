@@ -1,5 +1,24 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 3.0.0 (2026/10/28) - Local Decision Router
+
+### 3.0.0 Changes
+
+- Added separate image and text Decision Router nodes. Each item is classified independently and routed to one of up to 52 user-named outputs, with an editable system prompt and per-route descriptions.
+- Routed only the selected branch. Inactive outputs emit ComfyUI execution blockers, so unused downstream branches are skipped; image and text outputs retain their native types.
+- Added `decision_json` with each item's selected route and normalized decision probabilities. Updated connected output labels when route names change while keeping route sockets stable.
+- Added in-process llama.cpp support for Clef-Flash 9B, Clef 27B, and OpenJev 27B GGUFs. Models download on first use; image routing also downloads its vision projector. No separate `llama-server` is started.
+- Added runtime probes for the required SystemOne decision APIs, MTMD vision symbols, and CUDA dynamic backends, with actionable compatibility errors before model downloads.
+- Added community/commercial model catalog handling. OpenJev is available only in community builds because its license is CC BY-NC 4.0; Clef models are Apache-2.0.
+- Added runtime installation guidance, Decision Router workflow documentation, and an illustrated README example. PyTorch and Transformers are not upgraded as part of llama.cpp setup.
+
+### 3.0.0 Validation
+
+- All 220 tests passed in the bundled ComfyUI Python 3.12 runtime, including the Decision Router and llama.cpp installer suites.
+- Python compilation, JavaScript syntax, version metadata parsing, README image validation, and `git diff --check` passed.
+- The image router was exercised in ComfyUI with Clef-Flash 9B on fox, dog, cat, and none routes; the expected branch was observed for the demonstrated inputs.
+- Full inference smoke tests for Clef 27B and OpenJev 27B, and clean-install validation across all Python/CUDA/OS combinations, have not been completed. The in-process runtime currently requires a llama.cpp build exporting the documented decision and vision APIs; only the Windows x64 / CPython 3.12 / CUDA 13.0 JamePeng wheel is documented as locally verified.
+
 ## Version 2.5.8 (2026/09/27) - ROCm SageAttention 1 Support
 
 ### 2.5.8 Changes

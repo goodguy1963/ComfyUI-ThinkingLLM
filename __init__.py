@@ -1,9 +1,9 @@
 """
 {
     "name": "ComfyUI-ThinkingLLM",
-    "description": "A multimodal ComfyUI AI node with Qwen3.5, Qwen3-VL, Qwen2.5-VL, Qwen3, and Gemma 4 integrations. Features live thinking in the terminal to see what the LLM is doing in real time.",
+    "description": "A multimodal ComfyUI AI node pack with Qwen, Gemma 4, GGUF, Whisper, image and text decision routing, and live thinking output.",
     "author": "goodguy1963",
-    "version": "2.5.8",
+    "version": "3.0.0",
     "url": "https://github.com/goodguy1963/ComfyUI-ThinkingLLM",
     "category": "image"
 }
@@ -20,7 +20,7 @@ sys.path.insert(0, current_dir)
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 COMMERCIAL_RELEASE = os.environ.get("THINKINGLLM_COMMERCIAL_RELEASE") == "1"
-WEB_DIRECTORY = None if COMMERCIAL_RELEASE else "./web"
+WEB_DIRECTORY = "./web_commercial" if COMMERCIAL_RELEASE else "./web"
 COMMERCIAL_MODULES = {
     "AILab_OutputCleaner",
     "AILab_QwenVL",
@@ -28,6 +28,7 @@ COMMERCIAL_MODULES = {
     "AILab_StreamDisplay",
 }
 COMMERCIAL_NODE_MODULES = {
+    "decision_router",
     "story_split_node",
     "system_prompt_preset",
     "vram_cleanup",
