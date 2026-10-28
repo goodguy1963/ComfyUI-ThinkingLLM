@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Curated convenience model lists for the ThinkingLLM API node. These are suggestions only and never override a server-side profile allowed_models allowlist. Maintained by hand; validated by tools/check_api_model_catalogs.py on every PR, push, and release.",
-  "updated_at": "2026-09-27",
+  "updated_at": "2026-10-28",
   "profiles": {
     "OpenAI": {
       "provider": "OpenAI",
@@ -78,38 +78,8 @@
           "vision": false
         },
         {
-          "id": "deepseek/deepseek-v4-flash-0731",
-          "label": "deepseek/deepseek-v4-flash-0731",
-          "vision": false
-        },
-        {
           "id": "meta-llama/llama-4-scout",
           "label": "meta-llama/llama-4-scout",
-          "vision": false
-        },
-        {
-          "id": "z-ai/glm-5.3",
-          "label": "z-ai/glm-5.3",
-          "vision": false
-        },
-        {
-          "id": "z-ai/glm-5.3-flash",
-          "label": "z-ai/glm-5.3-flash",
-          "vision": false
-        },
-        {
-          "id": "~deepseek/deepseek-v4-flash-latest",
-          "label": "~deepseek/deepseek-v4-flash-latest",
-          "vision": false
-        },
-        {
-          "id": "~z-ai/glm-flash-latest",
-          "label": "~z-ai/glm-flash-latest",
-          "vision": false
-        },
-        {
-          "id": "~z-ai/glm-latest",
-          "label": "~z-ai/glm-latest",
           "vision": false
         },
         {
@@ -273,6 +243,46 @@
           "vision": false
         },
         {
+          "id": "openai/gpt-6.1-sol",
+          "label": "openai/gpt-6.1-sol",
+          "vision": false
+        },
+        {
+          "id": "openai/gpt-6.1-sol-pro",
+          "label": "openai/gpt-6.1-sol-pro",
+          "vision": false
+        },
+        {
+          "id": "openai/gpt-6.1-sol-pro:batch",
+          "label": "openai/gpt-6.1-sol-pro:batch",
+          "vision": false
+        },
+        {
+          "id": "openai/gpt-6.1-sol:batch",
+          "label": "openai/gpt-6.1-sol:batch",
+          "vision": false
+        },
+        {
+          "id": "openai/gpt-6.1-terra",
+          "label": "openai/gpt-6.1-terra",
+          "vision": false
+        },
+        {
+          "id": "openai/gpt-6.1-terra-pro",
+          "label": "openai/gpt-6.1-terra-pro",
+          "vision": false
+        },
+        {
+          "id": "openai/gpt-6.1-terra-pro:batch",
+          "label": "openai/gpt-6.1-terra-pro:batch",
+          "vision": false
+        },
+        {
+          "id": "openai/gpt-6.1-terra:batch",
+          "label": "openai/gpt-6.1-terra:batch",
+          "vision": false
+        },
+        {
           "id": "xiaomi/mimo-v2.5",
           "label": "xiaomi/mimo-v2.5",
           "vision": false
@@ -280,6 +290,11 @@
         {
           "id": "xiaomi/mimo-v2.5-pro",
           "label": "xiaomi/mimo-v2.5-pro",
+          "vision": false
+        },
+        {
+          "id": "xiaomi/mimo-v2.6-flash",
+          "label": "xiaomi/mimo-v2.6-flash",
           "vision": false
         },
         {
@@ -318,6 +333,11 @@
           "vision": false
         },
         {
+          "id": "deepseek/deepseek-v4-flash-0731",
+          "label": "deepseek/deepseek-v4-flash-0731",
+          "vision": false
+        },
+        {
           "id": "deepseek/deepseek-v4-flash-vision-exp",
           "label": "deepseek/deepseek-v4-flash-vision-exp",
           "vision": false
@@ -335,6 +355,11 @@
         {
           "id": "deepseek/deepseek-v4.1-flash",
           "label": "deepseek/deepseek-v4.1-flash",
+          "vision": false
+        },
+        {
+          "id": "deepseek/deepseek-v4.1-flash-1017",
+          "label": "deepseek/deepseek-v4.1-flash-1017",
           "vision": false
         },
         {
@@ -358,16 +383,6 @@
           "vision": false
         },
         {
-          "id": "google/gemini-2.5-flash-lite:batch",
-          "label": "google/gemini-2.5-flash-lite:batch",
-          "vision": false
-        },
-        {
-          "id": "google/gemini-2.5-flash:batch",
-          "label": "google/gemini-2.5-flash:batch",
-          "vision": false
-        },
-        {
           "id": "google/gemini-2.5-pro",
           "label": "google/gemini-2.5-pro",
           "vision": false
@@ -375,11 +390,6 @@
         {
           "id": "google/gemini-2.5-pro-preview",
           "label": "google/gemini-2.5-pro-preview",
-          "vision": false
-        },
-        {
-          "id": "google/gemini-2.5-pro:batch",
-          "label": "google/gemini-2.5-pro:batch",
           "vision": false
         },
         {
@@ -473,6 +483,16 @@
           "vision": false
         },
         {
+          "id": "google/gemini-4-argon",
+          "label": "google/gemini-4-argon",
+          "vision": false
+        },
+        {
+          "id": "google/gemini-4-argon:batch",
+          "label": "google/gemini-4-argon:batch",
+          "vision": false
+        },
+        {
           "id": "google/lyria-3-clip-preview",
           "label": "google/lyria-3-clip-preview",
           "vision": false
@@ -480,11 +500,6 @@
         {
           "id": "google/lyria-3-pro-preview",
           "label": "google/lyria-3-pro-preview",
-          "vision": false
-        },
-        {
-          "id": "meta-llama/llama-4-maverick",
-          "label": "meta-llama/llama-4-maverick",
           "vision": false
         },
         {
@@ -513,8 +528,28 @@
           "vision": false
         },
         {
+          "id": "meta/muse-spark-open",
+          "label": "meta/muse-spark-open",
+          "vision": false
+        },
+        {
+          "id": "meta/muse-wonder",
+          "label": "meta/muse-wonder",
+          "vision": false
+        },
+        {
           "id": "minimax/minimax-m3",
           "label": "minimax/minimax-m3",
+          "vision": false
+        },
+        {
+          "id": "minimax/minimax-m3.1-flash",
+          "label": "minimax/minimax-m3.1-flash",
+          "vision": false
+        },
+        {
+          "id": "mistralai/mistral-large-4-0",
+          "label": "mistralai/mistral-large-4-0",
           "vision": false
         },
         {
@@ -523,8 +558,28 @@
           "vision": false
         },
         {
+          "id": "moonshotai/kimi-k3.1-pro",
+          "label": "moonshotai/kimi-k3.1-pro",
+          "vision": false
+        },
+        {
           "id": "moonshotai/kimi-k3:batch",
           "label": "moonshotai/kimi-k3:batch",
+          "vision": false
+        },
+        {
+          "id": "nvidia/nemotron-3-super-120b-a12b",
+          "label": "nvidia/nemotron-3-super-120b-a12b",
+          "vision": false
+        },
+        {
+          "id": "nvidia/nemotron-3.5-super-vl",
+          "label": "nvidia/nemotron-3.5-super-vl",
+          "vision": false
+        },
+        {
+          "id": "particle-ai/particle-1",
+          "label": "particle-ai/particle-1",
           "vision": false
         },
         {
@@ -535,6 +590,16 @@
         {
           "id": "qwen/qwen3.8-2.4t-a95b",
           "label": "qwen/qwen3.8-2.4t-a95b",
+          "vision": false
+        },
+        {
+          "id": "reflection/beam-1.0-501b-a23b",
+          "label": "reflection/beam-1.0-501b-a23b",
+          "vision": false
+        },
+        {
+          "id": "stepfun/step-5-preview",
+          "label": "stepfun/step-5-preview",
           "vision": false
         },
         {
@@ -553,8 +618,8 @@
           "vision": false
         },
         {
-          "id": "xiaomi/mimo-v2.6-flash",
-          "label": "xiaomi/mimo-v2.6-flash",
+          "id": "unbiased/pareto-26.10",
+          "label": "unbiased/pareto-26.10",
           "vision": false
         },
         {
@@ -565,6 +630,16 @@
         {
           "id": "z-ai/glm-5.2",
           "label": "z-ai/glm-5.2",
+          "vision": false
+        },
+        {
+          "id": "z-ai/glm-5.3",
+          "label": "z-ai/glm-5.3",
+          "vision": false
+        },
+        {
+          "id": "z-ai/glm-5.3-flash",
+          "label": "z-ai/glm-5.3-flash",
           "vision": false
         },
         {
@@ -593,6 +668,11 @@
           "vision": false
         },
         {
+          "id": "~deepseek/deepseek-v4-flash-latest",
+          "label": "~deepseek/deepseek-v4-flash-latest",
+          "vision": false
+        },
+        {
           "id": "~google/gemini-flash-latest",
           "label": "~google/gemini-flash-latest",
           "vision": false
@@ -605,6 +685,21 @@
         {
           "id": "~moonshotai/kimi-latest",
           "label": "~moonshotai/kimi-latest",
+          "vision": false
+        },
+        {
+          "id": "~unbiased/pareto-latest",
+          "label": "~unbiased/pareto-latest",
+          "vision": false
+        },
+        {
+          "id": "~z-ai/glm-flash-latest",
+          "label": "~z-ai/glm-flash-latest",
+          "vision": false
+        },
+        {
+          "id": "~z-ai/glm-latest",
+          "label": "~z-ai/glm-latest",
           "vision": false
         },
         {
@@ -683,6 +778,16 @@
           "vision": false
         },
         {
+          "id": "anthropic/claude-haiku-5.5",
+          "label": "anthropic/claude-haiku-5.5",
+          "vision": false
+        },
+        {
+          "id": "anthropic/claude-haiku-5.5:batch",
+          "label": "anthropic/claude-haiku-5.5:batch",
+          "vision": false
+        },
+        {
           "id": "anthropic/claude-opus-4.6",
           "label": "anthropic/claude-opus-4.6",
           "vision": false
@@ -758,8 +863,28 @@
           "vision": false
         },
         {
+          "id": "anthropic/claude-sonnet-5.5",
+          "label": "anthropic/claude-sonnet-5.5",
+          "vision": false
+        },
+        {
+          "id": "anthropic/claude-sonnet-5.5:batch",
+          "label": "anthropic/claude-sonnet-5.5:batch",
+          "vision": false
+        },
+        {
           "id": "anthropic/claude-sonnet-5:batch",
           "label": "anthropic/claude-sonnet-5:batch",
+          "vision": false
+        },
+        {
+          "id": "inception/mercury-3",
+          "label": "inception/mercury-3",
+          "vision": false
+        },
+        {
+          "id": "inclusionai/ling-3.1-flash",
+          "label": "inclusionai/ling-3.1-flash",
           "vision": false
         },
         {
@@ -773,13 +898,18 @@
           "vision": false
         },
         {
-          "id": "nvidia/nemotron-3.5-lightning",
-          "label": "nvidia/nemotron-3.5-lightning",
+          "id": "nvidia/nemotron-3.5-lightning:free",
+          "label": "nvidia/nemotron-3.5-lightning:free",
           "vision": false
         },
         {
-          "id": "nvidia/nemotron-3.5-lightning:free",
-          "label": "nvidia/nemotron-3.5-lightning:free",
+          "id": "nvidia/nemotron-3.5-super-vl:free",
+          "label": "nvidia/nemotron-3.5-super-vl:free",
+          "vision": false
+        },
+        {
+          "id": "nvidia/switchyard",
+          "label": "nvidia/switchyard",
           "vision": false
         },
         {
@@ -793,18 +923,8 @@
           "vision": false
         },
         {
-          "id": "qwen/qwen-plus-2025-07-28",
-          "label": "qwen/qwen-plus-2025-07-28",
-          "vision": false
-        },
-        {
           "id": "qwen/qwen3-coder-flash",
           "label": "qwen/qwen3-coder-flash",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3-coder-plus",
-          "label": "qwen/qwen3-coder-plus",
           "vision": false
         },
         {
@@ -888,8 +1008,13 @@
           "vision": false
         },
         {
-          "id": "stealth/space-bunny-alpha",
-          "label": "stealth/space-bunny-alpha",
+          "id": "scaledown/extract",
+          "label": "scaledown/extract",
+          "vision": false
+        },
+        {
+          "id": "scaledown/summarize",
+          "label": "scaledown/summarize",
           "vision": false
         },
         {
@@ -918,6 +1043,11 @@
           "vision": false
         },
         {
+          "id": "~anthropic/claude-haiku-latest",
+          "label": "~anthropic/claude-haiku-latest",
+          "vision": false
+        },
+        {
           "id": "~anthropic/claude-opus-latest",
           "label": "~anthropic/claude-opus-latest",
           "vision": false
@@ -925,6 +1055,11 @@
         {
           "id": "~anthropic/claude-sonnet-latest",
           "label": "~anthropic/claude-sonnet-latest",
+          "vision": false
+        },
+        {
+          "id": "meta-llama/llama-4-maverick",
+          "label": "meta-llama/llama-4-maverick",
           "vision": false
         },
         {
@@ -1133,11 +1268,6 @@
           "vision": false
         },
         {
-          "id": "arcee-ai/trinity-large-thinking",
-          "label": "arcee-ai/trinity-large-thinking",
-          "vision": false
-        },
-        {
           "id": "bytedance-seed/seed-1.6",
           "label": "bytedance-seed/seed-1.6",
           "vision": false
@@ -1168,6 +1298,11 @@
           "vision": false
         },
         {
+          "id": "elorian/glimpse",
+          "label": "elorian/glimpse",
+          "vision": false
+        },
+        {
           "id": "google/gemma-4-26b-a4b-it",
           "label": "google/gemma-4-26b-a4b-it",
           "vision": false
@@ -1193,31 +1328,6 @@
           "vision": false
         },
         {
-          "id": "inclusionai/ling-3.0-flash-fin",
-          "label": "inclusionai/ling-3.0-flash-fin",
-          "vision": false
-        },
-        {
-          "id": "inclusionai/ling-3.0-flash-fin:free",
-          "label": "inclusionai/ling-3.0-flash-fin:free",
-          "vision": false
-        },
-        {
-          "id": "inclusionai/ling-3.0-flash-sante:free",
-          "label": "inclusionai/ling-3.0-flash-sante:free",
-          "vision": false
-        },
-        {
-          "id": "inclusionai/ling-3.0-flash-vl",
-          "label": "inclusionai/ling-3.0-flash-vl",
-          "vision": false
-        },
-        {
-          "id": "kwaipilot/kat-coder-pro-v2.5",
-          "label": "kwaipilot/kat-coder-pro-v2.5",
-          "vision": false
-        },
-        {
           "id": "mistralai/devstral-2512",
           "label": "mistralai/devstral-2512",
           "vision": false
@@ -1233,18 +1343,8 @@
           "vision": false
         },
         {
-          "id": "mistralai/ministral-8b-2512:batch",
-          "label": "mistralai/ministral-8b-2512:batch",
-          "vision": false
-        },
-        {
           "id": "mistralai/mistral-large-2512",
           "label": "mistralai/mistral-large-2512",
-          "vision": false
-        },
-        {
-          "id": "mistralai/mistral-large-2512:batch",
-          "label": "mistralai/mistral-large-2512:batch",
           "vision": false
         },
         {
@@ -1260,11 +1360,6 @@
         {
           "id": "mistralai/mistral-small-2603",
           "label": "mistralai/mistral-small-2603",
-          "vision": false
-        },
-        {
-          "id": "mistralai/mistral-small-2603:batch",
-          "label": "mistralai/mistral-small-2603:batch",
           "vision": false
         },
         {
@@ -1293,8 +1388,23 @@
           "vision": false
         },
         {
+          "id": "morph/morph-v3-fast",
+          "label": "morph/morph-v3-fast",
+          "vision": false
+        },
+        {
           "id": "morph/morph-v3-large",
           "label": "morph/morph-v3-large",
+          "vision": false
+        },
+        {
+          "id": "nex-agi/nex-n2.5-mini",
+          "label": "nex-agi/nex-n2.5-mini",
+          "vision": false
+        },
+        {
+          "id": "nex-agi/nex-n2.5-pro",
+          "label": "nex-agi/nex-n2.5-pro",
           "vision": false
         },
         {
@@ -1303,18 +1413,13 @@
           "vision": false
         },
         {
-          "id": "nvidia/nemotron-3-super-120b-a12b",
-          "label": "nvidia/nemotron-3-super-120b-a12b",
-          "vision": false
-        },
-        {
-          "id": "nvidia/nemotron-3-super-120b-a12b:free",
-          "label": "nvidia/nemotron-3-super-120b-a12b:free",
-          "vision": false
-        },
-        {
           "id": "nvidia/nemotron-3-ultra-550b-a55b",
           "label": "nvidia/nemotron-3-ultra-550b-a55b",
+          "vision": false
+        },
+        {
+          "id": "nvidia/nemotron-3.5-lightning",
+          "label": "nvidia/nemotron-3.5-lightning",
           "vision": false
         },
         {
@@ -1335,6 +1440,11 @@
         {
           "id": "prism-ml/ternary-bonsai-2-27b",
           "label": "prism-ml/ternary-bonsai-2-27b",
+          "vision": false
+        },
+        {
+          "id": "prism-ml/ternary-bonsai-2-9b",
+          "label": "prism-ml/ternary-bonsai-2-9b",
           "vision": false
         },
         {
@@ -1363,23 +1473,8 @@
           "vision": false
         },
         {
-          "id": "qwen/qwen3-max",
-          "label": "qwen/qwen3-max",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3-max-thinking",
-          "label": "qwen/qwen3-max-thinking",
-          "vision": false
-        },
-        {
           "id": "qwen/qwen3-next-80b-a3b-instruct",
           "label": "qwen/qwen3-next-80b-a3b-instruct",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3-next-80b-a3b-thinking",
-          "label": "qwen/qwen3-next-80b-a3b-thinking",
           "vision": false
         },
         {
@@ -1438,13 +1533,13 @@
           "vision": false
         },
         {
-          "id": "qwen/qwen3.6-max-preview",
-          "label": "qwen/qwen3.6-max-preview",
+          "id": "qwen/qwen3.7-plus:batch",
+          "label": "qwen/qwen3.7-plus:batch",
           "vision": false
         },
         {
-          "id": "qwen/qwen3.8-27b:free",
-          "label": "qwen/qwen3.8-27b:free",
+          "id": "recursive/flint-v1.0:free",
+          "label": "recursive/flint-v1.0:free",
           "vision": false
         },
         {
@@ -1473,8 +1568,13 @@
           "vision": false
         },
         {
-          "id": "unbiased/pareto",
-          "label": "unbiased/pareto",
+          "id": "unbiased/pareto-26.9",
+          "label": "unbiased/pareto-26.9",
+          "vision": false
+        },
+        {
+          "id": "xingchen-agi/xing4.0-29b-a4b:free",
+          "label": "xingchen-agi/xing4.0-29b-a4b:free",
           "vision": false
         },
         {
@@ -1495,11 +1595,6 @@
         {
           "id": "mistralai/codestral-2508",
           "label": "mistralai/codestral-2508",
-          "vision": false
-        },
-        {
-          "id": "mistralai/codestral-2508:batch",
-          "label": "mistralai/codestral-2508:batch",
           "vision": false
         },
         {
@@ -1608,33 +1703,8 @@
           "vision": false
         },
         {
-          "id": "anthropic/claude-sonnet-4",
-          "label": "anthropic/claude-sonnet-4",
-          "vision": false
-        },
-        {
-          "id": "openai/o1",
-          "label": "openai/o1",
-          "vision": false
-        },
-        {
-          "id": "openai/o1-pro",
-          "label": "openai/o1-pro",
-          "vision": false
-        },
-        {
           "id": "openai/o3",
           "label": "openai/o3",
-          "vision": false
-        },
-        {
-          "id": "openai/o3-mini",
-          "label": "openai/o3-mini",
-          "vision": false
-        },
-        {
-          "id": "openai/o3-mini-high",
-          "label": "openai/o3-mini-high",
           "vision": false
         },
         {
@@ -1650,16 +1720,6 @@
         {
           "id": "openai/o3:batch",
           "label": "openai/o3:batch",
-          "vision": false
-        },
-        {
-          "id": "openai/o4-mini",
-          "label": "openai/o4-mini",
-          "vision": false
-        },
-        {
-          "id": "openai/o4-mini-high",
-          "label": "openai/o4-mini-high",
           "vision": false
         },
         {
@@ -1685,11 +1745,6 @@
         {
           "id": "z-ai/glm-4.7-flash",
           "label": "z-ai/glm-4.7-flash",
-          "vision": false
-        },
-        {
-          "id": "~anthropic/claude-haiku-latest",
-          "label": "~anthropic/claude-haiku-latest",
           "vision": false
         },
         {
@@ -1783,6 +1838,11 @@
           "vision": false
         },
         {
+          "id": "inclusionai/ling-3.0-flash-vl",
+          "label": "inclusionai/ling-3.0-flash-vl",
+          "vision": false
+        },
+        {
           "id": "meta-llama/llama-3.1-70b-instruct",
           "label": "meta-llama/llama-3.1-70b-instruct",
           "vision": false
@@ -1825,11 +1885,6 @@
         {
           "id": "mistralai/mistral-medium-3.1",
           "label": "mistralai/mistral-medium-3.1",
-          "vision": false
-        },
-        {
-          "id": "mistralai/mistral-medium-3.1:batch",
-          "label": "mistralai/mistral-medium-3.1:batch",
           "vision": false
         },
         {
@@ -1888,58 +1943,13 @@
           "vision": false
         },
         {
-          "id": "qwen/qwen3-14b",
-          "label": "qwen/qwen3-14b",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3-235b-a22b",
-          "label": "qwen/qwen3-235b-a22b",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3-235b-a22b-thinking-2507",
-          "label": "qwen/qwen3-235b-a22b-thinking-2507",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3-30b-a3b",
-          "label": "qwen/qwen3-30b-a3b",
-          "vision": false
-        },
-        {
           "id": "qwen/qwen3-32b",
           "label": "qwen/qwen3-32b",
           "vision": false
         },
         {
-          "id": "qwen/qwen3-8b",
-          "label": "qwen/qwen3-8b",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3-vl-235b-a22b-thinking",
-          "label": "qwen/qwen3-vl-235b-a22b-thinking",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3-vl-32b-instruct",
-          "label": "qwen/qwen3-vl-32b-instruct",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3-vl-8b-thinking",
-          "label": "qwen/qwen3-vl-8b-thinking",
-          "vision": false
-        },
-        {
           "id": "sao10k/l3.1-euryale-70b",
           "label": "sao10k/l3.1-euryale-70b",
-          "vision": false
-        },
-        {
-          "id": "sao10k/l3.3-euryale-70b",
-          "label": "sao10k/l3.3-euryale-70b",
           "vision": false
         },
         {
@@ -1970,11 +1980,6 @@
         {
           "id": "z-ai/glm-4.6v",
           "label": "z-ai/glm-4.6v",
-          "vision": false
-        },
-        {
-          "id": "ibm-granite/granite-4.0-h-micro",
-          "label": "ibm-granite/granite-4.0-h-micro",
           "vision": false
         },
         {
@@ -2023,6 +2028,16 @@
           "vision": false
         },
         {
+          "id": "liquid/lfm-2.5-2.6b",
+          "label": "liquid/lfm-2.5-2.6b",
+          "vision": false
+        },
+        {
+          "id": "liquid/lfm-2.5-24b-a2b",
+          "label": "liquid/lfm-2.5-24b-a2b",
+          "vision": false
+        },
+        {
           "id": "mistralai/mistral-large",
           "label": "mistralai/mistral-large",
           "vision": false
@@ -2035,11 +2050,6 @@
         {
           "id": "nvidia/nemotron-3.5-content-safety:free",
           "label": "nvidia/nemotron-3.5-content-safety:free",
-          "vision": false
-        },
-        {
-          "id": "openai/gpt-4-turbo",
-          "label": "openai/gpt-4-turbo",
           "vision": false
         },
         {
@@ -2123,23 +2133,13 @@
           "vision": false
         },
         {
+          "id": "qwen/qwen3-235b-a22b-thinking-2507",
+          "label": "qwen/qwen3-235b-a22b-thinking-2507",
+          "vision": false
+        },
+        {
           "id": "perplexity/sonar",
           "label": "perplexity/sonar",
-          "vision": false
-        },
-        {
-          "id": "baidu/ernie-4.5-vl-424b-a47b",
-          "label": "baidu/ernie-4.5-vl-424b-a47b",
-          "vision": false
-        },
-        {
-          "id": "morph/morph-v3-fast",
-          "label": "morph/morph-v3-fast",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3-30b-a3b-thinking-2507",
-          "label": "qwen/qwen3-30b-a3b-thinking-2507",
           "vision": false
         },
         {
@@ -2155,6 +2155,11 @@
         {
           "id": "google/gemini-3.1-flash-lite-image",
           "label": "google/gemini-3.1-flash-lite-image",
+          "vision": false
+        },
+        {
+          "id": "google/gemini-nano-banana-2.1",
+          "label": "google/gemini-nano-banana-2.1",
           "vision": false
         },
         {
@@ -2183,18 +2188,18 @@
           "vision": false
         },
         {
-          "id": "microsoft/wizardlm-2-8x22b",
-          "label": "microsoft/wizardlm-2-8x22b",
-          "vision": false
-        },
-        {
-          "id": "deepseek/deepseek-r1",
-          "label": "deepseek/deepseek-r1",
-          "vision": false
-        },
-        {
           "id": "meta-llama/llama-3.2-1b-instruct",
           "label": "meta-llama/llama-3.2-1b-instruct",
+          "vision": false
+        },
+        {
+          "id": "qwen/qwen3-14b",
+          "label": "qwen/qwen3-14b",
+          "vision": false
+        },
+        {
+          "id": "qwen/qwen3-30b-a3b",
+          "label": "qwen/qwen3-30b-a3b",
           "vision": false
         },
         {
@@ -2258,18 +2263,18 @@
           "vision": false
         },
         {
-          "id": "openai/gpt-3.5-turbo",
-          "label": "openai/gpt-3.5-turbo",
+          "id": "moondream/moondream3-preview",
+          "label": "moondream/moondream3-preview",
+          "vision": false
+        },
+        {
+          "id": "moondream/moondream3.1-9b-a2b",
+          "label": "moondream/moondream3.1-9b-a2b",
           "vision": false
         },
         {
           "id": "openai/gpt-3.5-turbo-16k",
           "label": "openai/gpt-3.5-turbo-16k",
-          "vision": false
-        },
-        {
-          "id": "openai/gpt-3.5-turbo:batch",
-          "label": "openai/gpt-3.5-turbo:batch",
           "vision": false
         },
         {
@@ -2280,11 +2285,6 @@
         {
           "id": "rekaai/reka-edge",
           "label": "rekaai/reka-edge",
-          "vision": false
-        },
-        {
-          "id": "deepseek/deepseek-r1-distill-llama-70b",
-          "label": "deepseek/deepseek-r1-distill-llama-70b",
           "vision": false
         },
         {
@@ -2335,11 +2335,6 @@
         {
           "id": "openai/gpt-3.5-turbo-0613",
           "label": "openai/gpt-3.5-turbo-0613",
-          "vision": false
-        },
-        {
-          "id": "openai/gpt-3.5-turbo-instruct",
-          "label": "openai/gpt-3.5-turbo-instruct",
           "vision": false
         },
         {
@@ -2428,6 +2423,11 @@
           "vision": false
         },
         {
+          "id": "anthropic/claude-sonnet-5-5",
+          "label": "anthropic/claude-sonnet-5-5",
+          "vision": false
+        },
+        {
           "id": "Audio8/Audio8-TTS-Preview-0.6b",
           "label": "Audio8/Audio8-TTS-Preview-0.6b",
           "vision": false
@@ -2468,11 +2468,6 @@
           "vision": false
         },
         {
-          "id": "black-forest-labs/FLUX-1-Redux-dev",
-          "label": "black-forest-labs/FLUX-1-Redux-dev",
-          "vision": false
-        },
-        {
           "id": "black-forest-labs/FLUX-1-schnell",
           "label": "black-forest-labs/FLUX-1-schnell",
           "vision": false
@@ -2508,11 +2503,6 @@
           "vision": false
         },
         {
-          "id": "black-forest-labs/FLUX.1-Kontext-dev",
-          "label": "black-forest-labs/FLUX.1-Kontext-dev",
-          "vision": false
-        },
-        {
           "id": "bosonai/HiggsAudioV2.5",
           "label": "bosonai/HiggsAudioV2.5",
           "vision": false
@@ -2543,13 +2533,8 @@
           "vision": false
         },
         {
-          "id": "Bria/fibo",
-          "label": "Bria/fibo",
-          "vision": false
-        },
-        {
-          "id": "Bria/fibo-1.5",
-          "label": "Bria/fibo-1.5",
+          "id": "Bria/fibo-2.0",
+          "label": "Bria/fibo-2.0",
           "vision": false
         },
         {
@@ -2565,6 +2550,11 @@
         {
           "id": "Bria/remove_background",
           "label": "Bria/remove_background",
+          "vision": false
+        },
+        {
+          "id": "Bria/remove_background_guided",
+          "label": "Bria/remove_background_guided",
           "vision": false
         },
         {
@@ -2650,6 +2640,11 @@
         {
           "id": "deepseek-ai/DeepSeek-V4.1-Flash",
           "label": "deepseek-ai/DeepSeek-V4.1-Flash",
+          "vision": false
+        },
+        {
+          "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+          "label": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
           "vision": false
         },
         {
@@ -2753,23 +2748,8 @@
           "vision": false
         },
         {
-          "id": "Gryphe/MythoMax-L2-13b",
-          "label": "Gryphe/MythoMax-L2-13b",
-          "vision": false
-        },
-        {
           "id": "hexgrad/Kokoro-82M",
           "label": "hexgrad/Kokoro-82M",
-          "vision": false
-        },
-        {
-          "id": "ibm-granite/granite-4.2-30b",
-          "label": "ibm-granite/granite-4.2-30b",
-          "vision": false
-        },
-        {
-          "id": "ibm-granite/granite-4.2-3b",
-          "label": "ibm-granite/granite-4.2-3b",
           "vision": false
         },
         {
@@ -2783,13 +2763,13 @@
           "vision": false
         },
         {
-          "id": "inclusionAI/Ling-3.0-flash-Fin",
-          "label": "inclusionAI/Ling-3.0-flash-Fin",
+          "id": "inclusionAI/Ling-3.0-flash-VL",
+          "label": "inclusionAI/Ling-3.0-flash-VL",
           "vision": false
         },
         {
-          "id": "inclusionAI/Ling-3.0-flash-VL",
-          "label": "inclusionAI/Ling-3.0-flash-VL",
+          "id": "inclusionAI/Ling-3.1-flash",
+          "label": "inclusionAI/Ling-3.1-flash",
           "vision": false
         },
         {
@@ -2843,11 +2823,6 @@
           "vision": false
         },
         {
-          "id": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
-          "label": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
-          "vision": false
-        },
-        {
           "id": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
           "label": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
           "vision": false
@@ -2860,11 +2835,6 @@
         {
           "id": "microsoft/phi-4",
           "label": "microsoft/phi-4",
-          "vision": false
-        },
-        {
-          "id": "MiniMaxAI/MiniMax-M2.7-Turbo",
-          "label": "MiniMaxAI/MiniMax-M2.7-Turbo",
           "vision": false
         },
         {
@@ -2908,23 +2878,8 @@
           "vision": false
         },
         {
-          "id": "NousResearch/Hermes-3-Llama-3.1-405B",
-          "label": "NousResearch/Hermes-3-Llama-3.1-405B",
-          "vision": false
-        },
-        {
-          "id": "NousResearch/Hermes-3-Llama-3.1-70B",
-          "label": "NousResearch/Hermes-3-Llama-3.1-70B",
-          "vision": false
-        },
-        {
           "id": "nvidia/llama-nemotron-embed-vl-1b-v2",
           "label": "nvidia/llama-nemotron-embed-vl-1b-v2",
-          "vision": false
-        },
-        {
-          "id": "nvidia/Nemotron-3-Nano-30B-A3B",
-          "label": "nvidia/Nemotron-3-Nano-30B-A3B",
           "vision": false
         },
         {
@@ -2953,13 +2908,13 @@
           "vision": false
         },
         {
-          "id": "openai/gpt-oss-120b",
-          "label": "openai/gpt-oss-120b",
+          "id": "nvidia/NVIDIA-Nemotron-3.5-Super-VL",
+          "label": "nvidia/NVIDIA-Nemotron-3.5-Super-VL",
           "vision": false
         },
         {
-          "id": "openai/gpt-oss-120b-Turbo",
-          "label": "openai/gpt-oss-120b-Turbo",
+          "id": "openai/gpt-oss-120b",
+          "label": "openai/gpt-oss-120b",
           "vision": false
         },
         {
@@ -3005,11 +2960,6 @@
         {
           "id": "PrunaAI/p-video",
           "label": "PrunaAI/p-video",
-          "vision": false
-        },
-        {
-          "id": "Qwen/Qwen-Image-Edit",
-          "label": "Qwen/Qwen-Image-Edit",
           "vision": false
         },
         {
@@ -3073,16 +3023,6 @@
           "vision": false
         },
         {
-          "id": "Qwen/Qwen3-Max",
-          "label": "Qwen/Qwen3-Max",
-          "vision": false
-        },
-        {
-          "id": "Qwen/Qwen3-Max-Thinking",
-          "label": "Qwen/Qwen3-Max-Thinking",
-          "vision": false
-        },
-        {
           "id": "Qwen/Qwen3-Next-80B-A3B-Instruct",
           "label": "Qwen/Qwen3-Next-80B-A3B-Instruct",
           "vision": false
@@ -3140,11 +3080,6 @@
         {
           "id": "Qwen/Qwen3.7-Max",
           "label": "Qwen/Qwen3.7-Max",
-          "vision": false
-        },
-        {
-          "id": "Qwen/Qwen3.8-2.4T-A95B",
-          "label": "Qwen/Qwen3.8-2.4T-A95B",
           "vision": false
         },
         {
@@ -3233,11 +3168,6 @@
           "vision": false
         },
         {
-          "id": "tencent/Hy3",
-          "label": "tencent/Hy3",
-          "vision": false
-        },
-        {
           "id": "tencent/Hy4-preview",
           "label": "tencent/Hy4-preview",
           "vision": false
@@ -3250,11 +3180,6 @@
         {
           "id": "thenlper/gte-large",
           "label": "thenlper/gte-large",
-          "vision": false
-        },
-        {
-          "id": "thinkingmachines/Inkling",
-          "label": "thinkingmachines/Inkling",
           "vision": false
         },
         {
@@ -3420,6 +3345,16 @@
         {
           "id": "2stacks/gemma3-4b-it-comedy-v2",
           "label": "2stacks/gemma3-4b-it-comedy-v2",
+          "vision": false
+        },
+        {
+          "id": "3MPER0RR/Ornith-1.5-35B-A3B-3MPER0RR-abliterated",
+          "label": "3MPER0RR/Ornith-1.5-35B-A3B-3MPER0RR-abliterated",
+          "vision": false
+        },
+        {
+          "id": "3MPER0RR/Qwen2.5-Coder-32B-Instruct-3MPER0RR-abliterated",
+          "label": "3MPER0RR/Qwen2.5-Coder-32B-Instruct-3MPER0RR-abliterated",
           "vision": false
         },
         {
@@ -3618,13 +3553,18 @@
           "vision": false
         },
         {
-          "id": "accorvin/Llama-2-7b-chat-hf-fine-tuned",
-          "label": "accorvin/Llama-2-7b-chat-hf-fine-tuned",
+          "id": "AbteeXAILab/lumynax-longctx-prolong-512k-instruct",
+          "label": "AbteeXAILab/lumynax-longctx-prolong-512k-instruct",
           "vision": false
         },
         {
-          "id": "ACE-Step/ACE-Step-v1-3.5B",
-          "label": "ACE-Step/ACE-Step-v1-3.5B",
+          "id": "acakefromdafuture3/anime-qwen-chatbot",
+          "label": "acakefromdafuture3/anime-qwen-chatbot",
+          "vision": false
+        },
+        {
+          "id": "accorvin/Llama-2-7b-chat-hf-fine-tuned",
+          "label": "accorvin/Llama-2-7b-chat-hf-fine-tuned",
           "vision": false
         },
         {
@@ -3773,6 +3713,11 @@
           "vision": false
         },
         {
+          "id": "agentlans/Qwen2.5-1.5B-Instruct-Multiple-Choice-Maker",
+          "label": "agentlans/Qwen2.5-1.5B-Instruct-Multiple-Choice-Maker",
+          "vision": false
+        },
+        {
           "id": "AgentPublic/llama3-instruct-8b",
           "label": "AgentPublic/llama3-instruct-8b",
           "vision": false
@@ -3868,11 +3813,6 @@
           "vision": false
         },
         {
-          "id": "AI-MO/Kimina-Prover-Preview-Distill-1.5B",
-          "label": "AI-MO/Kimina-Prover-Preview-Distill-1.5B",
-          "vision": false
-        },
-        {
           "id": "ai-nexuz/llama-3.2-1b-instruct-fine-tuned",
           "label": "ai-nexuz/llama-3.2-1b-instruct-fine-tuned",
           "vision": false
@@ -3948,6 +3888,11 @@
           "vision": false
         },
         {
+          "id": "AIMONGER12/Huihui-Ornith-1.5-9B-abliterated",
+          "label": "AIMONGER12/Huihui-Ornith-1.5-9B-abliterated",
+          "vision": false
+        },
+        {
           "id": "aipib/karasu-lora-jp-qa-chat",
           "label": "aipib/karasu-lora-jp-qa-chat",
           "vision": false
@@ -4005,6 +3950,11 @@
         {
           "id": "aisingapore/Qwen-SEA-LION-v4-32B-IT",
           "label": "aisingapore/Qwen-SEA-LION-v4-32B-IT",
+          "vision": false
+        },
+        {
+          "id": "aisingapore/Qwen-SEA-LION-v4.5-27B-IT",
+          "label": "aisingapore/Qwen-SEA-LION-v4.5-27B-IT",
           "vision": false
         },
         {
@@ -4438,11 +4388,6 @@
           "vision": false
         },
         {
-          "id": "Altworld/Astrea-R8-Chat-9B",
-          "label": "Altworld/Astrea-R8-Chat-9B",
-          "vision": false
-        },
-        {
           "id": "AlvianKhairi/Llama-2-7b-chat-finetune-25k",
           "label": "AlvianKhairi/Llama-2-7b-chat-finetune-25k",
           "vision": false
@@ -4505,6 +4450,11 @@
         {
           "id": "AmberYifan/Qwen2.5-7B-Instruct-userfeedback-SPIN-iter2",
           "label": "AmberYifan/Qwen2.5-7B-Instruct-userfeedback-SPIN-iter2",
+          "vision": false
+        },
+        {
+          "id": "AmberYifan/Qwen2.5-7B-Instruct-wildfeedback-DRIFT-iter2",
+          "label": "AmberYifan/Qwen2.5-7B-Instruct-wildfeedback-DRIFT-iter2",
           "vision": false
         },
         {
@@ -5298,6 +5248,11 @@
           "vision": false
         },
         {
+          "id": "atarayosd/TinySwallow-1.5B-Instruct",
+          "label": "atarayosd/TinySwallow-1.5B-Instruct",
+          "vision": false
+        },
+        {
           "id": "atharvapawar/Llama-2-7b-chat-finetune-app",
           "label": "atharvapawar/Llama-2-7b-chat-finetune-app",
           "vision": false
@@ -5811,36 +5766,6 @@
           "id": "AXCXEPT/Llama-3-EZO-8b-Common-it",
           "label": "AXCXEPT/Llama-3-EZO-8b-Common-it",
           "vision": false
-        },
-        {
-          "id": "AXCXEPT/Llama-3.1-70B-EZO-1.1-it",
-          "label": "AXCXEPT/Llama-3.1-70B-EZO-1.1-it",
-          "vision": false
-        },
-        {
-          "id": "AXCXEPT/Llama-3.1-8B-EZO-1.1-it",
-          "label": "AXCXEPT/Llama-3.1-8B-EZO-1.1-it",
-          "vision": false
-        },
-        {
-          "id": "axel-datos/qwen2.5-0.5b-instruct_gsm8k_full-finetuning",
-          "label": "axel-datos/qwen2.5-0.5b-instruct_gsm8k_full-finetuning",
-          "vision": false
-        },
-        {
-          "id": "axel-datos/qwen2.5-0.5b-instruct_gsm8k_full-finetuningV2",
-          "label": "axel-datos/qwen2.5-0.5b-instruct_gsm8k_full-finetuningV2",
-          "vision": false
-        },
-        {
-          "id": "axel-datos/qwen2.5-0.5b-instruct_gsm8k_lisa",
-          "label": "axel-datos/qwen2.5-0.5b-instruct_gsm8k_lisa",
-          "vision": false
-        },
-        {
-          "id": "axel-datos/qwen2.5-0.5b-instruct_MATH_full-finetuning",
-          "label": "axel-datos/qwen2.5-0.5b-instruct_MATH_full-finetuning",
-          "vision": false
         }
       ]
     },
@@ -5903,6 +5828,11 @@
           "vision": false
         },
         {
+          "id": "anthropic/claude-sonnet-5.5",
+          "label": "anthropic/claude-sonnet-5.5",
+          "vision": false
+        },
+        {
           "id": "codex-auto-review",
           "label": "codex-auto-review",
           "vision": false
@@ -5950,6 +5880,16 @@
         {
           "id": "deepseek/deepseek-v4.1-flash",
           "label": "deepseek/deepseek-v4.1-flash",
+          "vision": false
+        },
+        {
+          "id": "deepseek/deepseek-v4.1-flash-1017",
+          "label": "deepseek/deepseek-v4.1-flash-1017",
+          "vision": false
+        },
+        {
+          "id": "deepseek/deepseek-v4.1-flash-free",
+          "label": "deepseek/deepseek-v4.1-flash-free",
           "vision": false
         },
         {
@@ -6103,6 +6043,16 @@
           "vision": false
         },
         {
+          "id": "gpt-image-2.5-flare",
+          "label": "gpt-image-2.5-flare",
+          "vision": false
+        },
+        {
+          "id": "gpt-image-2.5-sunburst",
+          "label": "gpt-image-2.5-sunburst",
+          "vision": false
+        },
+        {
           "id": "grok/grok-4.3",
           "label": "grok/grok-4.3",
           "vision": false
@@ -6145,6 +6095,11 @@
         {
           "id": "kimi/kimi-k3",
           "label": "kimi/kimi-k3",
+          "vision": false
+        },
+        {
+          "id": "kimi/kimi-k3.1-pro",
+          "label": "kimi/kimi-k3.1-pro",
           "vision": false
         },
         {
@@ -6225,6 +6180,11 @@
         {
           "id": "minimax/minimax-m3",
           "label": "minimax/minimax-m3",
+          "vision": false
+        },
+        {
+          "id": "minimax/minimax-m3.1-flash",
+          "label": "minimax/minimax-m3.1-flash",
           "vision": false
         },
         {
@@ -6563,6 +6523,11 @@
           "vision": false
         },
         {
+          "id": "openai/gpt-6.1-sol",
+          "label": "openai/gpt-6.1-sol",
+          "vision": false
+        },
+        {
           "id": "openai/gpt-image-1",
           "label": "openai/gpt-image-1",
           "vision": false
@@ -6580,11 +6545,6 @@
         {
           "id": "openai/gpt-image-2",
           "label": "openai/gpt-image-2",
-          "vision": false
-        },
-        {
-          "id": "openai/gpt-oss-120b",
-          "label": "openai/gpt-oss-120b",
           "vision": false
         },
         {
@@ -6783,8 +6743,28 @@
           "vision": false
         },
         {
+          "id": "tencent/hy4-preview",
+          "label": "tencent/hy4-preview",
+          "vision": false
+        },
+        {
+          "id": "tencent/hy4-preview-free",
+          "label": "tencent/hy4-preview-free",
+          "vision": false
+        },
+        {
           "id": "typesafe/jev-1.13",
           "label": "typesafe/jev-1.13",
+          "vision": false
+        },
+        {
+          "id": "xiaomi/mimo-v2.6-flash",
+          "label": "xiaomi/mimo-v2.6-flash",
+          "vision": false
+        },
+        {
+          "id": "xiaomi/mimo-v2.6-pro",
+          "label": "xiaomi/mimo-v2.6-pro",
           "vision": false
         },
         {
@@ -6855,6 +6835,11 @@
         {
           "id": "orcarouter/fusion-mini",
           "label": "orcarouter/fusion-mini",
+          "vision": false
+        },
+        {
+          "id": "orcarouter/pod",
+          "label": "orcarouter/pod",
           "vision": false
         }
       ]
