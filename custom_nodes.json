@@ -9,5 +9,5 @@
   "description": "A multimodal ComfyUI AI node pack with Qwen, Gemma 4, GGUF, Whisper, image and text decision routing, and live thinking output.",
   "category": "image",
   "tags": ["vision", "language", "multimodal", "thinkingllm", "decision-router", "qwen", "gguf", "flash_attention", "performance", "wan2.2", "video", "i2v", "t2v", "storyboard", "caching", "fork", "gpl-3.0"],
-  "version": "3.0.1"
+  "version": "3.0.2"
 }

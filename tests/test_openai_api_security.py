@@ -93,6 +93,18 @@ class SecurityTests(unittest.TestCase):
                 'api_key_env': 'TEST_KEY',
             })
 
+    def test_native_decision_profile_requires_a_supported_protocol_and_endpoint_pair(self):
+        profile = self.profile(
+            decision_protocol='openrouter_decisions',
+            decision_endpoint='https://openrouter.ai/api/alpha/decisions',
+        )
+        self.assertEqual(profile['decision_protocol'], 'openrouter_decisions')
+        self.assertEqual(profile['decision_endpoint'], 'https://openrouter.ai/api/alpha/decisions')
+        with self.assertRaisesRegex(ValueError, 'both decision_protocol and decision_endpoint'):
+            self.profile(decision_protocol='openai_decisions')
+        with self.assertRaisesRegex(ValueError, 'unsupported decision_protocol'):
+            self.profile(decision_protocol='chat_json', decision_endpoint='https://example.test/decisions')
+
     def test_plain_http_non_loopback_requires_explicit_opt_in(self):
         with self.assertRaisesRegex(ValueError, 'Plain HTTP'):
             api_node._normalize_profile('LAN', {

@@ -76,6 +76,16 @@ def _model_options() -> list[str]:
     return COMMUNITY_MODEL_OPTIONS.copy()
 
 
+def _api_profile_options() -> list[str]:
+    try:
+        from openai_compatible_api import _load_api_profiles
+
+        profiles = _load_api_profiles()
+    except Exception:
+        return ["No Decision API profiles configured"]
+    return [name for name, profile in profiles.items() if profile.get("decision_protocol")] or ["No Decision API profiles configured"]
+
+
 def _gguf_base_dir() -> Path:
     if folder_paths is None:
         raise RuntimeError("ComfyUI folder_paths is unavailable; the Decision Router must run inside ComfyUI.")
@@ -294,6 +304,19 @@ class _DecisionRouterBase:
                 "STRING",
                 {"default": "", "multiline": False},
             )
+        # Append new controls so saved workflows keep their original positional widget values.
+        required["decision_backend"] = (
+            ["Local (in-process)", "API"],
+            {"default": "Local (in-process)", "tooltip": "Use the local native model or a server-configured native Decisions API."},
+        )
+        required["api_profile"] = (
+            _api_profile_options(),
+            {"tooltip": "Server-side API profile. Only profiles explicitly configured for OpenAI Decisions or OpenRouter Decisions are available."},
+        )
+        required["api_model"] = (
+            "STRING",
+            {"default": "gpt-6-luna", "multiline": False, "tooltip": "Decision model ID. The UI lists models matching this node's input type."},
+        )
         return {"required": required}
 
     CATEGORY = "ThinkingLLM/Decision"
@@ -403,26 +426,93 @@ class _DecisionRouterBase:
         if len(routes) > len("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"):
             raise ValueError("The selected native decision protocol supports at most 52 routes.")
 
-        model_key = MODEL_KEYS_BY_DISPLAY.get(str(decision_model))
-        if model_key is None or (COMMERCIAL_RELEASE and model_key == "openjev"):
-            raise ValueError(f"Decision model is unavailable in this build: {decision_model!r}.")
-
+        api_backend = str(kwargs.get("decision_backend", "Local (in-process)")) == "API"
         keep_model_loaded = bool(kwargs.get("keep_model_loaded", False))
+        if api_backend and (self.llm is not None or self.chat_handler is not None):
+            self.clear()
         if item_count == 0:
-            if not keep_model_loaded:
+            if not api_backend and not keep_model_loaded:
                 self.clear()
+            selected_model = str(kwargs.get("api_model", "")).strip() if api_backend else str(decision_model)
             outputs = [ExecutionBlocker(None) for _ in range(MAX_DECISION_ROUTES)]
-            return (json.dumps({"model": decision_model, "input_type": input_kind, "decisions": []}, ensure_ascii=False), *outputs)
+            return (json.dumps({"model": selected_model, "input_type": input_kind, "decisions": []}, ensure_ascii=False), *outputs)
 
+        model_key = None
+        api_profile = None
+        api_model = ""
+        api_key = ""
+        if api_backend:
+            try:
+                from openai_compatible_api import (
+                    _credential_value,
+                    _image_to_data_url,
+                    _load_api_profiles,
+                    _NO_REDIRECT_OPENER,
+                    _validate_input_text,
+                )
+                from thinkingllm_core.decision_api import decision_models_for_profile, request_decision
+            except Exception as exc:
+                raise RuntimeError("Decision API support could not be loaded. Restart ComfyUI and check the API node installation.") from exc
+            profile_name = str(kwargs.get("api_profile", "")).strip()
+            api_profile = _load_api_profiles().get(profile_name)
+            if not api_profile or not api_profile.get("decision_protocol"):
+                raise ValueError(f"API profile {profile_name!r} is not configured for a native Decisions API.")
+            api_model = str(kwargs.get("api_model", "")).strip()
+            if not api_model:
+                raise ValueError("Select a Decision API model.")
+            api_key = _credential_value(api_profile)
+            api_opener = _NO_REDIRECT_OPENER
+            if use_image:
+                if not api_profile.get("allow_images", False):
+                    raise ValueError(f"Image input is disabled by API profile {profile_name!r}.")
+            supported_models = decision_models_for_profile(api_profile, input_kind)
+            selected_api_model = next((item for item in supported_models if item.get("id") == api_model), None)
+            if selected_api_model is None:
+                modality = "image-capable " if use_image else ""
+                raise ValueError(f"Model {api_model!r} is not a listed {modality}Decision API model allowed by profile {profile_name!r}.")
+            if use_image and not selected_api_model.get("vision", False):
+                raise ValueError(f"Decision API model {api_model!r} is not an image-capable model.")
+        else:
+            model_key = MODEL_KEYS_BY_DISPLAY.get(str(decision_model))
+            if model_key is None or (COMMERCIAL_RELEASE and model_key == "openjev"):
+                raise ValueError(f"Decision model is unavailable in this build: {decision_model!r}.")
         include_reason = bool(kwargs.get("include_reason", False))
+        api_route_text = "\n".join(
+            f"{route['name']}: {route.get('description') or ''}" for route in routes
+        ) if api_backend else ""
         try:
-            self._load_model(model_key, require_vision=use_image)
+            if not api_backend:
+                self._load_model(model_key, require_vision=use_image)
             decisions = []
             chosen_names = []
             for item_index in range(item_count):
-                image_data_url = _encode_image(items[item_index]) if use_image else None
+                if api_backend:
+                    item_text = str(items[item_index]) if not use_image else "Classify the supplied image."
+                    _validate_input_text(
+                        api_profile,
+                        system_prompt,
+                        f"{item_text}\n{api_route_text}",
+                    )
+                image_data_url = None
+                if use_image:
+                    if api_backend:
+                        image_data_url = _image_to_data_url(api_profile, items[item_index])
+                    else:
+                        image_data_url = _encode_image(items[item_index])
                 try:
-                    if model_key == "openjev":
+                    if api_backend:
+                        chosen, probability_map, confidence = request_decision(
+                            api_profile,
+                            api_model,
+                            input_kind,
+                            items[item_index],
+                            image_data_url,
+                            str(system_prompt or ""),
+                            routes,
+                            api_key=api_key,
+                            opener=api_opener,
+                        )
+                    elif model_key == "openjev":
                         if use_image:
                             probabilities = openjev_probabilities(self.llm, self.chat_handler, image_data_url, str(system_prompt or ""), routes)
                         else:
@@ -435,10 +525,12 @@ class _DecisionRouterBase:
                             sorted_probabilities, sorted_routes = clef_text_probabilities(self.llm, items[item_index], str(system_prompt or ""), routes)
                         sorted_map = map_route_probabilities(sorted_routes, sorted_probabilities)
                         probability_map = {str(route["name"]): sorted_map[str(route["name"])] for route in routes}
-                    chosen = selected_route(routes, probability_map)
+                    if not api_backend:
+                        chosen = selected_route(routes, probability_map)
                 except Exception as exc:
+                    model_label = api_model if api_backend else decision_model
                     raise RuntimeError(
-                        f"Decision inference failed for {'image' if use_image else 'text'} item {item_index + 1} with {decision_model}: {exc}"
+                        f"Decision inference failed for {'image' if use_image else 'text'} item {item_index + 1} with {model_label}: {exc}"
                     ) from exc
                 chosen_names.append(chosen)
                 decision = {
@@ -446,7 +538,13 @@ class _DecisionRouterBase:
                     "route": chosen,
                     "probabilities": probability_map,
                 }
-                if include_reason:
+                if api_backend:
+                    if confidence is not None:
+                        decision["confidence"] = confidence
+                    if include_reason:
+                        decision["reason"] = None
+                        decision["reason_error"] = "The selected Decisions API returns typed decisions, not generated explanations."
+                elif include_reason:
                     chosen_route = next(route for route in routes if route["name"] == chosen)
                     try:
                         decision["reason"] = _decision_reason(
@@ -476,14 +574,17 @@ class _DecisionRouterBase:
                 else:
                     output_batches.append([items[index] for index in batch_indices])
 
+            metadata = {"model": api_model if api_backend else decision_model, "input_type": input_kind, "decisions": decisions}
+            if api_backend:
+                metadata["provider"] = api_profile["provider"]
             decision_json = json.dumps(
-                {"model": decision_model, "input_type": input_kind, "decisions": decisions},
+                metadata,
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
             return (decision_json, *output_batches)
         finally:
-            if not keep_model_loaded:
+            if not api_backend and not keep_model_loaded:
                 self.clear()
 
 
@@ -532,3 +633,40 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ThinkingLLM_DecisionRouter": "ThinkingLLM Decision Router (Image)",
     "ThinkingLLM_DecisionRouterText": "ThinkingLLM Decision Router (Text)",
 }
+
+
+def _register_decision_model_route():
+    try:
+        from aiohttp import web
+        from server import PromptServer
+        from thinkingllm_core.decision_api import decision_models_for_profile
+
+        server = PromptServer.instance
+        if server is None:
+            return
+
+        async def list_decision_models(request):
+            from openai_compatible_api import _load_api_profiles
+
+            profile_name = str(request.query.get("profile", ""))
+            input_kind = str(request.query.get("input_kind", "text"))
+            if input_kind not in {"text", "image"}:
+                raise web.HTTPBadRequest(text="input_kind must be text or image")
+            profile = _load_api_profiles().get(profile_name)
+            if not profile or not profile.get("decision_protocol"):
+                raise web.HTTPBadRequest(text="Unknown Decision API profile")
+            try:
+                models = decision_models_for_profile(profile, input_kind)
+            except RuntimeError as exc:
+                raise web.HTTPServiceUnavailable(text="Decision model catalog is unavailable") from exc
+            return web.json_response({"models": models})
+
+        server.routes.get("/thinkingllm/decision/models")(list_decision_models)
+    except Exception as exc:
+        # The module is also imported in lightweight tests without ComfyUI's server.
+        if "server" in str(exc).lower() or "PromptServer" in str(exc):
+            return
+        print(f"[ThinkingLLM Decision Router] Could not register Decision API model route: {exc}")
+
+
+_register_decision_model_route()

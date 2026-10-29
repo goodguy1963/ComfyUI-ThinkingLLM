@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-ThinkingLLM"
 description = "A multimodal ComfyUI AI node pack with Qwen, Gemma 4, GGUF, Whisper, image and text decision routing, and live thinking output."
-version = "3.0.1"
+version = "3.0.2"
 license = {file = "LICENSE"}
 dependencies = ["transformers>=5.2.0", "torch", "huggingface-hub", "hf_xet", "psutil", "numpy", "Pillow", "opencv-python", "bitsandbytes", "accelerate", "sentencepiece", "tiktoken", "faster-whisper", "llama-cpp-python"]
 

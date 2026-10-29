@@ -55,6 +55,7 @@ _PROFILE_ALLOWED_FIELDS = {
     "allowed_extra_body_fields", "send_seed", "thinking_mode",
     "max_tokens_field", "allow_insecure_http",
     "allow_images", "allow_image_url", "max_image_pixels", "max_image_bytes",
+    "decision_protocol", "decision_endpoint",
 }
 
 
@@ -86,13 +87,17 @@ _BUILTIN_PROFILES = {
     "OpenAI": _cloud_profile(
         "OpenAI", "https://api.openai.com/v1", "OPENAI_API_KEY",
         max_tokens_field="max_completion_tokens",
+        decision_protocol="openai_decisions",
+        decision_endpoint="https://api.openai.com/v1/decisions",
     ),
     "QwenCloud (Singapore)": _cloud_profile(
         "QwenCloud", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         "DASHSCOPE_API_KEY", thinking_mode="qwen",
     ),
     "OpenRouter": _cloud_profile(
-        "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"
+        "OpenRouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY",
+        decision_protocol="openrouter_decisions",
+        decision_endpoint="https://openrouter.ai/api/alpha/decisions",
     ),
     "Together AI": _cloud_profile(
         "Together AI", "https://api.together.ai/v1", "TOGETHER_API_KEY"
@@ -280,6 +285,15 @@ def _normalize_profile(name: str, raw: dict) -> dict:
     if allow_image_url and not allow_images:
         raise ValueError(f"API profile {profile_name!r} cannot enable allow_image_url while allow_images is false.")
 
+    decision_protocol = str(raw.get("decision_protocol") or "").strip().lower()
+    if decision_protocol not in {"", "openai_decisions", "openrouter_decisions"}:
+        raise ValueError(f"API profile {profile_name!r} has unsupported decision_protocol {decision_protocol!r}.")
+    decision_endpoint = str(raw.get("decision_endpoint") or "").strip()
+    if decision_endpoint:
+        decision_endpoint = _validate_base_url(decision_endpoint, auth, allow_insecure_http)
+    if bool(decision_protocol) != bool(decision_endpoint):
+        raise ValueError(f"API profile {profile_name!r} must configure both decision_protocol and decision_endpoint, or neither.")
+
     return {
         "name": profile_name,
         "provider": provider,
@@ -300,6 +314,8 @@ def _normalize_profile(name: str, raw: dict) -> dict:
         "allow_image_url": allow_image_url,
         "max_image_pixels": _profile_int(raw, "max_image_pixels", DEFAULT_MAX_IMAGE_PIXELS, maximum=100_000_000),
         "max_image_bytes": _profile_int(raw, "max_image_bytes", DEFAULT_MAX_IMAGE_BYTES, maximum=100_000_000),
+        "decision_protocol": decision_protocol,
+        "decision_endpoint": decision_endpoint,
     }
 
 

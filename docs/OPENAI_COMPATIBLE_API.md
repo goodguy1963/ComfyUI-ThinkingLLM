@@ -253,12 +253,22 @@ The string `OPENROUTER_PRODUCTION_API_KEY` is only the **name** of an environmen
 | `thinking_mode` | Currently empty or `qwen`. |
 | `max_tokens_field` | `max_tokens` or `max_completion_tokens`. |
 | `allow_insecure_http` | Explicit opt-in for unauthenticated non-loopback HTTP. |
+| `decision_protocol` | Optional native Decision API adapter: `openai_decisions` or `openrouter_decisions`. Profiles without it cannot be selected by the Decision Router API mode. |
+| `decision_endpoint` | Optional fixed HTTPS endpoint paired with `decision_protocol`; this is server-side profile data and is never workflow-controlled. |
 
 Unknown profile fields are rejected instead of silently ignored. This is intentional: a typo such as `max_token_limit` must not quietly disable a security limit.
 
 A custom profile with the same name as a built-in is treated as an override. If that override is invalid, the built-in with that name is removed rather than silently used as a fallback. This is fail-closed behavior: a broken restrictive `OpenRouter` override must not accidentally reactivate the permissive convenience built-in.
 
 Literal secret/header fields such as `api_key`, `token`, `Authorization`, `headers`, or `secret` are rejected.
+
+### Native Decisions API profiles
+
+The Image and Text Decision Router nodes can use the built-in OpenAI and OpenRouter profiles in API mode. These profiles use their dedicated Decisions APIs, not `/chat/completions`. To enable a custom profile, set both `decision_protocol` and `decision_endpoint`, keep the credential in the configured environment variable, and configure an exact `allowed_models` list for shared deployments. OpenAI uses `openai_decisions` with `/v1/decisions`; OpenRouter uses `openrouter_decisions` with `/api/alpha/decisions`. See the [Decision Router API guide](DECISION_ROUTER_API.md) for configuration details.
+
+OpenAI currently exposes `gpt-6-luna` through its Decisions API. OpenRouter model choices are fetched from its model catalog and filtered by `output_modalities=decisions` plus this node's input modality. Image support is a model capability, not a provider-wide setting. If model metadata is unavailable, the UI may retain a previously fetched list, but the server validates the selected model before making an inference request.
+
+Each input item in a ComfyUI batch is sent as its own native decision request. Local mode remains the default and does not require API credentials. `keep_model_loaded` and generated rationale output apply only to local models; native Decisions APIs return typed choices and probabilities, not free-form explanations.
 
 ---
 

@@ -51,8 +51,8 @@ The Decision Router needs native llama.cpp decision APIs that are not present in
 | `ThinkingLLM Prompt Enhancer` | Transformers / HF | Text prompt enhancement |
 | `ThinkingLLM (GGUF)` | llama.cpp | GGUF image and video understanding |
 | `ThinkingLLM (GGUF Advanced)` | llama.cpp | GGUF advanced controls and `MASK_PREVIEW` |
-| `ThinkingLLM Decision Router (Image)` | llama.cpp | Image decisions routed to named branches |
-| `ThinkingLLM Decision Router (Text)` | llama.cpp | Text decisions routed to named branches |
+| `ThinkingLLM Decision Router (Image)` | llama.cpp / OpenAI / OpenRouter | Image decisions routed to named branches |
+| `ThinkingLLM Decision Router (Text)` | llama.cpp / OpenAI / OpenRouter | Text decisions routed to named branches |
 | `ThinkingLLM Gemma 4 Audio (GGUF)` | llama.cpp | Gemma 4 audio understanding |
 | `ThinkingLLM Whisper ASR` | faster-whisper | Speech-to-text transcription |
 | `ThinkingLLM Prompt Enhancer (GGUF)` | llama.cpp | GGUF prompt enhancement |
@@ -63,7 +63,9 @@ The Transformers/HF nodes are the recommended default when you want the simplest
 
 ### Decision Router
 
-The separate Image and Text Decision Router nodes classify their input and send each image or text item to one named route. Configure a system prompt plus route names and descriptions for any task, such as subject, document, or product classification. They offer Clef-Flash 9B, Clef 27B, and OpenJev 27B GGUFs. Model files download on first use into `ComfyUI/models/LLM/GGUF`; image routing also downloads the matching vision projector. Both run in-process without a separate llama.cpp server. Each node exposes up to 52 configured route sockets and returns per-item decisions and normalized route probabilities on `decision_json`. Empty route outputs are blocked, so their downstream branches do not execute. `keep_model_loaded` controls whether the model stays resident between runs (off by default); `include_reason` optionally adds a short post-hoc explanation to each JSON decision without changing the route or scores.
+The separate Image and Text Decision Router nodes classify their input and send each image or text item to one named route. Configure a system prompt plus route names and descriptions for any task, such as subject, document, or product classification. They offer Clef-Flash 9B, Clef 27B, and OpenJev 27B GGUFs. Model files download on first use into `ComfyUI/models/LLM/GGUF`; image routing also downloads the matching vision projector. Local inference runs in-process without a separate llama.cpp server. Each node exposes up to 52 configured route sockets and returns per-item decisions and normalized route probabilities on `decision_json`. Empty route outputs are blocked, so their downstream branches do not execute. `keep_model_loaded` controls whether the model stays resident between runs (off by default); `include_reason` optionally adds a short post-hoc explanation to each JSON decision without changing the route or scores.
+
+You can also select the native **API** backend on either router. It supports OpenAI Decisions (`gpt-6-luna`) and OpenRouter's Decisions API; OpenRouter models are listed according to their text/image capabilities. API credentials stay in server-side profiles/environment variables rather than workflow files. See the [Decision Router API guide](docs/DECISION_ROUTER_API.md) for setup and limits.
 
 Clef models require llama.cpp's native decision-batch APIs; OpenJev uses llama.cpp's final-position logits API. Image routing additionally requires the MTMD vision APIs; text routing does not. Each node checks the selected capabilities before downloading model weights and reports missing symbols with an installation hint. See [Decision Router llama.cpp requirements](docs/LLAMA_CPP_SYSTEMONE_INSTALL.md) for the runtime details. OpenJev is CC BY-NC 4.0 and is hidden in commercial builds; Clef models are Apache-2.0.
 
@@ -112,6 +114,7 @@ See [Models and backends](docs/MODELS_AND_BACKENDS.md) for exact families, model
 | Supported models, discovery, locations, and backend selection | [Models and backends](docs/MODELS_AND_BACKENDS.md) |
 | GGUF / llama.cpp installation on Windows and Linux | [llama.cpp backend installation](docs/LLAMA_CPP_PYTHON_VISION_INSTALL.md) |
 | Decision model runtime requirements | [Decision Router llama.cpp requirements](docs/LLAMA_CPP_SYSTEMONE_INSTALL.md) |
+| Native OpenAI and OpenRouter decision APIs | [Decision Router API guide](docs/DECISION_ROUTER_API.md) |
 | Duration-aware LTX and MiniMax H3 prompting | [Duration-aware video prompts](docs/VIDEO_PROMPT_DURATION.md) |
 | Video preset recommendations and rationale | [Video preset settings](docs/VIDEO_PRESET_SETTINGS.md) |
 | OpenAI-compatible API node | [API setup and security](docs/OPENAI_COMPATIBLE_API.md) |

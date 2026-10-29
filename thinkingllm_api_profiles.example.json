@@ -3,6 +3,8 @@
     "OpenRouter Production": {
       "provider": "OpenRouter",
       "base_url": "https://openrouter.ai/api/v1",
+      "decision_protocol": "openrouter_decisions",
+      "decision_endpoint": "https://openrouter.ai/api/alpha/decisions",
       "auth": "bearer_env",
       "api_key_env": "OPENROUTER_PRODUCTION_API_KEY",
       "allowed_models": [

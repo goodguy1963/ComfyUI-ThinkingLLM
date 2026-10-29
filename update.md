@@ -1,5 +1,23 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 3.0.2 (2026/10/29) - Native Decision API Backends
+
+### 3.0.2 Changes
+
+- Added an optional native Decisions API backend to both image and text Decision Router nodes. Local in-process llama.cpp inference remains the default.
+- Added direct OpenAI Decisions support with `gpt-6-luna` and dynamic OpenRouter Decisions model discovery, filtered by decision output, input modality, profile image policy, and optional model allowlists.
+- Preserved typed route selection and provider probabilities in `decision_json`; image items are encoded within profile limits and each batch item receives its own request. The router does not fall back to chat-generated JSON.
+- Reused server-side API profiles and environment-based credentials, enforced each profile's input-size and timeout limits, and kept credentials out of workflows.
+- Kept existing widget order stable for saved workflows. Switching to API mode releases a locally retained decision model.
+- Added API configuration documentation and updated the README.
+
+### 3.0.2 Validation
+
+- All 240 tests passed across the six relevant test modules when run individually in the bundled ComfyUI Python 3.12 runtime, including 12 Decision API adapter/router tests, 29 local Decision Router tests, and 38 API security/profile tests.
+- Python compilation, both JavaScript syntax checks, JSON/TOML and mirrored-version checks, API model-catalog validation, and `git diff --check` passed.
+- A live public OpenRouter model-catalog request returned decision models with text/image capabilities, confirming the dynamic modality filter against the current catalog.
+- Provider inference tests use mocked responses; no authenticated OpenAI or OpenRouter inference request was made. A previous combined `unittest discover` attempt showed test-order/native-extension interference, so the six modules were verified in separate processes.
+
 ## Version 3.0.1 (2026/10/29) - Decision Router VRAM and Explanation Controls
 
 ### 3.0.1 Changes

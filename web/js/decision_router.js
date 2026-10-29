@@ -5,6 +5,66 @@ const NODE_OUTPUT_TYPES = {
   ThinkingLLM_DecisionRouterText: "STRING",
 };
 const MAX_ROUTES = 52;
+const API_MODELS_URL = "/thinkingllm/decision/models";
+const apiModelRequestIds = new WeakMap();
+
+function findWidget(node, name) {
+  return node.widgets?.find((widget) => widget.name === name);
+}
+
+function widgetValue(widget) {
+  return String(widget?.value ?? "").trim();
+}
+
+async function refreshApiModels(node, inputKind) {
+  const profileWidget = findWidget(node, "api_profile");
+  const modelWidget = findWidget(node, "api_model");
+  if (!profileWidget || !modelWidget || widgetValue(findWidget(node, "decision_backend")) !== "API") return;
+  const profile = widgetValue(profileWidget);
+  const requestId = (apiModelRequestIds.get(node) ?? 0) + 1;
+  apiModelRequestIds.set(node, requestId);
+  const query = new URLSearchParams({ profile, input_kind: inputKind });
+  try {
+    const response = await fetch(`${API_MODELS_URL}?${query.toString()}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    if (apiModelRequestIds.get(node) !== requestId
+      || widgetValue(findWidget(node, "decision_backend")) !== "API"
+      || widgetValue(findWidget(node, "api_profile")) !== profile) return;
+    const ids = (Array.isArray(payload.models) ? payload.models : [])
+      .map((model) => String(model?.id ?? "")).filter(Boolean);
+    if (!ids.length) throw new Error("No compatible decision models returned");
+    modelWidget.type = "combo";
+    modelWidget.serialize = true;
+    modelWidget.options ??= {};
+    modelWidget.options.values = ids;
+    if (!ids.includes(widgetValue(modelWidget))) {
+      modelWidget.value = ids[0];
+      modelWidget.options.value = ids[0];
+    }
+  } catch (error) {
+    if (apiModelRequestIds.get(node) !== requestId
+      || widgetValue(findWidget(node, "decision_backend")) !== "API"
+      || widgetValue(findWidget(node, "api_profile")) !== profile) return;
+    console.warn("[ThinkingLLM Decision Router] Could not load API decision models.", error);
+    modelWidget.type = "text";
+  }
+  node.size = node.computeSize?.() ?? node.size;
+  node.setDirtyCanvas?.(true, true);
+}
+
+function synchronizeBackend(node, inputKind) {
+  const apiMode = widgetValue(findWidget(node, "decision_backend")) === "API";
+  for (const name of ["decision_model", "api_profile", "api_model", "keep_model_loaded", "include_reason"]) {
+    const widget = findWidget(node, name);
+    if (widget) widget.hidden = apiMode
+      ? ["decision_model", "keep_model_loaded", "include_reason"].includes(name)
+      : ["api_profile", "api_model"].includes(name);
+  }
+  if (apiMode) refreshApiModels(node, inputKind);
+  node.size = node.computeSize?.() ?? node.size;
+  node.setDirtyCanvas?.(true, true);
+}
 
 function widgetName(index, field) {
   return `route_${String(index + 1).padStart(2, "0")}_${field}`;
@@ -97,6 +157,7 @@ app.registerExtension({
   async beforeRegisterNodeDef(nodeType, nodeData) {
     const routeType = NODE_OUTPUT_TYPES[nodeData.name];
     if (!routeType) return;
+    const inputKind = nodeData.name === "ThinkingLLM_DecisionRouter" ? "image" : "text";
 
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
@@ -104,6 +165,15 @@ app.registerExtension({
       const node = this;
       return afterLifecycle(node, routeType, result, (createdNode, outputType) => {
         for (const widget of createdNode.widgets ?? []) {
+          if (["decision_backend", "api_profile"].includes(widget.name)) {
+            const originalCallback = widget.callback;
+            widget.callback = function (value, ...args) {
+              const callbackResult = originalCallback?.call(this, value, ...args);
+              synchronizeBackend(createdNode, inputKind);
+              return callbackResult;
+            };
+            continue;
+          }
           if (!widget.name?.startsWith("route_")) continue;
           const originalCallback = widget.callback;
           widget.callback = function (value, ...args) {
@@ -112,13 +182,17 @@ app.registerExtension({
           };
         }
         scheduleSynchronize(createdNode, outputType);
+        synchronizeBackend(createdNode, inputKind);
       });
     };
 
     const originalConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function () {
       const result = originalConfigure?.apply(this, arguments);
-      return afterLifecycle(this, routeType, result, scheduleSynchronize);
+      return afterLifecycle(this, routeType, result, (configuredNode, outputType) => {
+        scheduleSynchronize(configuredNode, outputType);
+        synchronizeBackend(configuredNode, inputKind);
+      });
     };
   },
 });
