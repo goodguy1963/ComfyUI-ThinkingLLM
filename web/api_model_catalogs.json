@@ -598,11 +598,6 @@
           "vision": false
         },
         {
-          "id": "stepfun/step-5-preview",
-          "label": "stepfun/step-5-preview",
-          "vision": false
-        },
-        {
           "id": "tencent/hy4-preview",
           "label": "tencent/hy4-preview",
           "vision": false
@@ -1015,6 +1010,11 @@
         {
           "id": "scaledown/summarize",
           "label": "scaledown/summarize",
+          "vision": false
+        },
+        {
+          "id": "stepfun/step-5-preview",
+          "label": "stepfun/step-5-preview",
           "vision": false
         },
         {
