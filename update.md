@@ -1,5 +1,19 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 3.0.1 (2026/10/29) - Decision Router VRAM and Explanation Controls
+
+### 3.0.1 Changes
+
+- Added `keep_model_loaded` to both Decision Router nodes. By default, the llama.cpp model and image handler are released after routing, including inference errors and empty batches; enabling the option retains them for faster subsequent runs.
+- Added optional `include_reason` post-hoc explanations to `decision_json`. The native decision head remains authoritative for route selection and probabilities; explanation failures leave routing intact and are reported as unavailable.
+- Documented VRAM tradeoffs and both controls in the Decision Router README section.
+
+### 3.0.1 Validation
+
+- All 227 tests passed in the bundled ComfyUI Python runtime (17.62 seconds), including the 29 focused Decision Router tests.
+- Version metadata parsing and `git diff --check` passed.
+- Real-weight explanation generation has not been smoke-tested; model-specific chat-generation support and its added latency may vary.
+
 ## Version 3.0.0 (2026/10/28) - Local Decision Router
 
 ### 3.0.0 Changes

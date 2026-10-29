@@ -460,9 +460,12 @@ class DecisionRouterNodeTests(unittest.TestCase):
         router_module = load_router_module()
         node = router_module.ThinkingLLMDecisionRouterText()
         node._load_model = mock.Mock(side_effect=AssertionError("empty batches must not load a model"))
+        node.clear = mock.Mock()
         result = node.route_text([], "Clef-Flash 9B · Q4_K_M", "choose", route_01_name="a", route_02_name="b")
         self.assertEqual(json.loads(result[0])["decisions"], [])
         self.assertTrue(all(isinstance(output, router_module.ExecutionBlocker) for output in result[1:]))
+        node._load_model.assert_not_called()
+        node.clear.assert_called_once_with()
 
     def test_image_and_text_nodes_have_separate_typed_ports(self):
         module = load_router_module()
@@ -475,8 +478,12 @@ class DecisionRouterNodeTests(unittest.TestCase):
         self.assertNotIn("text", image_node.INPUT_TYPES()["required"])
         self.assertEqual(text_node.INPUT_TYPES()["required"]["text"][0], "STRING")
         self.assertNotIn("image", text_node.INPUT_TYPES()["required"])
-        self.assertEqual(len(image_node.INPUT_TYPES()["required"]), 107)
-        self.assertEqual(len(text_node.INPUT_TYPES()["required"]), 107)
+        self.assertEqual(len(image_node.INPUT_TYPES()["required"]), 109)
+        self.assertEqual(len(text_node.INPUT_TYPES()["required"]), 109)
+        self.assertEqual(image_node.INPUT_TYPES()["required"]["keep_model_loaded"][1]["default"], False)
+        self.assertEqual(text_node.INPUT_TYPES()["required"]["keep_model_loaded"][1]["default"], False)
+        self.assertEqual(image_node.INPUT_TYPES()["required"]["include_reason"][1]["default"], False)
+        self.assertEqual(text_node.INPUT_TYPES()["required"]["include_reason"][1]["default"], False)
         self.assertEqual(
             module.NODE_CLASS_MAPPINGS["ThinkingLLM_DecisionRouterText"],
             text_node,
@@ -507,6 +514,182 @@ class DecisionRouterNodeTests(unittest.TestCase):
         self.assertTrue(torch.equal(result[1], image[[0, 2]]))
         self.assertTrue(torch.equal(result[2], image[[1]]))
         self.assertTrue(load_calls[0]["require_vision"])
+
+    def test_model_is_cleared_after_routing_by_default(self):
+        router_module = load_router_module()
+        node = router_module.ThinkingLLMDecisionRouterText()
+        node._load_model = lambda *_args, **_kwargs: setattr(node, "llm", object())
+        node.clear = mock.Mock()
+
+        with (
+            mock.patch.object(router_module, "openjev_text_probabilities", return_value=[0.8, 0.2]),
+            mock.patch.object(router_module, "_decision_reason") as reason_mock,
+        ):
+            node.route_text(
+                "a text input",
+                "OpenJev 27B · Q4_K_M · non-commercial",
+                "Choose a route.",
+                route_01_name="a",
+                route_02_name="b",
+            )
+
+        node.clear.assert_called_once_with()
+        reason_mock.assert_not_called()
+
+    def test_keep_model_loaded_retains_model_between_runs(self):
+        router_module = load_router_module()
+        node = router_module.ThinkingLLMDecisionRouterText()
+        node._load_model = lambda *_args, **_kwargs: setattr(node, "llm", object())
+        node.clear = mock.Mock()
+
+        with mock.patch.object(router_module, "openjev_text_probabilities", return_value=[0.8, 0.2]):
+            node.route_text(
+                "a text input",
+                "OpenJev 27B · Q4_K_M · non-commercial",
+                "Choose a route.",
+                keep_model_loaded=True,
+                route_01_name="a",
+                route_02_name="b",
+            )
+
+        node.clear.assert_not_called()
+
+    def test_model_is_cleared_after_inference_error_by_default(self):
+        router_module = load_router_module()
+        node = router_module.ThinkingLLMDecisionRouterText()
+        node._load_model = lambda *_args, **_kwargs: setattr(node, "llm", object())
+        node.clear = mock.Mock()
+
+        with mock.patch.object(router_module, "openjev_text_probabilities", side_effect=RuntimeError("inference failed")):
+            with self.assertRaisesRegex(RuntimeError, "Decision inference failed"):
+                node.route_text(
+                    "a text input",
+                    "OpenJev 27B · Q4_K_M · non-commercial",
+                    "Choose a route.",
+                    route_01_name="a",
+                    route_02_name="b",
+                )
+
+        node.clear.assert_called_once_with()
+
+    def test_text_reason_is_optional_post_hoc_json_field(self):
+        router_module = load_router_module()
+        node = router_module.ThinkingLLMDecisionRouterText()
+        node._load_model = lambda *_args, **_kwargs: setattr(node, "llm", object())
+        node.clear = mock.Mock()
+
+        with (
+            mock.patch.object(router_module, "openjev_text_probabilities", return_value=[0.8, 0.2]),
+            mock.patch.object(router_module, "_decision_reason", return_value="Mentions a billing issue.") as reason_mock,
+        ):
+            result = node.route_text(
+                "billing issue",
+                "OpenJev 27B · Q4_K_M · non-commercial",
+                "Choose a route.",
+                include_reason=True,
+                route_01_name="billing",
+                route_01_description="billing questions",
+                route_02_name="support",
+                route_02_description="technical support",
+            )
+
+        decision = json.loads(result[0])["decisions"][0]
+        self.assertEqual(decision["route"], "billing")
+        self.assertEqual(decision["reason"], "Mentions a billing issue.")
+        self.assertIn("probabilities", decision)
+        reason_mock.assert_called_once()
+        self.assertEqual(reason_mock.call_args.kwargs["input_kind"], "text")
+        self.assertEqual(reason_mock.call_args.kwargs["item"], "billing issue")
+        node.clear.assert_called_once_with()
+
+    def test_image_reason_uses_selected_route_without_changing_decision(self):
+        router_module = load_router_module()
+        node = router_module.ThinkingLLMDecisionRouter()
+        node._load_model = lambda *_args, **_kwargs: setattr(node, "llm", object())
+        node.clear = mock.Mock()
+        image = torch.zeros((1, 2, 2, 3))
+
+        with (
+            mock.patch.object(router_module, "_encode_image", return_value="data:image/png;base64,AA=="),
+            mock.patch.object(router_module, "openjev_probabilities", return_value=[0.1, 0.9]),
+            mock.patch.object(router_module, "_decision_reason", return_value="A dog is visible.") as reason_mock,
+        ):
+            result = node.route_images(
+                image,
+                "OpenJev 27B · Q4_K_M · non-commercial",
+                "Choose a route.",
+                include_reason=True,
+                route_01_name="cat",
+                route_01_description="a cat",
+                route_02_name="dog",
+                route_02_description="a dog",
+            )
+
+        decision = json.loads(result[0])["decisions"][0]
+        self.assertEqual(decision["route"], "dog")
+        self.assertEqual(decision["reason"], "A dog is visible.")
+        self.assertEqual(tuple(result[2].shape), (1, 2, 2, 3))
+        self.assertEqual(reason_mock.call_args.kwargs["input_kind"], "image")
+        self.assertEqual(reason_mock.call_args.kwargs["image_data_url"], "data:image/png;base64,AA==")
+
+    def test_reason_failure_does_not_fail_routing(self):
+        router_module = load_router_module()
+        node = router_module.ThinkingLLMDecisionRouterText()
+        node._load_model = lambda *_args, **_kwargs: setattr(node, "llm", object())
+        node.clear = mock.Mock()
+
+        with (
+            mock.patch.object(router_module, "openjev_text_probabilities", return_value=[0.8, 0.2]),
+            mock.patch.object(router_module, "_decision_reason", side_effect=RuntimeError("explanation unavailable")),
+        ):
+            result = node.route_text(
+                "billing issue",
+                "OpenJev 27B · Q4_K_M · non-commercial",
+                "Choose a route.",
+                include_reason=True,
+                keep_model_loaded=True,
+                route_01_name="billing",
+                route_02_name="support",
+            )
+
+        decision = json.loads(result[0])["decisions"][0]
+        self.assertEqual(decision["route"], "billing")
+        self.assertIsNone(decision["reason"])
+        self.assertEqual(decision["reason_error"], "Explanation unavailable (RuntimeError).")
+        self.assertEqual(result[1], ["billing issue"])
+        node.clear.assert_not_called()
+
+    def test_decision_reason_is_one_line_bounded_and_restores_image_template(self):
+        router_module = load_router_module()
+
+        class FakeLlama:
+            def create_chat_completion(self, **kwargs):
+                self.call = kwargs
+                self.raw_template_during_call = handler.chat_template.raw
+                return {"choices": [{"message": {"content": "Evidence:\n" + ("visible clue " * 40)}}]}
+
+        handler = SimpleNamespace(chat_template=SimpleNamespace(raw=True))
+        llm = FakeLlama()
+        reason = router_module._decision_reason(
+            llm,
+            handler,
+            input_kind="image",
+            item=None,
+            image_data_url="data:image/png;base64,AA==",
+            system_prompt="Choose by subject.",
+            route={"name": "dog", "description": "a dog"},
+        )
+
+        self.assertLessEqual(len(reason), router_module._MAX_REASON_CHARS)
+        self.assertNotIn("\n", reason)
+        self.assertEqual(llm.call["max_tokens"], 96)
+        self.assertFalse(llm.raw_template_during_call)
+        self.assertTrue(handler.chat_template.raw)
+        prompt_content = llm.call["messages"][1]["content"]
+        self.assertEqual(prompt_content[0]["image_url"]["url"], "data:image/png;base64,AA==")
+        self.assertIn("Selected route: dog", prompt_content[1]["text"])
+        self.assertIn("Route description: a dog", prompt_content[1]["text"])
+        self.assertIn("Decision instruction: Choose by subject.", prompt_content[1]["text"])
 
 
 if __name__ == "__main__":
