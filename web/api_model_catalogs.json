@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Curated convenience model lists for the ThinkingLLM API node. These are suggestions only and never override a server-side profile allowed_models allowlist. Maintained by hand; validated by tools/check_api_model_catalogs.py on every PR, push, and release.",
-  "updated_at": "2026-10-29",
+  "updated_at": "2026-10-30",
   "profiles": {
     "OpenAI": {
       "provider": "OpenAI",
@@ -598,6 +598,11 @@
           "vision": false
         },
         {
+          "id": "stepfun/step-5-preview",
+          "label": "stepfun/step-5-preview",
+          "vision": false
+        },
+        {
           "id": "tencent/hy4-preview",
           "label": "tencent/hy4-preview",
           "vision": false
@@ -1010,11 +1015,6 @@
         {
           "id": "scaledown/summarize",
           "label": "scaledown/summarize",
-          "vision": false
-        },
-        {
-          "id": "stepfun/step-5-preview",
-          "label": "stepfun/step-5-preview",
           "vision": false
         },
         {
@@ -1960,11 +1960,6 @@
         {
           "id": "thedrummer/cydonia-24b-v4.1",
           "label": "thedrummer/cydonia-24b-v4.1",
-          "vision": false
-        },
-        {
-          "id": "upstage/solar-pro-3",
-          "label": "upstage/solar-pro-3",
           "vision": false
         },
         {
@@ -6755,6 +6750,11 @@
         {
           "id": "typesafe/jev-1.13",
           "label": "typesafe/jev-1.13",
+          "vision": false
+        },
+        {
+          "id": "typesafe/jev-1.14",
+          "label": "typesafe/jev-1.14",
           "vision": false
         },
         {
