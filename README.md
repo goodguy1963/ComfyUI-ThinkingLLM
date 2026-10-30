@@ -17,6 +17,7 @@
 - Prompt enhancers for image and video generation workflows
 - Thinking-mode control, live terminal streaming, and a separate `RAW_TRACE` output
 - Local image and text decision routing to named, lazily executed workflow branches
+- Typed image and text decision fields with Boolean and bounded Integer outputs
 - Curated model recommendations and preset-specific generation guidance
 - Secure OpenAI-compatible API node for approved remote providers
 - Existing compatible models are discovered instead of downloaded twice
@@ -53,6 +54,8 @@ The Decision Router needs native llama.cpp decision APIs that are not present in
 | `ThinkingLLM (GGUF Advanced)` | llama.cpp | GGUF advanced controls and `MASK_PREVIEW` |
 | `ThinkingLLM Decision Router (Image)` | llama.cpp / OpenAI / OpenRouter | Image decisions routed to named branches |
 | `ThinkingLLM Decision Router (Text)` | llama.cpp / OpenAI / OpenRouter | Text decisions routed to named branches |
+| `ThinkingLLM Decision Fields (Image)` | llama.cpp / OpenAI / OpenRouter | Independent Boolean questions and bounded Integer decisions from images |
+| `ThinkingLLM Decision Fields (Text)` | llama.cpp / OpenAI / OpenRouter | Independent Boolean questions and bounded Integer decisions from text |
 | `ThinkingLLM Gemma 4 Audio (GGUF)` | llama.cpp | Gemma 4 audio understanding |
 | `ThinkingLLM Whisper ASR` | faster-whisper | Speech-to-text transcription |
 | `ThinkingLLM Prompt Enhancer (GGUF)` | llama.cpp | GGUF prompt enhancement |
@@ -70,6 +73,16 @@ You can also select the native **API** backend on either router. It supports Ope
 Clef models require llama.cpp's native decision-batch APIs; OpenJev uses llama.cpp's final-position logits API. Image routing additionally requires the MTMD vision APIs; text routing does not. Each node checks the selected capabilities before downloading model weights and reports missing symbols with an installation hint. See [Decision Router llama.cpp requirements](docs/LLAMA_CPP_SYSTEMONE_INSTALL.md) for the runtime details. OpenJev is CC BY-NC 4.0 and is hidden in commercial builds; Clef models are Apache-2.0.
 
 ![ThinkingLLM Decision Router example: an image is classified and routed to named fox, dog, cat, or none branches](docs/decision-router-example.png)
+
+### Decision Fields
+
+The Image and Text Decision Fields nodes evaluate independent questions and expose up to eight `BOOLEAN` values and eight `INT` values per node. Both types of output sockets appear only as fields are configured; Boolean sockets come first, followed by Integer sockets. Boolean fields use an adjustable probability threshold (default `0.5`), so separate conditions can both be true. Integer fields select from the configured range instead of parsing generated text. The range can contain at most 52 choices for compatibility with local decision heads; values outside it are clamped to the nearest bound and marked in `decision_json` as `below_min` or `above_max`.
+
+Add a field by filling its name and question. Examples: `is_fox` / “Is a fox visibly present?” or `person_count` / “How many people are visible?” The model receives the shared system prompt plus each field question. Configured Boolean and Integer outputs appear dynamically and use their field names. Connected outputs remain in place if a field is cleared and return an execution blocker until it is configured again. `decision_json` retains the compact machine-readable results, including option probabilities and API confidence when available. The separate `decision` output gives a multiline summary of each item's chosen values without probability decimals. Batched values preserve input order.
+
+For saving raw JSON as an indented `.json` file, ComfyUI's built-in **Save Text** node pretty-prints valid JSON when its format is set to `json`; it saves the file rather than converting the string for downstream nodes. Use the new `decision` output for an immediately readable workflow result.
+
+API backends evaluate all fields for one input in a single request. Local models stay loaded once per node execution, but currently evaluate fields sequentially; multiple fields and larger image batches therefore increase inference time. Integer typing guarantees a valid bounded integer result, not counting accuracy. Test the selected model against representative labeled images before relying on counts in an automated workflow.
 
 ## Start a workflow
 

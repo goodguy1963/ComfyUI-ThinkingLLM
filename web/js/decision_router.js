@@ -4,6 +4,10 @@ const NODE_OUTPUT_TYPES = {
   ThinkingLLM_DecisionRouter: "IMAGE",
   ThinkingLLM_DecisionRouterText: "STRING",
 };
+const DECISION_FIELD_INPUT_KINDS = {
+  ThinkingLLM_DecisionFieldsImage: "image",
+  ThinkingLLM_DecisionFieldsText: "text",
+};
 const MAX_ROUTES = 52;
 const API_MODELS_URL = "/thinkingllm/decision/models";
 const apiModelRequestIds = new WeakMap();
@@ -156,8 +160,9 @@ app.registerExtension({
   name: "ThinkingLLM.DecisionRouter",
   async beforeRegisterNodeDef(nodeType, nodeData) {
     const routeType = NODE_OUTPUT_TYPES[nodeData.name];
-    if (!routeType) return;
-    const inputKind = nodeData.name === "ThinkingLLM_DecisionRouter" ? "image" : "text";
+    const inputKind = DECISION_FIELD_INPUT_KINDS[nodeData.name]
+      ?? (nodeData.name === "ThinkingLLM_DecisionRouter" ? "image" : routeType ? "text" : null);
+    if (!inputKind) return;
 
     const originalCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
@@ -174,14 +179,14 @@ app.registerExtension({
             };
             continue;
           }
-          if (!widget.name?.startsWith("route_")) continue;
+          if (!routeType || !widget.name?.startsWith("route_")) continue;
           const originalCallback = widget.callback;
           widget.callback = function (value, ...args) {
             const callbackResult = originalCallback?.call(this, value, ...args);
             return afterLifecycle(createdNode, outputType, callbackResult, safeSynchronize);
           };
         }
-        scheduleSynchronize(createdNode, outputType);
+        if (outputType) scheduleSynchronize(createdNode, outputType);
         synchronizeBackend(createdNode, inputKind);
       });
     };
@@ -190,7 +195,7 @@ app.registerExtension({
     nodeType.prototype.onConfigure = function () {
       const result = originalConfigure?.apply(this, arguments);
       return afterLifecycle(this, routeType, result, (configuredNode, outputType) => {
-        scheduleSynchronize(configuredNode, outputType);
+        if (outputType) scheduleSynchronize(configuredNode, outputType);
         synchronizeBackend(configuredNode, inputKind);
       });
     };

@@ -142,6 +142,136 @@ def request_decision(profile: dict, model: str, input_kind: str, item, image_dat
     return normalize_decision_response(protocol, response, [str(route["name"]) for route in routes])
 
 
+def build_fields_decision_request(
+    protocol: str,
+    model: str,
+    input_kind: str,
+    item,
+    image_data_url: str | None,
+    system_prompt: str,
+    fields,
+):
+    """Build one provider request containing all typed output fields for an input."""
+    instructions = str(system_prompt or "").strip()
+    questions = []
+    openrouter_questions = {}
+    for field in fields:
+        question_text = str(field["question"])
+        instruction = f"{instructions}\n\n{question_text}" if instructions else question_text
+        options = field["options"]
+        if protocol == "openai_decisions":
+            questions.append({
+                "type": "choice",
+                "name": str(field["id"]),
+                "instructions": instruction,
+                "choices": [
+                    {"value": str(option["value"]), "description": str(option["description"])}
+                    for option in options
+                ],
+            })
+        elif protocol == "openrouter_decisions":
+            openrouter_questions[str(field["id"])] = {
+                "type": "choice",
+                "instructions": instruction,
+                "criteria": {
+                    str(option["value"]): str(option["description"])
+                    for option in options
+                },
+            }
+        else:
+            raise ValueError(f"Unsupported Decision API protocol: {protocol!r}.")
+
+    if protocol == "openai_decisions":
+        content = [{
+            "type": "input_text",
+            "text": str(item) if input_kind == "text" else "Evaluate the configured fields for the supplied image.",
+        }]
+        if image_data_url:
+            content.append({"type": "input_image", "image_url": image_data_url})
+        return {
+            "model": model,
+            "input": [{"role": "user", "content": content}],
+            "questions": questions,
+        }
+
+    state = str(item) if input_kind == "text" else []
+    if input_kind == "image":
+        state = [{"type": "image_url", "image_url": {"url": image_data_url}}]
+    return {"model": model, "state": state, "questions": openrouter_questions}
+
+
+def normalize_fields_decision_response(protocol: str, response: dict, fields):
+    """Normalize the differently shaped provider responses by stable field id."""
+    expected_ids = {str(field["id"]) for field in fields}
+    if protocol == "openai_decisions":
+        raw_answers = response.get("answers")
+        if not isinstance(raw_answers, list):
+            raise RuntimeError("OpenAI Decisions API did not return field answers.")
+        answers = {}
+        for answer in raw_answers:
+            if not isinstance(answer, dict) or answer.get("name") not in expected_ids:
+                continue
+            field_id = str(answer["name"])
+            if field_id in answers:
+                raise RuntimeError(f"OpenAI Decisions API returned duplicate answers for {field_id}.")
+            answers[field_id] = answer
+    elif protocol == "openrouter_decisions":
+        raw_answers = response.get("answers")
+        if not isinstance(raw_answers, dict):
+            raise RuntimeError("OpenRouter Decisions API did not return field answers.")
+        answers = raw_answers
+    else:
+        raise ValueError(f"Unsupported Decision API protocol: {protocol!r}.")
+
+    normalized = {}
+    for field in fields:
+        field_id = str(field["id"])
+        answer = answers.get(field_id)
+        if not isinstance(answer, dict) or answer.get("type") != "choice":
+            raise RuntimeError(f"Decision API did not return a choice for field {field['name']!r}.")
+        option_values = [str(option["value"]) for option in field["options"]]
+        choice = answer.get("choice")
+        if not isinstance(choice, str) or choice not in option_values:
+            raise RuntimeError(f"Decision API selected an unknown value for field {field['name']!r}.")
+        probabilities = _probability_map(answer.get("probabilities"), option_values)
+        confidence = answer.get("confidence")
+        if confidence is not None:
+            if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+                raise RuntimeError(f"Decision API returned invalid confidence for field {field['name']!r}.")
+            confidence = float(confidence)
+            if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+                raise RuntimeError(f"Decision API returned invalid confidence for field {field['name']!r}.")
+        normalized[field_id] = (choice, probabilities, confidence)
+    return normalized
+
+
+def request_decision_fields(
+    profile: dict,
+    model: str,
+    input_kind: str,
+    item,
+    image_data_url: str | None,
+    system_prompt: str,
+    fields,
+    *,
+    api_key: str,
+    opener=None,
+):
+    """Ask one API request to evaluate all configured output fields."""
+    protocol = profile.get("decision_protocol")
+    payload = build_fields_decision_request(
+        protocol, model, input_kind, item, image_data_url, system_prompt, fields,
+    )
+    response = _request_json(
+        profile["decision_endpoint"],
+        headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+        payload=payload,
+        timeout=int(profile.get("max_timeout_seconds", 300)),
+        opener=opener,
+    )
+    return normalize_fields_decision_response(protocol, response, fields)
+
+
 def openrouter_decision_models(input_kind: str, *, timeout: int = 20, now: float | None = None, opener=None):
     """Return OpenRouter model ids with decision output and requested input capability."""
     modality = "image" if input_kind == "image" else "text"

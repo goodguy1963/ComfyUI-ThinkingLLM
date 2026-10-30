@@ -20,6 +20,16 @@ Enter a route name in the last visible route row to reveal another row. Empty na
 
 The models run in-process through llama.cpp and are retained by each node for reuse. The available models are Clef-Flash 9B, Clef 27B, and OpenJev 27B, all Q4_K_M. Text routing needs no vision projector; image routing downloads one on first use. Runtime capability checks happen before downloads. Image and text route outputs keep their native ComfyUI types. See [Decision Router llama.cpp requirements](LLAMA_CPP_SYSTEMONE_INSTALL.md). OpenJev is licensed CC BY-NC 4.0 and is excluded from commercial builds; the Clef models are Apache-2.0.
 
+## Decision Fields
+
+The Image and Text Decision Fields nodes evaluate configured questions independently for each input item. Both Boolean and Integer output sockets appear as their fields are configured, up to eight of each. Boolean sockets come first, followed by Integer sockets, and each output keeps the configured field name and native ComfyUI socket type. Connected outputs remain available as inactive placeholders if their fields are cleared, so links do not break; those outputs block execution until the field is configured again. Workflows using either previous Boolean-first or Integer-first fixed slots are remapped when loaded.
+
+Boolean fields compare the model's probability for `true` with a per-field threshold (default `0.5`). They are independent: more than one field can be true. Integer fields use a finite choice set from `minimum` through `maximum`, inclusive, plus underflow/overflow choices when applicable. The local native decision heads support at most 52 choices per field. Out-of-range predictions return the nearest bound on the `INT` socket and include `range_status` in `decision_json` so the clamp is explicit.
+
+`decision_json` is the compact machine-readable output. It records each item's field values, option probabilities, and provider confidence when supplied. The separate `decision` output formats those values as a readable multiline summary and omits probability decimals; out-of-range integer results are marked as below or above the configured limit. Both outputs cover the full batch in input order. Typed field outputs are batches in original input order as well. API mode submits all active questions together for each item; local llama.cpp mode reuses the loaded model but evaluates fields sequentially. Runtime and provider response errors fail the node instead of returning fabricated values. Integer output typing does not imply reliable visual counting; validate the chosen model on representative examples.
+
+To save the raw JSON with indentation, connect `decision_json` to ComfyUI's built-in **Save Text** node and choose the `json` format. That node pretty-prints valid JSON in the saved file; the `decision` output is intended for readable text directly in a workflow.
+
 ## Thinking mode
 
 Every inference node exposes `enable_thinking`.

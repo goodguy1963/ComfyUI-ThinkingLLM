@@ -6,8 +6,8 @@
     "https://github.com/goodguy1963/ComfyUI-ThinkingLLM"
   ],
   "install_type": "git-clone",
-  "description": "A multimodal ComfyUI AI node pack with Qwen, Gemma 4, GGUF, Whisper, image and text decision routing, and live thinking output.",
+  "description": "A multimodal ComfyUI AI node pack with Qwen, Gemma 4, GGUF, Whisper, image and text decision routing, typed Boolean and Integer decision fields, and live thinking output.",
   "category": "image",
-  "tags": ["vision", "language", "multimodal", "thinkingllm", "decision-router", "qwen", "gguf", "flash_attention", "performance", "wan2.2", "video", "i2v", "t2v", "storyboard", "caching", "fork", "gpl-3.0"],
-  "version": "3.0.2"
+  "tags": ["vision", "language", "multimodal", "thinkingllm", "decision-router", "decision-fields", "qwen", "gguf", "flash_attention", "performance", "wan2.2", "video", "i2v", "t2v", "storyboard", "caching", "fork", "gpl-3.0"],
+  "version": "3.1.0"
 }

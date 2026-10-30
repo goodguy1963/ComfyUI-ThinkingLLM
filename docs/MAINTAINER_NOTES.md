@@ -23,6 +23,10 @@
 - Keep the same version mirrored in the `__init__.py` metadata block and `custom_nodes.json` so local ComfyUI metadata and manager-facing metadata stay aligned.
 - README still contains historical upstream links and changelog references beyond the top-level fork identity; that is acceptable for attribution, but a docs pass should normalize publish-facing instructions before release.
 
+## ThinkingLLM 3.1.0 release record
+
+Version metadata is synchronized at **3.1.0** in `pyproject.toml`, `__init__.py`, and `custom_nodes.json`. The release adds typed Boolean and bounded Integer Decision Fields for image and text inputs, local and API inference, dynamic native-type output sockets, and a readable `decision` summary alongside raw `decision_json`. The feature idea was contributed by [JMarimon1](https://www.reddit.com/user/JMarimon1/); see `update.md` for detailed changes and verification.
+
 ## ThinkingLLM 3.0.0 release record
 
 Version metadata is synchronized at **3.0.0** in `pyproject.toml`, `__init__.py`, and `custom_nodes.json`. The detailed user-facing changes and validation status are recorded in `update.md`.

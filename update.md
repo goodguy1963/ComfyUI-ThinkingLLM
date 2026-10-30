@@ -1,5 +1,28 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 3.1.0 (2026/10/30) - Typed Decision Fields and Readable Results
+
+### 3.1.0 Changes
+
+- Added separate Image and Text Decision Fields nodes. Configure up to eight Boolean conditions and eight bounded Integer questions per node; each configured field gets a native typed output socket.
+- Boolean fields are evaluated independently and use a configurable true-probability threshold. Integer fields choose from an inclusive minimum-to-maximum range; out-of-range results clamp to the nearest limit and remain marked in the raw result.
+- Added `decision` as a readable multiline summary alongside the existing compact `decision_json`, which continues to expose field probabilities and provider confidence when available.
+- Added native typed-field requests for the supported OpenAI and OpenRouter Decisions APIs, while retaining in-process local llama.cpp inference. Local fields are evaluated sequentially per item; API backends submit all configured fields together per item.
+- Made configured typed sockets appear dynamically, preserve their order and connections across edits and workflow reloads, and migrate links from earlier Boolean-first and Integer-first layouts.
+- Added bottom-of-node notes explaining Boolean, Integer, thresholds, route descriptions, batch behavior, raw/readable outputs, and local/API backends in both Community and commercial frontends. Editing existing field text no longer triggers repeated node-size recalculation.
+- Updated the README and workflow guide with setup, output, range, and model-accuracy guidance.
+
+### Feature idea credit
+
+- The typed Boolean and Integer output idea came from a feature request by [JMarimon1](https://www.reddit.com/user/JMarimon1/). Thanks for the thoughtful suggestion; it shaped Decision Fields into a more general VLM controller.
+
+### 3.1.0 Validation
+
+- All 257 Python tests passed in the embedded ComfyUI Python 3.12 runtime across the Decision Fields, Decision Router, Decisions API, API security, llama.cpp installer, SageAttention, and feature-compatibility suites.
+- All six frontend tests passed, including dynamic Boolean/Integer socket migration, output-link preservation, readable notes for all four Decision nodes, and stable sizing while editing configured fields.
+- Python compilation, JavaScript syntax checks, the API model-catalog validator (9 profiles / 1,359 models), mirrored version metadata, and `git diff --check` passed.
+- Typed Decisions API tests use mocked provider responses. No authenticated OpenAI/OpenRouter request, clean-install test, or full-weight Decision Fields inference smoke test was run for this release.
+
 ## Version 3.0.2 (2026/10/29) - Native Decision API Backends
 
 ### 3.0.2 Changes
