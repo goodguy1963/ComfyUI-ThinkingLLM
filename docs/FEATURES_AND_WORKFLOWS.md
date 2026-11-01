@@ -89,7 +89,7 @@ The standard and Advanced HF/GGUF vision nodes accept an optional ComfyUI `MASK`
 - Soft values create a gradual transition.
 - Mask dimensions are resized to the image automatically.
 
-In `focus` mode, ThinkingLLM keeps the selected area at normal brightness and dims the surroundings. This directs the vision model without removing spatial, lighting, or scene context.
+In `focus` mode, ThinkingLLM crops and centers the selected region with a small amount of nearby context, then dims the unselected part of that crop. This keeps a large, unrelated subject elsewhere in the image from overpowering the masked target.
 
 The node instructs the model to describe only the masked content. A broader preset such as `Detailed Description` keeps its requested detail level but is scoped to that content; the model should not narrate the mask or the rest of the image.
 
@@ -105,7 +105,7 @@ In `reconstruct` mode, the selected area is concealed and the model is asked to 
 
 ThinkingLLM does not edit the image. It describes what should naturally appear inside the masked region; the downstream diffusion model performs the replacement.
 
-Advanced nodes return `MASK_PREVIEW`. Connect it to **Preview Image** to inspect exactly what the LLM receives.
+Advanced nodes return `MASK_PREVIEW`. Connect it to **Preview Image** to inspect the centered focus crop that the LLM receives.
 
 Mask limitations:
 
@@ -116,7 +116,7 @@ Mask limitations:
 
 ## Video prompt workflows
 
-ThinkingLLM provides preset-specific guidance for LTX 2.3, MiniMax H3, and Wan 2.2 workflows. The optional `duration_seconds` input appears only for registered duration-aware presets. Adult-oriented video prompt formats are available as styles in the text-only Prompt Enhancer nodes; type the scene idea directly into their `prompt_text` field, with no separate text node required. For image-to-video styles, include a written description of the source frame because Prompt Enhancer nodes do not receive images.
+ThinkingLLM provides preset-specific guidance for LTX 2.3, MiniMax H3, and Wan 2.2 workflows. The optional `duration_seconds` input appears only for registered duration-aware presets. Adult-oriented video system prompts are available through the standalone **ThinkingLLM System Prompt Preset** node; they are not listed among the Prompt Enhancer styles. That node also includes a custom text field and a live preview of the exact combined system prompt it outputs. For general prompt enhancement, type the scene idea directly into `prompt_text`. For image-to-video styles, include a written description of the source frame because Prompt Enhancer nodes do not receive images.
 
 Use the preset that matches the downstream workflow and connected media. MiniMax H3 offers separate T2VA, I2VA, FL2VA, L2VA, and Reference-to-Video contracts; text-only Prompt Enhancer nodes expose T2VA. For image transformations, the vision nodes include `Creative Image Remix` and `Style Conversion`: both adapt to any connected image, preserve its recognizable subject, and avoid adult content. `Style Conversion` follows a style named in `custom_prompt`, or chooses a fitting style when none is specified.
 

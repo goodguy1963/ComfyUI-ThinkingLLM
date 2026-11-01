@@ -1,5 +1,19 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 3.1.2 (2026/11/01) - Preset and Mask Focus Improvements
+
+### 3.1.2 Changes
+
+- Centered mask-focused image analysis on the selected region and dimmed unrelated content more strongly, reducing competing subjects in descriptions.
+- Added an inline custom instruction field and a live full-text preview to the System Prompt Preset node.
+- Moved adult-oriented video system prompts out of Prompt Enhancer dropdowns and into the standalone System Prompt Preset node. Creative Image Remix and Style Conversion remain general and non-adult.
+
+### 3.1.2 Validation
+
+- 266 Python tests passed across all eight test modules; one Windows symlink test was skipped because symlink creation was unavailable.
+- All six frontend tests passed. JavaScript syntax, API model-catalog validation (9 profiles / 1,355 models), mirrored version metadata, and `git diff --check` passed.
+- No live ComfyUI inference smoke test was run.
+
 ## Version 3.1.1 (2026/11/01) - Audio Workflows and Security Hardening
 
 ### 3.1.1 Changes

@@ -394,7 +394,7 @@ class TestMaskFocusedImageAnalysis(unittest.TestCase):
 
         highlighted, mask_hash = self.apply_mask_highlight(image, mask)
 
-        expected_brightness = torch.tensor([[1.0, 0.2], [0.6, 1.0]])
+        expected_brightness = torch.tensor([[1.0, 0.05], [0.525, 1.0]])
         torch.testing.assert_close(highlighted[0, ..., :3], expected_brightness[..., None].expand(-1, -1, 3))
         torch.testing.assert_close(highlighted[..., 3], original[..., 3])
         torch.testing.assert_close(image, original)
@@ -414,8 +414,23 @@ class TestMaskFocusedImageAnalysis(unittest.TestCase):
         _, second_hash = self.apply_mask_highlight(image, second_mask)
 
         self.assertEqual(resized.shape, image.shape)
-        self.assertGreater(float(resized[0, 0, 0, 0]), float(resized[0, -1, -1, 0]))
+        self.assertGreater(float(resized.max()), float(resized.min()))
         self.assertNotEqual(first_hash, second_hash)
+
+    def test_focus_centers_mask_and_removes_dominant_subject_outside_it(self):
+        image = torch.zeros((1, 100, 100, 3), dtype=torch.float32)
+        image[:, 20:82, 10:40, 0] = 1.0  # Large red distractor outside the mask.
+        image[:, 25:76, 64:86, 1] = 1.0  # Smaller green subject under the mask.
+        original = image.clone()
+        mask = torch.zeros((1, 100, 100), dtype=torch.float32)
+        mask[:, 25:76, 64:86] = 1.0
+
+        focused, _ = self.apply_mask_highlight(image, mask)
+
+        self.assertEqual(focused.shape, image.shape)
+        self.assertGreater(float(focused[0, 50, 50, 1]), float(focused[0, 0, 0, 1]) * 2)
+        self.assertLess(float(focused[..., 0].max()), 0.01)
+        torch.testing.assert_close(image, original)
 
     def test_mask_requires_an_image_and_a_nonempty_selection(self):
         with self.assertRaisesRegex(ValueError, "requires an image"):
@@ -464,8 +479,9 @@ class TestMaskFocusedImageAnalysis(unittest.TestCase):
     def test_focus_instruction_suppresses_meta_language_and_overrides_full_image_scope(self):
         instruction = self.mask_focus_instruction.lower()
 
-        self.assertIn("start directly with its concrete identity or category", instruction)
-        self.assertIn("omit every other subject, background, scenery", instruction)
+        self.assertIn("start directly with the target's concrete identity or category", instruction)
+        self.assertIn("ignore dimmed surroundings", instruction)
+        self.assertIn("larger or more visually prominent subjects near the crop's edges", instruction)
         self.assertIn("do not mention the visual distinction, a mask", instruction)
         self.assertIn("overrides any earlier request", instruction)
         self.assertNotIn("normal brightness", instruction)
@@ -974,7 +990,7 @@ class TestModelRecommendations(unittest.TestCase):
                 self.assertIn("log_llm_input(", source)
                 self.assertIn("no LLM call was made", source)
 
-    def test_nsfw_i2v_presets_are_only_selectable_from_prompt_enhancers(self):
+    def test_nsfw_presets_are_only_selectable_from_system_prompt_preset_node(self):
         data = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
 
         self.assertNotIn("🎦 LTX 2.3 NSFW I2V Scene", data["_preset_prompts"])
@@ -1015,7 +1031,18 @@ class TestModelRecommendations(unittest.TestCase):
             ("ThinkingLLM_QwenVL_GGUF_PromptEnhancer", "preset_system_prompt"),
         ):
             values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0]
-            self.assertTrue(nsfw_labels.issubset(values), node_name)
+            self.assertTrue(nsfw_labels.isdisjoint(values), node_name)
+
+        system_prompt_module = load_module_from_file(
+            "nodes/system_prompt_preset.py",
+            "thinkingllm_system_prompt_preset_adult_test",
+        )
+        system_prompt_node = system_prompt_module.NODE_CLASS_MAPPINGS["ThinkingLLM_SystemPromptPreset"]
+        system_prompt_values = system_prompt_node.INPUT_TYPES()["required"]["preset_prompt"][0]
+        self.assertTrue(nsfw_labels.issubset(system_prompt_values))
+        for label in nsfw_labels:
+            with self.subTest(label=label):
+                self.assertTrue(system_prompt_node().get_system_prompt(label)[0])
 
     def test_creative_and_style_conversion_presets_are_general_and_non_adult(self):
         data = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
@@ -1651,7 +1678,11 @@ class TestModelRecommendations(unittest.TestCase):
         for node_name, widget_name in expectations.items():
             with self.subTest(node_name=node_name):
                 values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0]
-                self.assertTrue(any("LTX 2.3" in value for value in values))
+                if "PromptEnhancer" in node_name:
+                    self.assertIn("📝 Enhance", values)
+                    self.assertFalse(any("NSFW" in value.upper() for value in values))
+                else:
+                    self.assertTrue(any("LTX 2.3" in value for value in values))
 
     def test_preset_tooltip_payload_matches_system_prompts(self):
         system_prompts = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
@@ -1679,11 +1710,24 @@ class TestModelRecommendations(unittest.TestCase):
         )
         node_name = "ThinkingLLM_SystemPromptPreset"
         node_cls = module.NODE_CLASS_MAPPINGS[node_name]
-        combo = node_cls.INPUT_TYPES()["required"]["preset_prompt"][0]
+        required = node_cls.INPUT_TYPES()["required"]
+        combo = required["preset_prompt"][0]
+        custom_prompt_type, custom_prompt_options = required["custom_prompt"]
+        self.assertEqual(custom_prompt_type, "STRING")
+        self.assertTrue(custom_prompt_options["multiline"])
+        self.assertEqual(custom_prompt_options["default"], "")
 
         expected_presets = [
             name for name in data["_preset_prompts"] if name in data["qwenvl"]
         ]
+        adult_presets = [
+            name
+            for name, entry in data["qwen_text"]["styles"].items()
+            if "NSFW" in name.upper()
+            and isinstance(entry, dict)
+            and isinstance(entry.get("system_prompt"), str)
+        ]
+        expected_presets.extend(name for name in adult_presets if name not in expected_presets)
         self.assertEqual(combo, expected_presets)
         self.assertEqual(node_cls.RETURN_TYPES, ("STRING",))
         self.assertEqual(node_cls.RETURN_NAMES, ("system_prompt",))
@@ -1695,13 +1739,23 @@ class TestModelRecommendations(unittest.TestCase):
             node_cls().get_system_prompt(module.NO_PRESET_PROMPT),
             ("",),
         )
+        extra_text = "Keep the composition calm and preserve the original subject."
+        base_prompt = data["qwenvl"]["🖼️ Detailed Description"]
+        self.assertEqual(
+            node_cls().get_system_prompt("🖼️ Detailed Description", extra_text),
+            (f"{base_prompt}\n\n{extra_text}",),
+        )
+        self.assertEqual(
+            node_cls().get_system_prompt(module.NO_PRESET_PROMPT, extra_text),
+            (extra_text,),
+        )
 
         legacy_preset = "🍿 Wan 2.2 NSFW T2V Timeline (3s)"
         self.assertNotIn(legacy_preset, data["qwenvl"])
-        self.assertNotIn(legacy_preset, combo)
+        self.assertIn(legacy_preset, combo)
         self.assertEqual(
             node_cls().get_system_prompt(legacy_preset),
-            ("",),
+            (data["qwen_text"]["styles"][legacy_preset]["system_prompt"],),
         )
 
     def test_standalone_system_prompt_preset_node_is_registered_by_all_loaders(self):
@@ -1732,6 +1786,10 @@ class TestModelRecommendations(unittest.TestCase):
         ).group(1)
         self.assertNotIn("ThinkingLLM_SystemPromptPreset", inference_nodes)
         self.assertIn("ThinkingLLM_SystemPromptPreset", tooltip_nodes)
+        self.assertIn('const SYSTEM_PROMPT_PREVIEW_WIDGET_NAME = "system_prompt_preview"', source)
+        self.assertIn("function buildSystemPromptPresetPreviewText(node, payload)", source)
+        self.assertIn("exact text sent to system_prompt", source)
+        self.assertIn("hookSystemPromptPresetPreviewInputs(node)", source)
         for widget_name in ["preset_prompt", "enhancement_style", "preset_system_prompt"]:
             with self.subTest(widget_name=widget_name):
                 self.assertIn(f'"{widget_name}"', source)
@@ -1750,6 +1808,7 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertIn('buildPromptEnhancerPreviewText(node, payload)', source)
         self.assertIn('findWidget(node, "prompt_text")', source)
         self.assertIn('findWidget(node, "custom_system_prompt")', source)
+        self.assertIn('findWidget(node, "custom_prompt")', source)
         self.assertIn('widget.inputEl.addEventListener("input", () => queueRecommendationRefresh(node))', source)
 
     def test_duration_visibility_preserves_widget_type_and_serialization_slot(self):
@@ -1778,7 +1837,8 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertIn("model_recommendations.json", source)
         self.assertIn("ComfyWidgets", source)
         self.assertIn("recommended_settings", source)
-        self.assertIn("findWidgets(node, RECOMMENDATION_WIDGET_NAME)", source)
+        self.assertIn("findWidgets(node, widgetName)", source)
+        self.assertIn("SYSTEM_PROMPT_PREVIEW_WIDGET_NAME", source)
         self.assertIn("removeDuplicateRecommendationWidgets(node, widget)", source)
         self.assertIn("node.widgets.splice(index, 1)", source)
         self.assertIn("support_notes?.audio", source)
@@ -3067,7 +3127,7 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
                 sys.modules,
                 {"folder_paths": folder_paths_stub, "faster_whisper": fake_backend},
                 clear=False,
-            ), mock.patch.dict(module.os.environ, {"THINKINGLLM_AUDIO_ALLOWED_ROOTS": temp_dir}, clear=False):
+            ), mock.patch.dict(os.environ, {"THINKINGLLM_AUDIO_ALLOWED_ROOTS": temp_dir}, clear=False):
                 transcript, segments_json, raw_trace = module.ThinkingLLM_Whisper_ASR().process(
                     model_size="base",
                     language="de",
@@ -3120,7 +3180,7 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
                 sys.modules,
                 {"folder_paths": folder_paths_stub, "faster_whisper": fake_backend},
                 clear=False,
-            ), mock.patch.dict(module.os.environ, {"THINKINGLLM_AUDIO_ALLOWED_ROOTS": temp_dir}, clear=False):
+            ), mock.patch.dict(os.environ, {"THINKINGLLM_AUDIO_ALLOWED_ROOTS": temp_dir}, clear=False):
                 transcript, _, raw_trace = module.ThinkingLLM_Whisper_ASR().process(
                     model_size="small",
                     language="auto",
@@ -3173,7 +3233,7 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
                 sys.modules,
                 {"folder_paths": folder_paths_stub, "faster_whisper": fake_backend},
                 clear=False,
-            ), mock.patch.dict(module.os.environ, {"THINKINGLLM_AUDIO_ALLOWED_ROOTS": temp_dir}, clear=False):
+            ), mock.patch.dict(os.environ, {"THINKINGLLM_AUDIO_ALLOWED_ROOTS": temp_dir}, clear=False):
                 transcript, _, raw_trace = module.ThinkingLLM_Whisper_ASR().process(
                     model_size="small",
                     language="auto",

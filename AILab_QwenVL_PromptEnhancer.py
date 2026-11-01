@@ -177,7 +177,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         models = model_catalog_options(HF_ALL_MODELS)
         default_model = _default_model_from_config(HF_ALL_MODELS, "Qwen3-VL-4B-Instruct")
         default_model = model_catalog_label(default_model, HF_ALL_MODELS.get(default_model))
-        styles = list(cls.STYLES.keys())
+        styles = [name for name in cls.STYLES if "NSFW" not in name.upper()]
         preferred_style = "📝 Enhance"
         default_style = preferred_style if preferred_style in styles else (styles[0] if styles else "📝 Enhance")
         return {

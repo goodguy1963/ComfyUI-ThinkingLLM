@@ -544,7 +544,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
 
     @classmethod
     def INPUT_TYPES(cls):
-        styles = [CUSTOM_ONLY_STYLE] + list(STYLES.keys())
+        styles = [CUSTOM_ONLY_STYLE] + [name for name in STYLES if "NSFW" not in name.upper()]
         preferred_style = "📝 Enhance"
         default_style = preferred_style if preferred_style in styles else (styles[0] if styles else "📝 Enhance")
         temp = cls.load_gguf_models()

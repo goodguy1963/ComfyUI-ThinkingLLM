@@ -26,6 +26,20 @@ def _load_system_prompt_presets() -> tuple[list[str], dict[str, str]]:
         for name, prompt in system_prompts.items()
         if isinstance(prompt, str)
     }
+
+    raw_text_styles = (data.get("qwen_text") or {}).get("styles") or {}
+    adult_prompts = {
+        str(name): entry["system_prompt"]
+        for name, entry in raw_text_styles.items()
+        if isinstance(name, str)
+        and "NSFW" in name.upper()
+        and isinstance(entry, dict)
+        and isinstance(entry.get("system_prompt"), str)
+        and entry["system_prompt"]
+    } if isinstance(raw_text_styles, dict) else {}
+    for name, prompt in adult_prompts.items():
+        system_prompts.setdefault(name, prompt)
+
     system_prompts.setdefault(NO_PRESET_PROMPT, "")
 
     raw_presets = data.get("_preset_prompts") or []
@@ -36,6 +50,9 @@ def _load_system_prompt_presets() -> tuple[list[str], dict[str, str]]:
     ]
     if not preset_prompts:
         preset_prompts = list(system_prompts)
+    for name in adult_prompts:
+        if name in system_prompts and name not in preset_prompts:
+            preset_prompts.append(name)
     if NO_PRESET_PROMPT not in preset_prompts:
         preset_prompts.insert(0, NO_PRESET_PROMPT)
 
@@ -56,20 +73,30 @@ class ThinkingLLMSystemPromptPreset:
                         "default": preset_prompts[0],
                         "tooltip": "Select a ThinkingLLM system-prompt preset.",
                     },
-                )
+                ),
+                "custom_prompt": (
+                    "STRING",
+                    {
+                        "default": "",
+                        "multiline": True,
+                        "tooltip": "Optional extra text appended to the selected system prompt.",
+                    },
+                ),
             }
         }
 
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("system_prompt",)
-    OUTPUT_TOOLTIPS = ("The full system prompt text for the selected preset.",)
+    OUTPUT_TOOLTIPS = ("The selected preset prompt followed by any optional custom text.",)
     FUNCTION = "get_system_prompt"
     CATEGORY = "ThinkingLLM/Utils"
-    DESCRIPTION = "Outputs the full system prompt string for a ThinkingLLM preset."
+    DESCRIPTION = "Outputs the selected system prompt preset with optional extra custom text."
 
-    def get_system_prompt(self, preset_prompt: str):
+    def get_system_prompt(self, preset_prompt: str, custom_prompt: str = ""):
         _, system_prompts = _load_system_prompt_presets()
-        return (system_prompts.get(preset_prompt, ""),)
+        preset_text = system_prompts.get(preset_prompt, "").strip()
+        custom_text = (custom_prompt or "").strip()
+        return ("\n\n".join(part for part in (preset_text, custom_text) if part),)
 
 
 NODE_CLASS_MAPPINGS = {

@@ -91,6 +91,8 @@ const API_MODEL_WIDGET = "model_name";
 const API_HELP_WIDGET_NAME = "setup_help";
 const RECOMMENDATION_WIDGET_NAME = "recommended_settings";
 const RECOMMENDATION_PLACEHOLDER = "Select a model to see provider/community recommended settings. This note never changes your saved widget values.";
+const SYSTEM_PROMPT_PRESET_NODE_NAME = "ThinkingLLM_SystemPromptPreset";
+const SYSTEM_PROMPT_PREVIEW_WIDGET_NAME = "system_prompt_preview";
 const DEFAULT_DURATION_SECONDS = 5.0;
 const RECOMMENDATION_FIELDS = ["temperature", "top_p", "top_k", "max_tokens", "ctx_min", "n_batch", "image_max_tokens"];
 const AUDIO_UNSUPPORTED_MESSAGE = "No curated audio support for the selected model. Use Gemma 4 Audio for audio understanding or Whisper ASR for transcription.";
@@ -281,13 +283,13 @@ function findWidgets(node, name) {
     return node.widgets?.filter((widget) => widget?.name === name) || [];
 }
 
-function removeDuplicateRecommendationWidgets(node, keepWidget) {
+function removeDuplicateRecommendationWidgets(node, keepWidget, widgetName = RECOMMENDATION_WIDGET_NAME) {
     if (!node.widgets?.length || !keepWidget) {
         return;
     }
     for (let index = node.widgets.length - 1; index >= 0; index -= 1) {
         const widget = node.widgets[index];
-        if (widget?.name !== RECOMMENDATION_WIDGET_NAME || widget === keepWidget) {
+        if (widget?.name !== widgetName || widget === keepWidget) {
             continue;
         }
         hideStableWidget(node, widget);
@@ -527,28 +529,58 @@ function buildPromptEnhancerPreviewText(node, payload) {
     return lines.join("\n\n");
 }
 
+function buildSystemPromptPresetPreviewText(node, payload) {
+    const presetWidget = findWidget(node, "preset_prompt");
+    if (!presetWidget) {
+        return "Select a preset to preview the system prompt sent downstream.";
+    }
+
+    const presetName = readComboValue(presetWidget);
+    const primaryPrompt = payload?.preset_prompt?.[presetName];
+    const textStylePrompt = payload?.preset_system_prompt?.[presetName];
+    const presetPrompt = String(
+        typeof primaryPrompt === "string" ? primaryPrompt : (textStylePrompt || ""),
+    ).trim();
+    const customWidget = findWidget(node, "custom_prompt");
+    const customPrompt = String(customWidget?.inputEl?.value ?? customWidget?.value ?? "").trim();
+    const combinedPrompt = [presetPrompt, customPrompt].filter(Boolean).join("\n\n");
+    const promptText = combinedPrompt || "(No system prompt text will be sent.)";
+
+    return `Preview — exact text sent to system_prompt (${presetName}):\n\n${promptText}`;
+}
+
 function ensureRecommendationWidget(node) {
-    if (!THINKINGLLM_NODE_NAMES.has(node.comfyClass)) {
+    const isSystemPromptPreset = node.comfyClass === SYSTEM_PROMPT_PRESET_NODE_NAME;
+    if (!THINKINGLLM_NODE_NAMES.has(node.comfyClass) && !isSystemPromptPreset) {
         return null;
     }
-    let widget = findWidgets(node, RECOMMENDATION_WIDGET_NAME)
+    const widgetName = isSystemPromptPreset ? SYSTEM_PROMPT_PREVIEW_WIDGET_NAME : RECOMMENDATION_WIDGET_NAME;
+    let widget = findWidgets(node, widgetName)
         .find((candidate) => candidate?.inputEl)
-        || findWidget(node, RECOMMENDATION_WIDGET_NAME);
+        || findWidget(node, widgetName);
     if (!widget) {
-        widget = ComfyWidgets.STRING(node, RECOMMENDATION_WIDGET_NAME, ["STRING", { multiline: true }], app).widget;
+        widget = ComfyWidgets.STRING(node, widgetName, ["STRING", { multiline: true }], app).widget;
     }
-    removeDuplicateRecommendationWidgets(node, widget);
+    if (isSystemPromptPreset) {
+        removeDuplicateRecommendationWidgets(node, widget, widgetName);
+    } else {
+        removeDuplicateRecommendationWidgets(node, widget);
+    }
     if (widget?.inputEl) {
         widget.inputEl.readOnly = true;
-        widget.inputEl.style.opacity = 0.78;
+        widget.inputEl.style.opacity = isSystemPromptPreset ? 0.92 : 0.78;
         widget.inputEl.style.fontSize = "12px";
         widget.inputEl.style.lineHeight = "1.35";
-        widget.inputEl.rows = 10;
+        widget.inputEl.style.fontFamily = isSystemPromptPreset ? "monospace" : "";
+        widget.inputEl.style.resize = isSystemPromptPreset ? "vertical" : "";
+        widget.inputEl.rows = isSystemPromptPreset ? 18 : 10;
     }
     widget.options = { ...(widget.options || {}), serialize: false };
     widget.serializeValue = async () => undefined;
     if (!widget.value) {
-        widget.value = RECOMMENDATION_PLACEHOLDER;
+        widget.value = isSystemPromptPreset
+            ? "Select a preset to preview the full system prompt."
+            : RECOMMENDATION_PLACEHOLDER;
     }
     return widget;
 }
@@ -570,6 +602,17 @@ function resizeNode(node) {
 function updateRecommendationWidget(node) {
     const widget = ensureRecommendationWidget(node);
     if (!widget) {
+        return;
+    }
+    if (node.comfyClass === SYSTEM_PROMPT_PRESET_NODE_NAME) {
+        loadPresetTooltips().then((payload) => {
+            widget.value = buildSystemPromptPresetPreviewText(node, payload);
+            if (widget.inputEl) {
+                const lineCount = String(widget.value).split("\n").length;
+                widget.inputEl.rows = Math.max(14, Math.min(40, lineCount + 2));
+            }
+            resizeNode(node);
+        });
         return;
     }
     Promise.all([loadRecommendations(), loadPresetTooltips()]).then(([rules, payload]) => {
@@ -607,6 +650,18 @@ function hookPromptEnhancerPreviewInputs(node) {
         widget._thinkingllmPreviewInputHooked = true;
         widget.inputEl.addEventListener("input", () => queueRecommendationRefresh(node));
     }
+}
+
+function hookSystemPromptPresetPreviewInputs(node) {
+    if (node?.comfyClass !== SYSTEM_PROMPT_PRESET_NODE_NAME || node._thinkingllmSystemPromptPreviewInputHooked) {
+        return;
+    }
+    const widget = findWidget(node, "custom_prompt");
+    if (!widget?.inputEl) {
+        return;
+    }
+    node._thinkingllmSystemPromptPreviewInputHooked = true;
+    widget.inputEl.addEventListener("input", () => queueRecommendationRefresh(node));
 }
 
 function catalogModelsForProfile(catalogs, profileName) {
@@ -790,14 +845,19 @@ function hookPresetTooltipPreviews(node) {
 }
 
 function hookRecommendationUpdates(node) {
-    if (!THINKINGLLM_NODE_NAMES.has(node.comfyClass) || node._thinkingllmRecommendationHooked) {
+    const isSystemPromptPreset = node.comfyClass === SYSTEM_PROMPT_PRESET_NODE_NAME;
+    if ((!THINKINGLLM_NODE_NAMES.has(node.comfyClass) && !isSystemPromptPreset) || node._thinkingllmRecommendationHooked) {
         return;
     }
     node._thinkingllmRecommendationHooked = true;
     ensureRecommendationWidget(node);
     hookPromptEnhancerPreviewInputs(node);
+    hookSystemPromptPresetPreviewInputs(node);
 
-    for (const widgetName of ["model_name", "enable_thinking", ...PRESET_WIDGET_NAMES]) {
+    const callbackWidgetNames = isSystemPromptPreset
+        ? ["preset_prompt", "custom_prompt"]
+        : ["model_name", "enable_thinking", ...PRESET_WIDGET_NAMES];
+    for (const widgetName of callbackWidgetNames) {
         const target = findWidget(node, widgetName);
         if (!target || target._thinkingllmRecommendationCallbackHooked) {
             continue;

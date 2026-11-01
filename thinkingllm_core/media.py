@@ -4,15 +4,16 @@ import hashlib
 
 import torch
 
-MASK_PROMPT_CONTRACT_VERSION = 2
+MASK_PROMPT_CONTRACT_VERSION = 4
 
 MASK_FOCUS_INSTRUCTION = (
-    "Describe only the subject or object visually distinguished from the rest of the image. Start directly with its "
-    "concrete identity or category, then its visible appearance or action; no preface. Use the rest of the image "
-    "only to recognize the target. Omit every other subject, background, scenery, and unrelated scene detail. Do not "
-    "mention the visual distinction, a mask, highlighting, selection, brightness, dimming, or image processing. This "
+    "The image has been cropped and centered around the masked content; the focused subject is the brighter content "
+    "near the center, while nearby context is dimmed. Describe only that centered subject or object. Ignore dimmed "
+    "surroundings and any larger or more visually prominent subjects near the crop's edges. Start directly with the "
+    "target's concrete identity or category, then its visible appearance or action; no preface. Do not mention the "
+    "visual distinction, a mask, highlighting, selection, brightness, dimming, cropping, or image processing. This "
     "scope overrides any earlier request to describe the whole image. Preserve its requested level of detail, but "
-    "apply it only to the target."
+    "apply it only to the centered target."
 )
 
 MASK_RECONSTRUCTION_INSTRUCTION = (
@@ -127,8 +128,51 @@ def apply_mask_highlight(image, mask, mode="focus"):
             + fill.view(1, 1, -1) * expanded_mask.unsqueeze(-1)
         )
     else:
-        brightness = 0.2 + 0.8 * resized_mask
-        highlighted_frame[..., :color_channels] *= brightness.unsqueeze(-1)
+        height, width = frame.shape[:2]
+        mask_rows, mask_columns = torch.where(resized_mask > 0)
+        top = int(mask_rows.min().detach().cpu())
+        bottom = int(mask_rows.max().detach().cpu()) + 1
+        left = int(mask_columns.min().detach().cpu())
+        right = int(mask_columns.max().detach().cpu()) + 1
+        box_height = bottom - top
+        box_width = right - left
+        margin_y = max(2, int(round(box_height * 0.02)))
+        margin_x = max(2, int(round(box_width * 0.02)))
+        crop_height = min(height, max(box_height + 2 * margin_y, int(round(height * 0.22))))
+        crop_width = min(width, max(box_width + 2 * margin_x, int(round(width * 0.22))))
+        crop_top = max(0, min(height - crop_height, int(round((top + bottom - crop_height) / 2))))
+        crop_left = max(0, min(width - crop_width, int(round((left + right - crop_width) / 2))))
+        crop_bottom = crop_top + crop_height
+        crop_right = crop_left + crop_width
+
+        crop_frame = frame[crop_top:crop_bottom, crop_left:crop_right]
+        crop_mask = resized_mask[crop_top:crop_bottom, crop_left:crop_right]
+        scale = min(height / crop_height, width / crop_width)
+        scaled_height = max(1, min(height, int(round(crop_height * scale))))
+        scaled_width = max(1, min(width, int(round(crop_width * scale))))
+        crop_frame = torch.nn.functional.interpolate(
+            crop_frame.permute(2, 0, 1).unsqueeze(0).float(),
+            size=(scaled_height, scaled_width),
+            mode="bilinear",
+            align_corners=False,
+        )[0].permute(1, 2, 0).to(device=frame.device, dtype=frame.dtype)
+        crop_mask = torch.nn.functional.interpolate(
+            crop_mask[None, None].float(),
+            size=(scaled_height, scaled_width),
+            mode="bilinear",
+            align_corners=False,
+        )[0, 0].to(device=frame.device, dtype=frame.dtype)
+
+        fill = crop_frame.mean(dim=(0, 1), keepdim=True)
+        focused_frame = fill.expand(height, width, -1).clone()
+        focused_mask = torch.zeros((height, width), device=frame.device, dtype=frame.dtype)
+        offset_y = (height - scaled_height) // 2
+        offset_x = (width - scaled_width) // 2
+        focus_slice = (slice(offset_y, offset_y + scaled_height), slice(offset_x, offset_x + scaled_width))
+        focused_frame[focus_slice] = crop_frame
+        focused_mask[focus_slice] = crop_mask
+        brightness = 0.05 + 0.95 * focused_mask
+        highlighted_frame[..., :color_channels] = focused_frame[..., :color_channels] * brightness.unsqueeze(-1)
     highlighted = image.clone()
     if image.ndim == 4:
         highlighted[0] = highlighted_frame
