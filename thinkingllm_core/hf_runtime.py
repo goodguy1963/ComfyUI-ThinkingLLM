@@ -37,11 +37,13 @@ from thinkingllm_core.hf_models import (
 )
 from thinkingllm_core.media import (
     MASK_FOCUS_INSTRUCTION,
+    MASK_PROMPT_CONTRACT_VERSION,
     apply_mask_highlight,
     get_image_hash,
     get_video_hash,
 )
 from thinkingllm_core.model_access import resolve_model_catalog_name
+from thinkingllm_core.hf_trust import trust_remote_code_for_snapshot
 from thinkingllm_core.prompt_contracts import (
     apply_qwen_soft_thinking_directive,
     apply_video_duration_context,
@@ -167,6 +169,7 @@ class QwenVLBase:
             progress_label=f"QwenVL HF Download: {model_name}",
             hf_token=hf_token,
         )
+        trust_remote_code = trust_remote_code_for_snapshot(model_path, model_info.get("repo_id"))
         quant_config, dtype = quantization_config(model_name, quant)
 
         # Handle attention mode for loading
@@ -214,7 +217,11 @@ class QwenVLBase:
         if quant_config:
             load_kwargs["quantization_config"] = quant_config
 
-        self.model = AutoModelForVision2Seq.from_pretrained(model_path, **load_kwargs).eval()
+        self.model = AutoModelForVision2Seq.from_pretrained(
+            model_path,
+            trust_remote_code=trust_remote_code,
+            **load_kwargs,
+        ).eval()
 
         # Apply SageAttention patching if needed
         if attn_impl == "sage":
@@ -245,12 +252,12 @@ class QwenVLBase:
         self.processor = AutoProcessor.from_pretrained(
             model_path,
             local_files_only=COMMERCIAL_RELEASE,
-            trust_remote_code=not COMMERCIAL_RELEASE,
+            trust_remote_code=trust_remote_code,
         )
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_path,
             local_files_only=COMMERCIAL_RELEASE,
-            trust_remote_code=not COMMERCIAL_RELEASE,
+            trust_remote_code=trust_remote_code,
         )
         # Detect architecture from config.json instead of relying on model name
         hf_model_type = read_hf_model_type(model_path)
@@ -560,6 +567,7 @@ class QwenVLBase:
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=repetition_penalty,
+            **({"mask_prompt_contract_version": MASK_PROMPT_CONTRACT_VERSION} if mask_hash else {}),
             **duration_signature,
         )
 
@@ -586,7 +594,22 @@ class QwenVLBase:
         prompt_template = "" if preset_prompt == NO_PRESET_PROMPT else SYSTEM_PROMPTS.get(preset_prompt, preset_prompt)
 
         # Generate cache key with all inputs including seed
-        cache_key = get_cache_key(model_name, preset_prompt, custom_prompt, image_hash, video_hash, seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking, effective_duration_seconds=effective_duration_seconds, video_prompt_contract_version=resolved_duration.get("contract_version") if resolved_duration else None)
+        cache_key = get_cache_key(
+            model_name,
+            preset_prompt,
+            custom_prompt,
+            image_hash,
+            video_hash,
+            seed,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            enable_thinking=enable_thinking,
+            effective_duration_seconds=effective_duration_seconds,
+            video_prompt_contract_version=resolved_duration.get("contract_version") if resolved_duration else None,
+            mask_prompt_contract_version=MASK_PROMPT_CONTRACT_VERSION if mask_hash else None,
+        )
 
         # Check cache first (only for random mode)
         if cache_key in PROMPT_CACHE:

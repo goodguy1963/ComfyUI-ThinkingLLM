@@ -25,12 +25,17 @@ _TERMINAL_SAFE_PUNCTUATION = str.maketrans(
 
 
 def _terminal_safe_text(text: str) -> str:
-    """Keep streamed terminal text readable through legacy Windows code pages.
+    """Render untrusted streamed text without terminal control sequences.
 
     Only the display copy is normalized. The caller's generated text, cache,
     RESPONSE, and RAW_TRACE retain the model's original Unicode characters.
     """
-    return str(text or "").translate(_TERMINAL_SAFE_PUNCTUATION)
+    translated = str(text or "").translate(_TERMINAL_SAFE_PUNCTUATION)
+    return "".join(
+        char
+        for char in translated
+        if char in "\n\t" or (ord(char) >= 0x20 and not 0x7F <= ord(char) <= 0x9F)
+    )
 
 
 def get_thinking_stream_display():

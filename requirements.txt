@@ -14,6 +14,8 @@ accelerate
 sentencepiece
 tiktoken
 faster-whisper
+# ComfyUI requires PyAV >=17; faster-whisper's metadata_errors call breaks on PyAV 19.
+av>=17,<19
 
 # For running GGUF models with vision support
 # The [server] extra installs necessary components for multimodal models

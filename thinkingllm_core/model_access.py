@@ -2,10 +2,12 @@
 
 import inspect
 import os
+import re
 import shutil
 import tempfile
 import time
 from pathlib import Path
+from thinkingllm_core.hf_trust import get_trusted_hf_revision, mark_trusted_hf_snapshot
 
 try:
     from huggingface_hub import HfApi, hf_hub_download, snapshot_download
@@ -436,9 +438,13 @@ def _validate_transformers_repo_files(repo_id: str, repo_files: list[str], *, re
     )
 
 
-def _download_model_snapshot(repo_id: str, target: Path, *, require_processor: bool = False, node_id=None, progress_label: str | None = None, hf_token: str | None = None) -> None:
+def _download_model_snapshot(repo_id: str, target: Path, *, require_processor: bool = False, node_id=None, progress_label: str | None = None, hf_token: str | None = None, revision: str | None = None) -> None:
     if COMMERCIAL_RELEASE:
         raise RuntimeError("[QwenVL] Commercial release mode only permits preinstalled, hash-locked models.")
+    if revision is not None and not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("Trusted Hugging Face downloads require a 40-character commit SHA")
+    if revision is not None and target.exists():
+        raise FileExistsError(f"Refusing to reuse an existing trusted model directory: {target}")
     reporter = _DownloadProgressReporter(node_id=node_id, label=progress_label or "QwenVL HF Download", repo_id=repo_id)
     token_for_download = _clean_hf_token(hf_token)
     download_kwargs = {}
@@ -448,7 +454,10 @@ def _download_model_snapshot(repo_id: str, target: Path, *, require_processor: b
         if HfApi is None:
             raise RuntimeError("huggingface_hub.HfApi is unavailable; update huggingface-hub before downloading models")
         api = HfApi(token=token_for_download) if token_for_download else HfApi()
-        repo_files = api.list_repo_files(repo_id=repo_id, repo_type="model")
+        list_kwargs = {"repo_id": repo_id, "repo_type": "model"}
+        if revision is not None:
+            list_kwargs["revision"] = revision
+        repo_files = api.list_repo_files(**list_kwargs)
         _validate_transformers_repo_files(repo_id, repo_files, require_processor=require_processor)
 
         with tempfile.TemporaryDirectory(prefix=f".{target.name}.download-", dir=target.parent) as temp_dir:
@@ -459,6 +468,8 @@ def _download_model_snapshot(repo_id: str, target: Path, *, require_processor: b
                 "local_dir": str(staging_target),
                 "ignore_patterns": ["*.md", ".git*"],
             }
+            if revision is not None:
+                download_kwargs["revision"] = revision
             if token_for_download:
                 download_kwargs["token"] = token_for_download
             tqdm_cls = reporter.make_tqdm_class()
@@ -478,6 +489,8 @@ def _download_model_snapshot(repo_id: str, target: Path, *, require_processor: b
                 shutil.copytree(staging_target, target, dirs_exist_ok=True)
             else:
                 shutil.move(str(staging_target), str(target))
+            if revision is not None:
+                mark_trusted_hf_snapshot(target, repo_id, revision)
     except Exception as exc:
         reporter.fail(_hf_download_error_message(exc, repo_id=repo_id, hf_token=token_for_download))
         raise RuntimeError(_hf_download_error_message(exc, repo_id=repo_id, hf_token=token_for_download)) from exc

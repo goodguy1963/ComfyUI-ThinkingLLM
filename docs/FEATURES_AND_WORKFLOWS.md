@@ -62,7 +62,7 @@ Connect `RAW_TRACE` to a separate text display when diagnosing empty output, une
 
 Use `ThinkingLLM Gemma 4 Audio (GGUF)` for audio questions, descriptions, classification, and transcription with a compatible Gemma 4 model.
 
-The node accepts a ComfyUI `AUDIO` input or an `audio_file_path`. Audio is normalized to 16 kHz mono WAV before inference. Native Gemma 4 audio requires:
+The node accepts a ComfyUI `AUDIO` input or an `audio_file_path`. File paths must resolve inside ComfyUI's input directory or an administrator-configured root. Set `THINKINGLLM_AUDIO_ALLOWED_ROOTS` to add roots, separated by the operating system's path separator. Audio is limited to 10 minutes; files supplied by path are limited to 256 MiB. Audio is normalized to 16 kHz mono WAV before inference. Native Gemma 4 audio requires:
 
 - multimodal `llama-cpp-python` 0.3.36 or newer;
 - `Gemma4ChatHandler`;
@@ -72,7 +72,7 @@ ThinkingLLM verifies these conditions before sending audio to inference. Older o
 
 ### Whisper speech-to-text
 
-Use `ThinkingLLM Whisper ASR` when the primary goal is dependable transcription. It accepts ComfyUI audio and common FFmpeg-readable paths such as M4A, MP3, WAV, and FLAC.
+Use `ThinkingLLM Whisper ASR` when the primary goal is dependable transcription. It accepts ComfyUI audio and common FFmpeg-readable paths such as M4A, MP3, WAV, and FLAC, subject to the same path and size limits.
 
 The node uses `faster-whisper`. The first run may download the selected model. The `small` model on CPU/int8 is a practical Windows starting point; use CUDA after confirming that the local CTranslate2 CUDA runtime works.
 
@@ -90,6 +90,8 @@ The standard and Advanced HF/GGUF vision nodes accept an optional ComfyUI `MASK`
 - Mask dimensions are resized to the image automatically.
 
 In `focus` mode, ThinkingLLM keeps the selected area at normal brightness and dims the surroundings. This directs the vision model without removing spatial, lighting, or scene context.
+
+The node instructs the model to describe only the masked content. A broader preset such as `Detailed Description` keeps its requested detail level but is scoped to that content; the model should not narrate the mask or the rest of the image.
 
 In `reconstruct` mode, the selected area is concealed and the model is asked to infer a natural continuation from visible surroundings. This is useful for producing a positive inpainting prompt.
 
@@ -114,9 +116,9 @@ Mask limitations:
 
 ## Video prompt workflows
 
-ThinkingLLM provides preset-specific guidance for LTX 2.3, MiniMax H3, and Wan 2.2 workflows. The optional `duration_seconds` input appears only for registered duration-aware presets.
+ThinkingLLM provides preset-specific guidance for LTX 2.3, MiniMax H3, and Wan 2.2 workflows. The optional `duration_seconds` input appears only for registered duration-aware presets. Adult-oriented video prompt formats are available as styles in the text-only Prompt Enhancer nodes; type the scene idea directly into their `prompt_text` field, with no separate text node required. For image-to-video styles, include a written description of the source frame because Prompt Enhancer nodes do not receive images.
 
-Use the preset that matches the downstream workflow and connected media. MiniMax H3 offers separate T2VA, I2VA, FL2VA, L2VA, and Reference-to-Video contracts; text-only Prompt Enhancer nodes expose T2VA.
+Use the preset that matches the downstream workflow and connected media. MiniMax H3 offers separate T2VA, I2VA, FL2VA, L2VA, and Reference-to-Video contracts; text-only Prompt Enhancer nodes expose T2VA. For image transformations, the vision nodes include `Creative Image Remix` and `Style Conversion`: both adapt to any connected image, preserve its recognizable subject, and avoid adult content. `Style Conversion` follows a style named in `custom_prompt`, or chooses a fitting style when none is specified.
 
 Detailed duration resolution, MiniMax frame-grid normalization, output structures, long-script handling, best-effort cleanup, and recommended budgets are documented in [Duration-aware video prompts](VIDEO_PROMPT_DURATION.md).
 

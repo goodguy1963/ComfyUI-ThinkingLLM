@@ -127,6 +127,7 @@ def build_loader_test_stubs() -> dict[str, types.ModuleType]:
             "folder_paths",
             models_dir=str(PKG),
             folder_names_and_paths={},
+            get_input_directory=lambda: str(PKG),
             get_folder_paths=lambda *args, **kwargs: [],
             get_filename_list=lambda *args, **kwargs: [],
             get_full_path_or_raise=lambda category, filename: str(PKG / filename),
@@ -368,14 +369,22 @@ def iter_catalog_display_names() -> list[str]:
 class TestMaskFocusedImageAnalysis(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        module = parse_source("thinkingllm_core/media.py")
         function_node = next(
             node
-            for node in parse_source("thinkingllm_core/media.py").body
+            for node in module.body
             if isinstance(node, ast.FunctionDef) and node.name == "apply_mask_highlight"
         )
         namespace = {"hashlib": hashlib, "torch": torch}
         exec(compile(ast.fix_missing_locations(ast.Module(body=[function_node], type_ignores=[])), "thinkingllm_core/media.py", "exec"), namespace)
         cls.apply_mask_highlight = staticmethod(namespace["apply_mask_highlight"])
+        focus_assignment = next(
+            node
+            for node in module.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "MASK_FOCUS_INSTRUCTION" for target in node.targets)
+        )
+        cls.mask_focus_instruction = ast.literal_eval(focus_assignment.value)
 
     def test_mask_dims_rgb_and_preserves_alpha_without_mutating_input(self):
         image = torch.ones((1, 2, 2, 4), dtype=torch.float32)
@@ -445,10 +454,22 @@ class TestMaskFocusedImageAnalysis(unittest.TestCase):
         self.assertIn('image_hash = f"{image_hash}:{mask_hash}"', gguf_source)
         self.assertIn('prompt = f"{prompt}\\n\\n{MASK_FOCUS_INSTRUCTION}".strip()', hf_source)
         self.assertIn("MASK_RECONSTRUCTION_INSTRUCTION", gguf_source)
+        self.assertIn("MASK_PROMPT_CONTRACT_VERSION", hf_source)
+        self.assertIn("MASK_PROMPT_CONTRACT_VERSION", gguf_source)
         self.assertIn(
             "mask_preview, _ = apply_mask_highlight(image, mask, mode=mask_mode)",
             gguf_source,
         )
+
+    def test_focus_instruction_suppresses_meta_language_and_overrides_full_image_scope(self):
+        instruction = self.mask_focus_instruction.lower()
+
+        self.assertIn("start directly with its concrete identity or category", instruction)
+        self.assertIn("omit every other subject, background, scenery", instruction)
+        self.assertIn("do not mention the visual distinction, a mask", instruction)
+        self.assertIn("overrides any earlier request", instruction)
+        self.assertNotIn("normal brightness", instruction)
+        self.assertNotIn("selected area", instruction)
 
 
 class TestTerminalDisplayHelper(unittest.TestCase):
@@ -667,8 +688,11 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertIn("if COMMERCIAL_RELEASE:\n        _mark_installed_hf_catalog_models()", hf_models_source)
         self.assertIn("else:\n        _scan_local_hf_models()", hf_models_source)
         self.assertIn('"local_files_only": COMMERCIAL_RELEASE', hf_runtime_source)
-        self.assertIn("trust_remote_code=not COMMERCIAL_RELEASE", hf_runtime_source)
+        self.assertIn("trust_remote_code_for_snapshot", hf_runtime_source)
+        self.assertIn("trust_remote_code=trust_remote_code", hf_runtime_source)
         self.assertIn('"local_files_only": COMMERCIAL_RELEASE', enhancer_source)
+        self.assertIn("trust_remote_code_for_snapshot", enhancer_source)
+        self.assertIn('"trust_remote_code": trust_remote_code', enhancer_source)
         self.assertIn("commercial release mode forbids runtime package installation", enhancer_source)
 
     def test_recommendation_rules_have_sources(self):
@@ -950,21 +974,59 @@ class TestModelRecommendations(unittest.TestCase):
                 self.assertIn("log_llm_input(", source)
                 self.assertIn("no LLM call was made", source)
 
-    def test_ltx_presets_are_available_for_vision_and_prompt_enhancers(self):
+    def test_nsfw_i2v_presets_are_only_selectable_from_prompt_enhancers(self):
         data = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
 
-        self.assertIn("🎦 LTX 2.3 NSFW I2V Scene", data["_preset_prompts"])
+        self.assertNotIn("🎦 LTX 2.3 NSFW I2V Scene", data["_preset_prompts"])
         self.assertIn("🎦 LTX 2.3 NSFW I2V Scene", data["qwenvl"])
+        self.assertIn("🎦 LTX 2.3 NSFW I2V Scene", data["qwen_text"]["styles"])
         self.assertIn("📖 LTX 2.3 NSFW T2V Scene", data["qwen_text"]["styles"])
 
         vision_prompt = data["qwenvl"]["🎦 LTX 2.3 NSFW I2V Scene"]
-        text_prompt = data["qwen_text"]["styles"]["📖 LTX 2.3 NSFW T2V Scene"]["system_prompt"]
+        text_prompt = data["qwen_text"]["styles"]["🎦 LTX 2.3 NSFW I2V Scene"]["system_prompt"]
         self.assertIn("LTX 2.3", vision_prompt)
         self.assertIn("image first", vision_prompt)
+        self.assertIn("cannot see an image", text_prompt)
+        self.assertIn("TARGET_DURATION_SECONDS", text_prompt)
         self.assertIn("LTX 2.3", text_prompt)
-        self.assertIn("Do not change the user input intent", text_prompt)
         self.assertNotIn("Example:", vision_prompt)
         self.assertNotIn("Examples:", text_prompt)
+
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            package = load_thinkingllm_loader_subset(
+                [
+                    "AILab_QwenVL.py",
+                    "AILab_QwenVL_GGUF.py",
+                    "AILab_QwenVL_PromptEnhancer.py",
+                    "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                ]
+            )
+        nsfw_labels = {label for label in data["_video_presets"] if "NSFW" in label}
+        for node_name in (
+            "ThinkingLLM_QwenVL",
+            "ThinkingLLM_QwenVL_Advanced",
+            "ThinkingLLM_QwenVL_GGUF",
+            "ThinkingLLM_QwenVL_GGUF_Advanced",
+        ):
+            values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"]["preset_prompt"][0]
+            self.assertTrue(nsfw_labels.isdisjoint(values), node_name)
+        for node_name, widget_name in (
+            ("ThinkingLLM_QwenVL_PromptEnhancer", "enhancement_style"),
+            ("ThinkingLLM_QwenVL_GGUF_PromptEnhancer", "preset_system_prompt"),
+        ):
+            values = package.NODE_CLASS_MAPPINGS[node_name].INPUT_TYPES()["required"][widget_name][0]
+            self.assertTrue(nsfw_labels.issubset(values), node_name)
+
+    def test_creative_and_style_conversion_presets_are_general_and_non_adult(self):
+        data = json.loads(Path("AILab_System_Prompts.json").read_text(encoding="utf-8"))
+        presets = ("🎭 Creative Image Remix", "🎨 Style Conversion")
+        self.assertTrue(set(presets).issubset(data["_preset_prompts"]))
+        for label in presets:
+            with self.subTest(label=label):
+                prompt = data["qwenvl"][label]
+                self.assertIn("any image type", prompt)
+                self.assertIn("Do not add adult, nude, or sexual content", prompt)
+                self.assertIn("Output only the final prompt", prompt)
 
     def test_video_preset_duration_and_recommendation_metadata_are_complete(self):
         data = json.loads((PKG / "AILab_System_Prompts.json").read_text(encoding="utf-8"))
@@ -997,6 +1059,10 @@ class TestModelRecommendations(unittest.TestCase):
 
         self.assertEqual(set(metadata), duration_labels | wan_labels)
         self.assertNotIn("🖼️ MiniMax H3 Reference-to-Video", data["qwen_text"]["styles"])
+        nsfw_labels = {label for label in metadata if "NSFW" in label}
+        styles = data["qwen_text"]["styles"]
+        self.assertTrue(nsfw_labels.issubset(styles))
+        self.assertTrue(nsfw_labels.isdisjoint(data["_preset_prompts"]))
         for label, entry in metadata.items():
             with self.subTest(label=label):
                 self.assertIn(entry["provider"], {"ltx_2_3", "minimax_h3", "wan_2_2"})
@@ -1006,7 +1072,6 @@ class TestModelRecommendations(unittest.TestCase):
                 self.assertIn(entry["recommended_settings"]["max_tokens"], {512, 768, 1024, 1536, 2048, 3072})
                 self.assertTrue(entry["recommendation_note"])
 
-        styles = data["qwen_text"]["styles"]
         self.assertIn("🍿 Wan 2.2 NSFW T2V Timeline (3s)", styles)
         self.assertNotIn("🍿 Wan 2.2 NSFW T2V Timeline (3)", styles)
         wan_t2v_20 = styles["📖 Wan 2.2 NSFW T2V Scene (20s)"]["system_prompt"]
@@ -1118,6 +1183,14 @@ class TestModelRecommendations(unittest.TestCase):
                 effective_duration_seconds=five_seconds,
                 video_prompt_contract_version=module.VIDEO_PROMPT_CONTRACT_VERSION,
             ),
+        )
+        self.assertNotEqual(
+            module.get_cache_key("m", "p", "x", mask_prompt_contract_version=1),
+            module.get_cache_key("m", "p", "x", mask_prompt_contract_version=2),
+        )
+        self.assertNotEqual(
+            module.build_node_input_signature(mask_prompt_contract_version=1),
+            module.build_node_input_signature(mask_prompt_contract_version=2),
         )
         self.assertEqual(
             module.build_node_input_signature(effective_duration_seconds=five_seconds),
@@ -1673,6 +1746,11 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertIn("metadata?.recommended_settings", source)
         self.assertIn("Info only: your saved widget values are not changed.", source)
         self.assertIn('["model_name", "enable_thinking", ...PRESET_WIDGET_NAMES]', source)
+        self.assertIn("function buildPromptEnhancerPreviewText(node, payload)", source)
+        self.assertIn('buildPromptEnhancerPreviewText(node, payload)', source)
+        self.assertIn('findWidget(node, "prompt_text")', source)
+        self.assertIn('findWidget(node, "custom_system_prompt")', source)
+        self.assertIn('widget.inputEl.addEventListener("input", () => queueRecommendationRefresh(node))', source)
 
     def test_duration_visibility_preserves_widget_type_and_serialization_slot(self):
         source = read_source("web/js/appearance.js")
@@ -1864,6 +1942,24 @@ class TestModelRecommendations(unittest.TestCase):
 
         self.assertEqual(stream.getvalue(), '"That\'s useful... really" -- Peter\n')
         self.assertEqual(original, "\u201cThat\u2019s useful\u2026 really\u201d \u2014 Peter")
+
+    def test_terminal_display_strips_terminal_control_sequences(self):
+        from AILab_StreamDisplay import TerminalStreamDisplay, _terminal_safe_text
+        import io
+
+        display = TerminalStreamDisplay("UnitTest", compact=True, line_width=80)
+        stream = io.StringIO()
+        malicious = "safe\x1b]52;c;SGVsbG8=\x07\x1b[2J\x1b[999Dtext"
+        with contextlib.redirect_stdout(stream):
+            display.start_stage("STREAMING")
+            display.push_compact(malicious)
+            display.end_stage()
+
+        output = stream.getvalue()
+        self.assertIn("safe", output)
+        self.assertIn("text", output)
+        self.assertNotRegex(output, "[\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f]")
+        self.assertEqual("first line\nsecond\tline", _terminal_safe_text("first line\nsecond\tline"))
 
     def test_stream_degeneracy_guard_catches_repeated_word_loop(self):
         from AILab_StreamDisplay import StreamDegenerationError, StreamDegenerationGuard, strip_degenerate_repetition
@@ -2324,6 +2420,44 @@ class TestHuggingFaceTokenSupport(unittest.TestCase):
             self.assertEqual(b"weights", (target / "model.safetensors").read_bytes())
             self.assertEqual(1, len(download_targets))
             self.assertNotEqual(target, download_targets[0])
+
+    def test_hf_snapshot_downloads_and_marks_only_the_pinned_revision(self):
+        module = self._load_qwenvl_with_stubs()
+        access_globals = module._download_model_snapshot.__globals__
+        repo_id = "example/trusted-model"
+        revision = "a" * 40
+        list_revisions = []
+        download_revisions = []
+
+        class FakeHfApi:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def list_repo_files(self, **kwargs):
+                list_revisions.append(kwargs.get("revision"))
+                return ["config.json", "model.safetensors", "processor_config.json"]
+
+        def fake_snapshot_download(**kwargs):
+            download_revisions.append(kwargs.get("revision"))
+            staging = Path(kwargs["local_dir"])
+            staging.mkdir(parents=True)
+            (staging / "config.json").write_text("{}", encoding="utf-8")
+            (staging / "processor_config.json").write_text("{}", encoding="utf-8")
+            (staging / "model.safetensors").write_bytes(b"weights")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "pinned-model" / revision
+            with mock.patch.dict(
+                access_globals,
+                {"HfApi": FakeHfApi, "snapshot_download": fake_snapshot_download},
+            ):
+                module._download_model_snapshot(repo_id, target, require_processor=True, revision=revision)
+
+            marker = target.parent / f".{target.name}.thinkingllm-trust.json"
+            self.assertEqual([revision], list_revisions)
+            self.assertEqual([revision], download_revisions)
+            self.assertTrue(marker.is_file())
+            self.assertEqual(b"weights", (target / "model.safetensors").read_bytes())
 
     def test_hf_snapshot_validation_failure_does_not_modify_existing_target(self):
         module = self._load_qwenvl_with_stubs()
@@ -2879,7 +3013,8 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
 
     def test_whisper_asr_returns_install_message_when_backend_missing(self):
         node_cls = load_thinkingllm_loader_subset(["AILab_WhisperASR.py"]).NODE_CLASS_MAPPINGS["ThinkingLLM_Whisper_ASR"]
-        with mock.patch.dict(sys.modules, {"faster_whisper": None}, clear=False):
+        folder_paths_stub = build_stub_module("folder_paths", get_input_directory=lambda: str(PKG))
+        with mock.patch.dict(sys.modules, {"folder_paths": folder_paths_stub, "faster_whisper": None}, clear=False):
             transcript, segments_json, raw_trace = node_cls().process(
                 model_size="base",
                 language="auto",
@@ -2927,7 +3062,12 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
                 wav.setframerate(16000)
                 wav.writeframes(b"\0\0" * 1600)
 
-            with mock.patch.dict(sys.modules, {"faster_whisper": fake_backend}, clear=False):
+            folder_paths_stub = build_stub_module("folder_paths", get_input_directory=lambda: str(PKG))
+            with mock.patch.dict(
+                sys.modules,
+                {"folder_paths": folder_paths_stub, "faster_whisper": fake_backend},
+                clear=False,
+            ), mock.patch.dict(module.os.environ, {"THINKINGLLM_AUDIO_ALLOWED_ROOTS": temp_dir}, clear=False):
                 transcript, segments_json, raw_trace = module.ThinkingLLM_Whisper_ASR().process(
                     model_size="base",
                     language="de",
@@ -2975,7 +3115,12 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
                 wav.setframerate(16000)
                 wav.writeframes(b"\0\0" * 1600)
 
-            with mock.patch.dict(sys.modules, {"faster_whisper": fake_backend}, clear=False):
+            folder_paths_stub = build_stub_module("folder_paths", get_input_directory=lambda: str(PKG))
+            with mock.patch.dict(
+                sys.modules,
+                {"folder_paths": folder_paths_stub, "faster_whisper": fake_backend},
+                clear=False,
+            ), mock.patch.dict(module.os.environ, {"THINKINGLLM_AUDIO_ALLOWED_ROOTS": temp_dir}, clear=False):
                 transcript, _, raw_trace = module.ThinkingLLM_Whisper_ASR().process(
                     model_size="small",
                     language="auto",
@@ -3023,7 +3168,12 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
                 wav.setframerate(16000)
                 wav.writeframes(b"\0\0" * 1600)
 
-            with mock.patch.dict(sys.modules, {"faster_whisper": fake_backend}, clear=False):
+            folder_paths_stub = build_stub_module("folder_paths", get_input_directory=lambda: str(PKG))
+            with mock.patch.dict(
+                sys.modules,
+                {"folder_paths": folder_paths_stub, "faster_whisper": fake_backend},
+                clear=False,
+            ), mock.patch.dict(module.os.environ, {"THINKINGLLM_AUDIO_ALLOWED_ROOTS": temp_dir}, clear=False):
                 transcript, _, raw_trace = module.ThinkingLLM_Whisper_ASR().process(
                     model_size="small",
                     language="auto",
@@ -3107,7 +3257,13 @@ class TestGGUFAdvancedWorkflowCompatibility(unittest.TestCase):
                 capture_output=True,
             )
 
-            encoded = module._audio_file_path_to_wav_base64(str(m4a_path))
+            folder_paths_stub = build_stub_module("folder_paths", get_input_directory=lambda: str(PKG))
+            with mock.patch.dict(sys.modules, {"folder_paths": folder_paths_stub}, clear=False), mock.patch.dict(
+                module.os.environ,
+                {"THINKINGLLM_AUDIO_ALLOWED_ROOTS": temp_dir},
+                clear=False,
+            ):
+                encoded = module._audio_file_path_to_wav_base64(str(m4a_path))
 
         self.assertEqual(len(encoded), 1)
         with wave.open(io.BytesIO(base64.b64decode(encoded[0])), "rb") as wav:

@@ -4,10 +4,15 @@ import hashlib
 
 import torch
 
+MASK_PROMPT_CONTRACT_VERSION = 2
+
 MASK_FOCUS_INSTRUCTION = (
-    "The image has a mask highlight: the selected area is shown at normal brightness and the surrounding "
-    "context is dimmed. Analyze and describe only the normal-brightness selected area. Use the dimmed "
-    "surroundings only for spatial context and do not describe them."
+    "Describe only the subject or object visually distinguished from the rest of the image. Start directly with its "
+    "concrete identity or category, then its visible appearance or action; no preface. Use the rest of the image "
+    "only to recognize the target. Omit every other subject, background, scenery, and unrelated scene detail. Do not "
+    "mention the visual distinction, a mask, highlighting, selection, brightness, dimming, or image processing. This "
+    "scope overrides any earlier request to describe the whole image. Preserve its requested level of detail, but "
+    "apply it only to the target."
 )
 
 MASK_RECONSTRUCTION_INSTRUCTION = (

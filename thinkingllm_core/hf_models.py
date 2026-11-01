@@ -25,6 +25,7 @@ from thinkingllm_core.model_access import (
     normalize_commercial_status,
     resolve_model_catalog_name,
 )
+from thinkingllm_core.hf_trust import get_trusted_hf_revision, trust_remote_code_for_snapshot
 from thinkingllm_core.prompt_contracts import VIDEO_PRESET_METADATA
 
 try:
@@ -668,7 +669,8 @@ def ensure_model(model_name, require_processor=False, node_id=None, progress_lab
     if not repo_id:
         raise ValueError(f"Model '{model_name}' has no repo_id or local_path")
 
-    installed_target = _find_installed_hf_model_dir(info, require_processor=require_processor)
+    trusted_revision = get_trusted_hf_revision(repo_id)
+    installed_target = None if trusted_revision else _find_installed_hf_model_dir(info, require_processor=require_processor)
     if installed_target is not None:
         info["is_installed"] = True
         info["installed_path"] = str(installed_target)
@@ -689,13 +691,27 @@ def ensure_model(model_name, require_processor=False, node_id=None, progress_lab
     models_dir = _hf_qwen_vl_dirs()[0]
 
     models_dir.mkdir(parents=True, exist_ok=True)
-    target = models_dir / repo_id.split("/")[-1]
+    target = (
+        models_dir / ".thinkingllm-trusted" / repo_id.split("/")[-1] / trusted_revision
+        if trusted_revision
+        else models_dir / repo_id.split("/")[-1]
+    )
 
     # Only trust an existing snapshot if it also contains the metadata needed
     # by the selected backend. This avoids reusing stale or partial downloads.
     if _model_snapshot_has_required_files(target, require_processor=require_processor):
+        if trusted_revision and not trust_remote_code_for_snapshot(target, repo_id):
+            raise PermissionError(
+                f"[QwenVL] Existing snapshot for {repo_id} is not verified for the configured pinned revision; "
+                "move the directory aside before retrying the trusted download."
+            )
         enforce_model_access(info, model_name, local_exists=True, hf_token=hf_token)
         return str(target)
+    if trusted_revision and target.exists():
+        raise PermissionError(
+            f"[QwenVL] Incomplete trusted snapshot for {repo_id}: {target}. "
+            "Move the directory aside before retrying the pinned download."
+        )
 
     enforce_model_access(info, repo_id, local_exists=False, hf_token=hf_token)
 
@@ -709,6 +725,7 @@ def ensure_model(model_name, require_processor=False, node_id=None, progress_lab
         node_id=node_id,
         progress_label=progress_label or f"QwenVL HF Download: {model_name}",
         hf_token=hf_token,
+        revision=trusted_revision,
     )
 
     if not _model_snapshot_has_required_files(target, require_processor=require_processor):

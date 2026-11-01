@@ -1,5 +1,4 @@
 import json
-import os
 import shutil
 import subprocess
 import tempfile
@@ -7,6 +6,14 @@ import wave
 from pathlib import Path
 
 import numpy as np
+from thinkingllm_core.audio_security import (
+    FFMPEG_TIMEOUT_SECONDS,
+    MAX_AUDIO_SECONDS,
+    resolve_local_audio_path,
+    validate_audio_duration,
+    validate_audio_file,
+    validate_audio_shape,
+)
 
 
 WHISPER_MODEL_CHOICES = [
@@ -41,12 +48,7 @@ WHISPER_INSTALL_MESSAGE = (
 
 
 def _clean_audio_file_path(audio_file_path) -> Path | None:
-    if audio_file_path is None:
-        return None
-    raw_path = str(audio_file_path).strip().strip("\"'")
-    if not raw_path:
-        return None
-    return Path(os.path.expandvars(raw_path)).expanduser()
+    return resolve_local_audio_path(audio_file_path)
 
 
 def _ffmpeg_path() -> str:
@@ -60,8 +62,7 @@ def _decode_audio_file_to_wav(audio_file_path, target_path: Path) -> str:
     source_path = _clean_audio_file_path(audio_file_path)
     if source_path is None:
         raise ValueError("audio_file_path is empty")
-    if not source_path.exists() or not source_path.is_file():
-        raise FileNotFoundError(f"audio_file_path does not exist or is not a file: {source_path}")
+    validate_audio_file(source_path)
 
     result = subprocess.run(
         [
@@ -78,14 +79,19 @@ def _decode_audio_file_to_wav(audio_file_path, target_path: Path) -> str:
             "16000",
             "-acodec",
             "pcm_s16le",
+            "-t",
+            str(MAX_AUDIO_SECONDS + 1),
             str(target_path),
         ],
         check=False,
         capture_output=True,
         text=True,
+        timeout=FFMPEG_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg failed to decode audio_file_path: {result.stderr.strip() or 'unknown ffmpeg error'}")
+    with wave.open(str(target_path), "rb") as wav:
+        validate_audio_duration(wav.getnframes(), wav.getframerate())
     return str(source_path)
 
 
@@ -98,6 +104,9 @@ def _audio_to_wav_file(audio, target_path: Path) -> str:
     sample_rate = int(audio.get("sample_rate") or 0)
     if sample_rate <= 0:
         raise ValueError(f"invalid sample_rate={audio.get('sample_rate')!r}")
+    shape = tuple(getattr(waveform, "shape", ()))
+    if shape:
+        validate_audio_shape(shape, sample_rate)
 
     tensor = waveform.detach().cpu() if hasattr(waveform, "detach") else waveform
     tensor = tensor.cpu() if hasattr(tensor, "cpu") else tensor
@@ -117,6 +126,7 @@ def _audio_to_wav_file(audio, target_path: Path) -> str:
         array = np.nan_to_num(array, nan=0.0, posinf=1.0, neginf=-1.0)
 
     mono = np.mean(array, axis=0).astype(np.float32)
+    validate_audio_duration(mono.size, sample_rate)
     if sample_rate != 16000:
         target_length = max(1, int(round(float(mono.size) * 16000.0 / float(sample_rate))))
         old_positions = np.linspace(0.0, float(mono.size - 1), num=mono.size, dtype=np.float64)
@@ -188,7 +198,7 @@ class ThinkingLLM_Whisper_ASR:
             },
             "optional": {
                 "audio": ("AUDIO",),
-                "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": "Optional local audio file path. M4A, MP3, WAV, FLAC, and other FFmpeg-readable files are decoded to 16 kHz mono WAV before Whisper."}),
+                "audio_file_path": ("STRING", {"default": "", "multiline": False, "tooltip": "Optional audio file inside ComfyUI's input directory or an administrator-configured audio root. Files up to 256 MiB and 10 minutes are decoded to 16 kHz mono WAV."}),
             },
         }
 
@@ -210,7 +220,10 @@ class ThinkingLLM_Whisper_ASR:
         audio_file_path="",
     ):
         notes: list[str] = []
-        clean_path = _clean_audio_file_path(audio_file_path)
+        try:
+            clean_path = _clean_audio_file_path(audio_file_path)
+        except Exception as exc:
+            return _missing_audio_result([str(exc)])
         if audio is None and clean_path is None:
             return _missing_audio_result()
 

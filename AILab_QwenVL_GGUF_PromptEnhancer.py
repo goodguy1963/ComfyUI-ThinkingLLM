@@ -87,7 +87,7 @@ from AILab_QwenVL_GGUF import (
 
 GGUF_PROMPT_TOOLTIPS = {
     "model_name": "GGUF text model from config or auto-detected local files. [installed] means the catalog model was found in a configured GGUF/LLM location; [local] means an uncatalogued local model. Missing GGUF files download on first use.",
-    "prompt_text": "Prompt text to enhance. Leave blank to emit the selected preset instruction as the base prompt.",
+    "prompt_text": "Type your scene idea or video description here; no separate text node is needed. The selected style transforms this text into a generation prompt. For image-to-video styles, include any source-frame details in your text because this node does not receive images.",
     "preset_system_prompt": "Preset enhancement style. Use Custom Only when you want custom_system_prompt to fully control the instruction.",
     "custom_system_prompt": "Optional extra instruction. Required when using Custom Only; otherwise it is prepended to the selected style.",
     "max_tokens": "Maximum new tokens for the enhanced prompt. Increase only when the model truncates useful detail.",

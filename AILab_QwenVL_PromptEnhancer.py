@@ -41,6 +41,7 @@ from thinkingllm_core.model_access import (
     model_catalog_options,
     resolve_model_catalog_name,
 )
+from thinkingllm_core.hf_trust import trust_remote_code_for_snapshot
 from thinkingllm_core.prompt_contracts import (
     VIDEO_DURATION_INPUT,
     apply_qwen_soft_thinking_directive,
@@ -144,7 +145,7 @@ PROMPT_STYLES = _load_prompt_styles()
 PROMPT_STYLES = {CUSTOM_ONLY_STYLE: "", **PROMPT_STYLES}
 
 PROMPT_ENHANCER_TOOLTIPS = {
-    "prompt_text": "Prompt text to enhance. Leave blank to emit the selected preset instruction as the base prompt.",
+    "prompt_text": "Type your scene idea or video description here; no separate text node is needed. The selected style transforms this text into a generation prompt. For image-to-video styles, include any source-frame details in your text because this node does not receive images.",
     "enhancement_style": "Preset enhancement style. Use Custom Only when you want custom_system_prompt to fully control the instruction.",
     "custom_system_prompt": "Optional extra instruction. Required when using Custom Only; otherwise it is prepended to the selected style.",
     "max_tokens": "Maximum new tokens for the enhanced prompt. Increase only when the model truncates useful detail.",
@@ -414,6 +415,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             progress_label=f"QwenVL PromptEnhancer HF Download: {model_name}",
             hf_token=hf_token,
         )
+        trust_remote_code = trust_remote_code_for_snapshot(model_source, repo_id)
 
         if device_choice == "auto":
             device = "cuda" if torch.cuda.is_available() else ("mps" if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available() else "cpu")
@@ -451,7 +453,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         print(f"[QwenVL] Loading text model {model_name} ({quantization})")
         tokenizer_kwargs = {
             "local_files_only": COMMERCIAL_RELEASE,
-            "trust_remote_code": not COMMERCIAL_RELEASE,
+            "trust_remote_code": trust_remote_code,
         }
 
         def _load_tokenizer(prefer_slow: bool = False):
@@ -508,7 +510,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 ) from retry_exc
         self.text_model = AutoModelForCausalLM.from_pretrained(
             model_source,
-            trust_remote_code=not COMMERCIAL_RELEASE,
+            trust_remote_code=trust_remote_code,
             **load_kwargs,
         ).eval()
         self.text_model.to(device)

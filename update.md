@@ -1,5 +1,19 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 3.1.1 (2026/11/01) - Audio Workflows and Security Hardening
+
+### 3.1.1 Changes
+
+- Expanded audio, mask-focused image, and duration-aware video prompt workflows, with related frontend and guidance updates.
+- Restricted workflow audio paths to approved roots and bounded file size, decoded duration, sample rate, waveform size, and FFmpeg runtime.
+- Disabled Transformers remote code by default; custom code now requires an administrator-approved repository pinned to a full commit SHA.
+- Filtered terminal control characters from streamed model output.
+
+### 3.1.1 Validation
+
+- Focused audio, HF snapshot, commercial-mode, terminal-display, and security-control tests passed; one Windows symlink test was skipped because symlink creation was unavailable.
+- Python compilation and `git diff --check` passed. No live ComfyUI deployment or full test suite was run.
+
 ## Version 3.1.0 (2026/10/30) - Typed Decision Fields and Readable Results
 
 ### 3.1.0 Changes

@@ -100,6 +100,8 @@ The MiniMax H3/Qwen3-VL 32B conditioning checkpoint is excluded because it is no
 
 Community dropdowns preserve normal model names and download behavior. Gated Hugging Face repositories still require acceptance of the model owner's terms and a read token.
 
+Transformers remote Python code is disabled by default. To enable a custom architecture, an administrator must review it and set `THINKINGLLM_TRUSTED_HF_MODELS` to one or more comma-separated `org/repository@<40-character-commit-SHA>` entries. ThinkingLLM downloads those repositories at the pinned commit and enables custom code only for that verified snapshot. Local model directories and unpinned downloads continue to load with remote code disabled.
+
 Commercial-release dropdowns include only reviewed, locked models and group entries by rights status. This restriction is intentionally separate from Community behavior.
 
 ## Platform notes

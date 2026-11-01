@@ -47,12 +47,21 @@ from AILab_LlamaCppInstaller import (
 )
 import comfy.model_management as comfy_model_management
 from comfy.model_management import throw_exception_if_processing_interrupted
+from thinkingllm_core.audio_security import (
+    FFMPEG_TIMEOUT_SECONDS,
+    MAX_AUDIO_SECONDS,
+    resolve_local_audio_path,
+    validate_audio_duration,
+    validate_audio_file,
+    validate_audio_shape,
+)
 
 # Import shared contracts directly; AILab_QwenVL remains a compatibility facade.
 sys.path.append(str(Path(__file__).parent))
 from thinkingllm_core.hf_models import ensure_cuda_vram_headroom
 from thinkingllm_core.media import (
     MASK_FOCUS_INSTRUCTION,
+    MASK_PROMPT_CONTRACT_VERSION,
     MASK_RECONSTRUCTION_INSTRUCTION,
     apply_mask_highlight,
     get_image_hash,
@@ -609,7 +618,7 @@ GGUF_VL_CATALOG = _load_gguf_vl_catalog()
 GGUF_TOOLTIPS = {
     "model_name": "GGUF vision model from gguf_models.json or auto-detected local files. [installed] means the catalog model was found in a configured GGUF/LLM location; [local] means an uncatalogued local model. Missing GGUF or mmproj files are downloaded on first use.",
     "audio_model_name": "Gemma 4 audio-capable GGUF model. Only Gemma 4 E2B, E4B, and 12B are listed; 26B/31B variants are image/text-only for this purpose.",
-    "audio_file_path": "Optional local audio file path. M4A, MP3, WAV, FLAC, and other FFmpeg-readable files are decoded to 16 kHz mono WAV before inference.",
+    "audio_file_path": "Optional file inside ComfyUI's input directory or an administrator-configured audio root. Files up to 256 MiB and 10 minutes are decoded to 16 kHz mono WAV.",
     "device": "auto prefers CUDA when PyTorch sees an NVIDIA GPU. If RAW_TRACE says GPU offload is no or unknown, verify your llama-cpp-python CUDA wheel before blaming the model.",
     "max_tokens": "Maximum new tokens to generate. Larger values give more room for reasoning but increase runtime and memory use.",
     "keep_model_loaded": "Keep the GGUF model in RAM/VRAM after the run so repeated prompts skip model loading. Disable if you need memory back for other nodes.",
@@ -738,21 +747,14 @@ def _resample_mono_audio(samples, source_rate: int, target_rate: int = GGUF_AUDI
 
 
 def _clean_audio_file_path(audio_file_path) -> Path | None:
-    if audio_file_path is None:
-        return None
-    raw_path = str(audio_file_path).strip().strip("\"'")
-    if not raw_path:
-        return None
-    expanded = os.path.expandvars(raw_path)
-    return Path(expanded).expanduser()
+    return resolve_local_audio_path(audio_file_path)
 
 
 def _audio_file_path_to_wav_base64(audio_file_path) -> list[str]:
     path = _clean_audio_file_path(audio_file_path)
     if path is None:
         return []
-    if not path.exists() or not path.is_file():
-        raise FileNotFoundError(f"audio_file_path does not exist or is not a file: {path}")
+    validate_audio_file(path)
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("ffmpeg was not found on PATH; install FFmpeg or connect a decoded ComfyUI AUDIO input")
@@ -772,12 +774,15 @@ def _audio_file_path_to_wav_base64(audio_file_path) -> list[str]:
             str(GGUF_AUDIO_TARGET_SAMPLE_RATE),
             "-acodec",
             "pcm_s16le",
+            "-t",
+            str(MAX_AUDIO_SECONDS + 1),
             "-f",
             "s16le",
             "pipe:1",
         ],
         check=False,
         capture_output=True,
+        timeout=FFMPEG_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace").strip()
@@ -787,6 +792,7 @@ def _audio_file_path_to_wav_base64(audio_file_path) -> list[str]:
 
     if len(result.stdout) % 2 != 0:
         raise RuntimeError("ffmpeg produced malformed 16-bit PCM audio")
+    validate_audio_duration(len(result.stdout) // 2, GGUF_AUDIO_TARGET_SAMPLE_RATE)
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as wav:
         wav.setnchannels(1)
@@ -808,6 +814,9 @@ def _audio_to_wav_base64(audio) -> list[str]:
         sample_rate = int(audio.get("sample_rate") or 0)
         if sample_rate <= 0:
             raise ValueError(f"invalid sample_rate={audio.get('sample_rate')!r}")
+        shape = tuple(getattr(waveform, "shape", ()))
+        if shape:
+            validate_audio_shape(shape, sample_rate)
         tensor = waveform.detach().cpu() if hasattr(waveform, "detach") else waveform
         tensor = tensor.cpu() if hasattr(tensor, "cpu") else tensor
         array = tensor.numpy() if hasattr(tensor, "numpy") else np.asarray(tensor)
@@ -825,6 +834,7 @@ def _audio_to_wav_base64(audio) -> list[str]:
         if not np.all(np.isfinite(array)):
             array = np.nan_to_num(array, nan=0.0, posinf=1.0, neginf=-1.0)
         mono = np.mean(array, axis=0)
+        validate_audio_duration(mono.size, sample_rate)
         mono = _resample_mono_audio(mono, sample_rate, GGUF_AUDIO_TARGET_SAMPLE_RATE)
         pcm = np.clip(mono, -1.0, 1.0)
         pcm16 = (pcm * 32767.0).astype(np.int16)
@@ -850,17 +860,17 @@ def _audio_inputs_to_wav_base64(audio=None, audio_file_path="") -> tuple[list[st
         else:
             notes.append("Connected ComfyUI AUDIO input could not be converted to 16 kHz WAV.")
 
-    clean_path = _clean_audio_file_path(audio_file_path)
-    if clean_path is not None:
-        try:
+    try:
+        clean_path = _clean_audio_file_path(audio_file_path)
+        if clean_path is not None:
             converted = _audio_file_path_to_wav_base64(str(clean_path))
             if converted:
                 items.extend(converted)
                 print(f"[QwenVL] Audio file decoded: {clean_path}")
-        except Exception as exc:
-            note = f"audio_file_path failed: {exc}"
-            notes.append(note)
-            print(f"[QwenVL] Warning: {note}")
+    except Exception as exc:
+        note = f"audio_file_path failed: {exc}"
+        notes.append(note)
+        print(f"[QwenVL] Warning: {note}")
 
     return items, notes
 
@@ -884,10 +894,10 @@ def _get_audio_hash(audio) -> str | None:
 
 
 def _get_audio_file_hash(audio_file_path) -> str | None:
-    path = _clean_audio_file_path(audio_file_path)
-    if path is None:
-        return None
     try:
+        path = _clean_audio_file_path(audio_file_path)
+        if path is None:
+            return None
         stat = path.stat()
         content = f"{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}"
         return hashlib.md5(content.encode("utf-8", errors="replace")).hexdigest()[:16]
@@ -2065,6 +2075,7 @@ class QwenVLGGUFBase:
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             output_cleaner_version=OUTPUT_CLEANER_VERSION,
+            **({"mask_prompt_contract_version": MASK_PROMPT_CONTRACT_VERSION} if mask_hash else {}),
             **duration_signature,
         )
         requires_audio_input = node_class in {"ThinkingLLM_Gemma4_Audio_GGUF"}
@@ -2096,7 +2107,22 @@ class QwenVLGGUFBase:
         prompt_template = "" if preset_prompt == "🚫 No preset (image-only)" else SYSTEM_PROMPTS.get(preset_prompt, preset_prompt)
 
         # Generate cache key with all inputs including seed
-        cache_key = get_cache_key(model_name, preset_prompt, custom_prompt, image_hash, video_hash, int(seed), max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking, effective_duration_seconds=effective_duration_seconds, video_prompt_contract_version=resolved_duration.get("contract_version") if resolved_duration else None)
+        cache_key = get_cache_key(
+            model_name,
+            preset_prompt,
+            custom_prompt,
+            image_hash,
+            video_hash,
+            int(seed),
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+            enable_thinking=enable_thinking,
+            effective_duration_seconds=effective_duration_seconds,
+            video_prompt_contract_version=resolved_duration.get("contract_version") if resolved_duration else None,
+            mask_prompt_contract_version=MASK_PROMPT_CONTRACT_VERSION if mask_hash else None,
+        )
 
         # TEMPORARILY DISABLED CACHE FOR DEBUGGING
         # Check cache first (only for random mode)

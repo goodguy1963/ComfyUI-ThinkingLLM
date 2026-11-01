@@ -499,6 +499,34 @@ function buildVideoPresetRecommendationText(node, payload) {
     return lines.join("\n");
 }
 
+function buildPromptEnhancerPreviewText(node, payload) {
+    const styleWidget = findWidget(node, "enhancement_style") || findWidget(node, "preset_system_prompt");
+    const promptWidget = findWidget(node, "prompt_text");
+    if (!styleWidget || !promptWidget) {
+        return "";
+    }
+
+    const styleName = readComboValue(styleWidget);
+    const stylePrompt = String(payload?.[styleWidget.name]?.[styleName] || "").trim();
+    const customSystemWidget = findWidget(node, "custom_system_prompt");
+    const customSystemPrompt = String(customSystemWidget?.inputEl?.value ?? customSystemWidget?.value ?? "").trim();
+    const userText = String(promptWidget.inputEl?.value ?? promptWidget.value ?? "").trim();
+    const systemParts = [customSystemPrompt, stylePrompt].filter(Boolean);
+    const lines = ["Prompt preview (before generation)"];
+
+    if (systemParts.length) {
+        lines.push(`System instructions:\n${systemParts.join("\n\n")}`);
+    } else if (styleName === "✍️ Custom Only (no preset)") {
+        lines.push("System instructions:\nNo preset instruction is selected; add instructions in custom_system_prompt.");
+    } else {
+        lines.push("System instructions:\nThe selected style prompt is not available in the preview data.");
+    }
+
+    lines.push(`Your text (prompt_text):\n${userText || "Describe a scene vividly. (default because prompt_text is blank)"}`);
+    lines.push("This shows the selected instructions and source text; the generated prompt appears after execution.");
+    return lines.join("\n\n");
+}
+
 function ensureRecommendationWidget(node) {
     if (!THINKINGLLM_NODE_NAMES.has(node.comfyClass)) {
         return null;
@@ -548,6 +576,7 @@ function updateRecommendationWidget(node) {
         widget.value = [
             buildRecommendationText(node, rules),
             buildVideoPresetRecommendationText(node, payload),
+            buildPromptEnhancerPreviewText(node, payload),
         ].filter(Boolean).join("\n\n");
         resizeNode(node);
     });
@@ -562,6 +591,22 @@ function queueRecommendationRefresh(node) {
         node._thinkingllmRecommendationQueued = false;
         updateRecommendationWidget(node);
     });
+}
+
+function hookPromptEnhancerPreviewInputs(node) {
+    if (!findWidget(node, "prompt_text")
+        || (!findWidget(node, "enhancement_style") && !findWidget(node, "preset_system_prompt"))) {
+        return;
+    }
+
+    for (const widgetName of ["prompt_text", "custom_system_prompt"]) {
+        const widget = findWidget(node, widgetName);
+        if (!widget?.inputEl || widget._thinkingllmPreviewInputHooked) {
+            continue;
+        }
+        widget._thinkingllmPreviewInputHooked = true;
+        widget.inputEl.addEventListener("input", () => queueRecommendationRefresh(node));
+    }
 }
 
 function catalogModelsForProfile(catalogs, profileName) {
@@ -750,6 +795,7 @@ function hookRecommendationUpdates(node) {
     }
     node._thinkingllmRecommendationHooked = true;
     ensureRecommendationWidget(node);
+    hookPromptEnhancerPreviewInputs(node);
 
     for (const widgetName of ["model_name", "enable_thinking", ...PRESET_WIDGET_NAMES]) {
         const target = findWidget(node, widgetName);

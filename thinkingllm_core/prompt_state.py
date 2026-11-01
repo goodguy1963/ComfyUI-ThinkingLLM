@@ -188,11 +188,26 @@ def log_llm_input(
         encoding = getattr(sys.stdout, "encoding", None) or "ascii"
         print(message.encode(encoding, errors="replace").decode(encoding))
 
-def get_cache_key(model_name, preset_prompt, custom_prompt, image_hash=None, video_hash=None, seed=None, max_tokens=None, temperature=None, top_p=None, repetition_penalty=None, enable_thinking=None, effective_duration_seconds=None, video_prompt_contract_version=None):
+def get_cache_key(
+    model_name,
+    preset_prompt,
+    custom_prompt,
+    image_hash=None,
+    video_hash=None,
+    seed=None,
+    max_tokens=None,
+    temperature=None,
+    top_p=None,
+    repetition_penalty=None,
+    enable_thinking=None,
+    effective_duration_seconds=None,
+    video_prompt_contract_version=None,
+    mask_prompt_contract_version=None,
+):
     """Generate cache key from inputs including all generation parameters.
 
-    All generation-parameter fields are optional so existing callers that omit them
-    continue to work; when provided, changing any parameter produces a different key.
+    Input and contract-version fields are optional so existing callers that omit them
+    continue to work; when provided, changing a field produces a different key.
     """
     key_data = {
         "model": model_name,
@@ -211,6 +226,8 @@ def get_cache_key(model_name, preset_prompt, custom_prompt, image_hash=None, vid
         key_data["effective_duration_seconds"] = effective_duration_seconds
     if video_prompt_contract_version is not None:
         key_data["video_prompt_contract_version"] = video_prompt_contract_version
+    if mask_prompt_contract_version is not None:
+        key_data["mask_prompt_contract_version"] = mask_prompt_contract_version
     # Create deterministic hash
     key_str = json.dumps(key_data, sort_keys=True)
     return hashlib.md5(key_str.encode()).hexdigest()
