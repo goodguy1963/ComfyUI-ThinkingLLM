@@ -1216,8 +1216,16 @@ class TestModelRecommendations(unittest.TestCase):
             module.get_cache_key("m", "p", "x", mask_prompt_contract_version=2),
         )
         self.assertNotEqual(
+            module.get_cache_key("m", "p", "x", thinking_budget_policy_version=1),
+            module.get_cache_key("m", "p", "x", thinking_budget_policy_version=2),
+        )
+        self.assertNotEqual(
             module.build_node_input_signature(mask_prompt_contract_version=1),
             module.build_node_input_signature(mask_prompt_contract_version=2),
+        )
+        self.assertNotEqual(
+            module.build_node_input_signature(thinking_budget_policy_version=1),
+            module.build_node_input_signature(thinking_budget_policy_version=2),
         )
         self.assertEqual(
             module.build_node_input_signature(effective_duration_seconds=five_seconds),
@@ -1475,7 +1483,9 @@ class TestModelRecommendations(unittest.TestCase):
         self.assertNotIn("MINIMAX STRUCTURE REPAIR", source)
         self.assertNotIn("_NON_THINKING_REASONING_CHAR_LIMIT", source)
         self.assertIn("final = ensure_video_prompt_duration(", source)
-        self.assertIn("arch.startswith(\"qwen35\")", source)
+        self.assertIn('normalized_arch = re.sub(r"[^a-z0-9]", "", str(arch or "").lower())', source)
+        self.assertIn('normalized_arch in {"qwen3", "qwen35", "qwen35moe", "qwen3vl"}', source)
+        self.assertIn('stage_label = f"FINALIZATION ATTEMPT {attempt_number}/{max_finalization_attempts}"', source)
         self.assertIn('completion_kwargs["chat_template_kwargs"]', source)
         self.assertIn('"thinking_mode": "enabled" if current_enable_thinking else "disabled"', source)
         for filename in (
@@ -2135,7 +2145,7 @@ class TestSharedComfyUITextEncoders(unittest.TestCase):
 
                 self.assertEqual(("native answer", "native answer"), (text, raw))
                 self.assertEqual([str(PKG / "qwen3vl_8b_fp8_scaled.safetensors")], calls["load"]["ckpt_paths"])
-                self.assertTrue(calls["tokenize"][1]["thinking"])
+                self.assertFalse(calls["tokenize"][1]["thinking"])
                 self.assertEqual(7, calls["generate"][1]["seed"])
                 calls["decoded_text"] = "  "
                 with self.assertRaisesRegex(RuntimeError, "without producing text"):
@@ -4342,6 +4352,19 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         self.assertEqual(captured_llama_kwargs[0]["n_ubatch"], 1120)
         self.assertEqual(captured_llama_kwargs[0]["image_max_tokens"], 1120)
 
+    def test_gguf_rejects_blank_final_text_before_cache_or_save(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gguf_blank_final_guard_test",
+            )
+
+        self.assertEqual(module._require_nonempty_final_text(" final prompt ", source="QwenVL GGUF"), " final prompt ")
+        for blank in ("", "  \n\t"):
+            with self.subTest(blank=repr(blank)):
+                with self.assertRaisesRegex(RuntimeError, "empty output was not saved or cached"):
+                    module._require_nonempty_final_text(blank, source="QwenVL GGUF")
+
     def test_gemma4_cpu_only_multimodal_guard_blocks_native_abort_risk(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             module = load_module_from_file(
@@ -4525,6 +4548,272 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
         self.assertEqual(loader.llm.chat_template_kwargs["enable_thinking"], False)
         self.assertEqual(captured_kwargs[0]["chat_template_kwargs"], {"enable_thinking": False})
 
+    def test_gguf_enforces_reasoning_budget_when_backend_exposes_it(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gguf_reasoning_budget_test",
+            )
+
+        captured_kwargs = {}
+
+        class BudgetAwareLlama:
+            def reset(self):
+                return None
+
+            def create_chat_completion(
+                self,
+                *,
+                reasoning_budget,
+                reasoning_start,
+                reasoning_end,
+                reasoning_start_in_prompt,
+                **kwargs,
+            ):
+                captured_kwargs.update(kwargs)
+                captured_kwargs.update({
+                    "reasoning_budget": reasoning_budget,
+                    "reasoning_start": reasoning_start,
+                    "reasoning_end": reasoning_end,
+                    "reasoning_start_in_prompt": reasoning_start_in_prompt,
+                })
+                return iter([{"choices": [{"delta": {"content": "answer"}}]}])
+
+        loader = module.QwenVLGGUFBase()
+        loader.llm = BudgetAwareLlama()
+        loader.chat_handler = types.SimpleNamespace(enable_thinking=True)
+        loader.supports_qwen_soft_think = True
+        text, _raw_trace = loader._invoke(
+            system_prompt="system",
+            user_prompt="user",
+            images_b64=[],
+            audio_b64=[],
+            max_tokens=3000,
+            temperature=0.0,
+            top_p=1.0,
+            repetition_penalty=1.0,
+            seed=1,
+            enable_thinking=True,
+            reasoning_budget=1000,
+        )
+
+        self.assertEqual(text, "answer")
+        self.assertEqual(captured_kwargs["reasoning_budget"], 1000)
+        self.assertEqual(captured_kwargs["reasoning_start"], "<think>")
+        self.assertEqual(captured_kwargs["reasoning_end"], "</think>")
+        self.assertTrue(captured_kwargs["reasoning_start_in_prompt"])
+
+    def test_qwen35_text_only_thinking_off_requires_effective_control(self):
+        with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF.py",
+                "thinkingllm_gguf_qwen35_legacy_thinking_control_test",
+            )
+
+        class LegacyLlama:
+            def reset(self):
+                return None
+
+            def create_chat_completion(self, **kwargs):
+                return iter([{"choices": [{"delta": {"content": "answer"}}]}])
+
+        def make_loader(chat_handler=None):
+            loader = module.QwenVLGGUFBase()
+            loader.llm = LegacyLlama()
+            loader.chat_handler = chat_handler
+            loader.is_qwen35 = True
+            loader.supports_qwen_soft_think = True
+            return loader
+
+        invoke_kwargs = {
+            "system_prompt": "system",
+            "user_prompt": "user",
+            "images_b64": [],
+            "audio_b64": [],
+            "max_tokens": 128,
+            "temperature": 0.0,
+            "top_p": 1.0,
+            "repetition_penalty": 1.0,
+            "seed": 1,
+            "enable_thinking": False,
+        }
+        for media in (
+            {"images_b64": ["test-image"]},
+            {"audio_b64": ["test-audio"]},
+        ):
+            with self.subTest(media=tuple(media)):
+                with self.assertRaisesRegex(RuntimeError, "Cannot reliably disable Qwen3.5 thinking"):
+                    make_loader()._invoke(**{**invoke_kwargs, **media})
+        with self.assertRaisesRegex(RuntimeError, "Cannot reliably disable Qwen3.5 thinking"):
+            make_loader()._invoke(**invoke_kwargs)
+
+        supported_loader = make_loader(types.SimpleNamespace(enable_thinking=False))
+        text, _raw_trace = supported_loader._invoke(**invoke_kwargs)
+        self.assertEqual(text, "answer")
+
+        class BudgetAwareLegacyLlama(LegacyLlama):
+            def create_chat_completion(
+                self,
+                *,
+                reasoning_budget,
+                reasoning_start,
+                reasoning_end,
+                reasoning_start_in_prompt,
+                **kwargs,
+            ):
+                self.used_reasoning_budget = reasoning_budget
+                return iter([{"choices": [{"delta": {"content": "answer"}}]}])
+
+        budget_loader = make_loader()
+        budget_loader.llm = BudgetAwareLegacyLlama()
+        budget_loader._invoke(**invoke_kwargs)
+        self.assertEqual(budget_loader.llm.used_reasoning_budget, 0)
+
+    def test_gguf_prompt_enhancer_cutoff_is_dynamic_without_backend_budget_api(self):
+        stubs = build_loader_test_stubs()
+        stubs["AILab_QwenVL_GGUF"] = build_stub_module(
+            "AILab_QwenVL_GGUF",
+            construct_llama_safely=lambda *args, **kwargs: None,
+            read_gguf_architecture=lambda *args, **kwargs: "qwen35",
+            _supports_reasoning_budget=lambda llm: False,
+            register_active_gguf_loader=lambda *args, **kwargs: None,
+            release_other_gguf_loaders=lambda *args, **kwargs: None,
+            _filter_kwargs_for_callable=lambda func, kwargs: kwargs,
+            _find_existing_local_file_in_dirs=lambda *args, **kwargs: None,
+            _gguf_search_dirs=lambda *args, **kwargs: [],
+        )
+        with mock.patch.dict(sys.modules, stubs, clear=False):
+            module = load_module_from_file(
+                "AILab_QwenVL_GGUF_PromptEnhancer.py",
+                "thinkingllm_gguf_prompt_enhancer_dynamic_cutoff_test",
+            )
+
+        module.ensure_cuda_vram_headroom = lambda *args, **kwargs: None
+        module.log_llm_input = lambda *args, **kwargs: None
+        module.throw_exception_if_processing_interrupted = lambda: None
+        module._install_llama_abort_callback = lambda *args, **kwargs: None
+        module.extract_stream_token = lambda chunk: {
+            "reasoning": "",
+            "content": chunk["choices"][0]["delta"].get("content", ""),
+        }
+        module.compose_streamed_model_output = lambda reasoning, content: content
+        module.clean_model_output = lambda text, config=None: text.strip()
+        module.OutputCleanConfig = lambda **kwargs: kwargs
+        module._preset_output_is_usable = lambda text, *args: bool(text)
+        module.apply_qwen_soft_thinking_directive = lambda text, *args, **kwargs: text
+        module.strip_degenerate_repetition = lambda text: text
+
+        class DummyLlama:
+            def __init__(self):
+                self.calls = []
+
+            def reset(self):
+                pass
+
+            def create_chat_completion(self, **kwargs):
+                self.calls.append(kwargs)
+                return iter([{"choices": [{"delta": {"content": "final answer"}}]}])
+
+        for max_tokens, reasoning_budget, answer_reserve, expected_thinking in (
+            (3000, 1000, 2000, False),
+            (3072, 1024, 2048, True),
+        ):
+            loader = module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer()
+            loader.llm = DummyLlama()
+            loader.supports_qwen_soft_think = True
+            text, _raw_trace = loader._invoke_llama(
+                system_prompt="system",
+                user_prompt="user",
+                max_tokens=max_tokens,
+                temperature=0.5,
+                top_p=0.9,
+                repetition_penalty=1.1,
+                seed=1,
+                stream_to_terminal=False,
+                enable_thinking=True,
+                reasoning_budget=reasoning_budget,
+                answer_reserve_tokens=answer_reserve,
+            )
+            self.assertEqual(text, "final answer")
+            self.assertEqual(
+                loader.llm.calls[0]["chat_template_kwargs"]["enable_thinking"],
+                expected_thinking,
+            )
+            self.assertNotIn("reasoning_budget", loader.llm.calls[0])
+
+        module._supports_reasoning_budget = lambda llm: True
+        loader = module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer()
+        loader.llm = DummyLlama()
+        loader.supports_qwen_soft_think = True
+        loader.is_qwen35 = True
+        text, _raw_trace = loader._invoke_llama(
+            system_prompt="system",
+            user_prompt="user",
+            max_tokens=1000,
+            temperature=0.5,
+            top_p=0.9,
+            repetition_penalty=1.1,
+            seed=1,
+            stream_to_terminal=False,
+            enable_thinking=False,
+            reasoning_budget=0,
+            answer_reserve_tokens=0,
+        )
+        self.assertEqual(text, "final answer")
+        call = loader.llm.calls[0]
+        self.assertEqual(call["reasoning_budget"], 0)
+        self.assertFalse(call["reasoning_start_in_prompt"])
+        self.assertTrue(call["assistant_prefill"])
+        self.assertEqual(call["messages"][-1], {
+            "role": "assistant",
+            "content": "<think>\n\n</think>\n",
+        })
+
+        class BudgetAwarePromptLlama(DummyLlama):
+            def create_chat_completion(self, **kwargs):
+                self.calls.append(kwargs)
+                return iter([{"choices": [{"delta": {"content": "final answer"}}]}])
+
+        for max_tokens, requested_reserve, expected_thinking, expected_budget in (
+            (3000, 2000, False, 0),
+            (3072, 2048, True, 1024),
+        ):
+            available, answer_reserve, planned_budget = module.resolve_qwen_output_token_plan(
+                max_tokens,
+                answer_reserve_tokens=requested_reserve,
+                max_reasoning_tokens=module.QWEN_MAX_REASONING_BUDGET_TOKENS,
+            )
+            effective_thinking = module.resolve_qwen_thinking_mode(
+                True,
+                max_tokens,
+                label="GGUF preflight regression",
+                min_reasoning_tokens=module.QWEN_MIN_REASONING_BUDGET_TOKENS,
+                answer_reserve_tokens=answer_reserve,
+                quiet=True,
+            )
+            budget_loader = module.ThinkingLLM_QwenVL_GGUF_PromptEnhancer()
+            budget_loader.llm = BudgetAwarePromptLlama()
+            budget_loader.supports_qwen_soft_think = True
+            budget_loader.is_qwen35 = True
+            budget_loader._invoke_llama(
+                system_prompt="system",
+                user_prompt="user",
+                max_tokens=max_tokens,
+                temperature=0.5,
+                top_p=0.9,
+                repetition_penalty=1.1,
+                seed=1,
+                stream_to_terminal=False,
+                enable_thinking=effective_thinking,
+                reasoning_budget=planned_budget if effective_thinking else 0,
+                answer_reserve_tokens=answer_reserve,
+            )
+            call = budget_loader.llm.calls[0]
+            self.assertEqual(available, max_tokens)
+            self.assertEqual(effective_thinking, expected_thinking)
+            self.assertEqual(call["chat_template_kwargs"]["enable_thinking"], expected_thinking)
+            self.assertEqual(call["reasoning_budget"], expected_budget)
+
     def test_create_chat_completion_retries_without_unexpected_kwarg(self):
         with mock.patch.dict(sys.modules, build_loader_test_stubs(), clear=False):
             module = load_module_from_file(
@@ -4670,6 +4959,7 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
             "AILab_QwenVL_GGUF",
             construct_llama_safely=lambda *args, **kwargs: None,
             read_gguf_architecture=lambda *args, **kwargs: "qwen35",
+            _supports_reasoning_budget=lambda llm: False,
             register_active_gguf_loader=lambda *args, **kwargs: None,
             release_other_gguf_loaders=lambda *args, **kwargs: None,
             _filter_kwargs_for_callable=lambda func, kwargs: kwargs,
@@ -4760,6 +5050,7 @@ class TestGGUFWindllRuntimeFallback(unittest.TestCase):
             "AILab_QwenVL_GGUF",
             construct_llama_safely=lambda *args, **kwargs: None,
             read_gguf_architecture=lambda *args, **kwargs: "qwen35",
+            _supports_reasoning_budget=lambda llm: False,
             register_active_gguf_loader=lambda *args, **kwargs: None,
             release_other_gguf_loaders=lambda *args, **kwargs: None,
             _filter_kwargs_for_callable=lambda func, kwargs: kwargs,

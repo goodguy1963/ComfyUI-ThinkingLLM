@@ -203,6 +203,7 @@ def get_cache_key(
     effective_duration_seconds=None,
     video_prompt_contract_version=None,
     mask_prompt_contract_version=None,
+    thinking_budget_policy_version=None,
 ):
     """Generate cache key from inputs including all generation parameters.
 
@@ -222,6 +223,8 @@ def get_cache_key(
         "repetition_penalty": repetition_penalty if repetition_penalty is not None else None,
         "enable_thinking": bool(enable_thinking) if enable_thinking is not None else None,
     }
+    if thinking_budget_policy_version is not None:
+        key_data["thinking_budget_policy_version"] = thinking_budget_policy_version
     if effective_duration_seconds is not None:
         key_data["effective_duration_seconds"] = effective_duration_seconds
     if video_prompt_contract_version is not None:

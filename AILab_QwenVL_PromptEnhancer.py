@@ -43,6 +43,7 @@ from thinkingllm_core.model_access import (
 )
 from thinkingllm_core.hf_trust import trust_remote_code_for_snapshot
 from thinkingllm_core.prompt_contracts import (
+    QWEN_THINKING_BUDGET_POLICY_VERSION,
     VIDEO_DURATION_INPUT,
     apply_qwen_soft_thinking_directive,
     apply_video_duration_context,
@@ -253,6 +254,7 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             enhancement_style=enhancement_style,
             custom_system_prompt=custom_system_prompt,
             enable_thinking=bool(enable_thinking),
+            thinking_budget_policy_version=QWEN_THINKING_BUDGET_POLICY_VERSION,
             output_cleaner_version=OUTPUT_CLEANER_VERSION,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -341,6 +343,11 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             duration_seconds,
             source_prompt_text=prompt_text,
         )
+        if not final.strip():
+            raise RuntimeError(
+                "[QwenVL PromptEnhancer HF] Model returned no usable prompt after removing reasoning. "
+                "Try disabling thinking or increasing the output token limit."
+            )
 
         # Persist per-node for future keep_last_prompt=True
         set_node_saved_prompt(node_class, unique_id, extra_pnginfo, final, raw_trace=raw_trace, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, input_signature=input_signature)
@@ -566,10 +573,15 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
             messages = [{"role": "user", "content": effective_prompt}]
             local_template_kwargs = dict(template_kwargs)
             if is_qwen35 or supports_soft_think:
-                local_template_kwargs["chat_template_kwargs"] = {"enable_thinking": thinking_enabled}
+                local_template_kwargs["enable_thinking"] = thinking_enabled
             try:
                 formatted_prompt = self.text_tokenizer.apply_chat_template(messages, **local_template_kwargs)
-            except Exception:
+            except Exception as exc:
+                if is_qwen35 or supports_soft_think:
+                    raise RuntimeError(
+                        "[QwenVL PromptEnhancer HF] Could not apply the tokenizer chat template with "
+                        f"enable_thinking={thinking_enabled}; refusing to continue without the requested thinking control."
+                    ) from exc
                 formatted_prompt = effective_prompt
             inputs = self.text_tokenizer(formatted_prompt, return_tensors="pt").to(device_choice)
             return effective_prompt, formatted_prompt, inputs
@@ -646,7 +658,9 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
                 if not full_streamed.strip():
                     raise RuntimeError("[QwenVL] HF streaming returned empty response")
                 raw_text = full_streamed.strip()
-                result = clean_model_output(raw_text, OutputCleanConfig(mode="prompt")) or raw_text
+                result = clean_model_output(raw_text, OutputCleanConfig(mode="prompt"))
+                if not result.strip():
+                    raise RuntimeError("[QwenVL PromptEnhancer HF] Streaming produced no usable prompt after removing reasoning.")
                 if not keep_model_loaded:
                     self.text_model = None
                     self.text_processor = None
@@ -667,7 +681,9 @@ class ThinkingLLM_QwenVL_PromptEnhancer(QwenVLBase):
         input_length = inputs["input_ids"].shape[1]
         generated_tokens = outputs[0][input_length:]
         raw_text = self.text_tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
-        result = clean_model_output(raw_text, OutputCleanConfig(mode="prompt")) or raw_text
+        result = clean_model_output(raw_text, OutputCleanConfig(mode="prompt"))
+        if not result.strip():
+            raise RuntimeError("[QwenVL PromptEnhancer HF] Generation produced no usable prompt after removing reasoning.")
 
         if not keep_model_loaded:
             self.text_model = None

@@ -1,5 +1,19 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 3.1.3 (2026/11/02) - Reliable Thinking Control and Final Output
+
+### 3.1.3 Changes
+
+- Unified the dynamic Qwen thinking preflight across HF, GGUF, and API paths. GGUF prompt enhancement now uses the shared minimum reasoning threshold and applies a per-request reasoning cap when supported by the backend.
+- Corrected Qwen3.5 thinking control for GGUF and HF templates; text-only legacy GGUF backends without a reliable control now fail clearly instead of silently consuming the output budget.
+- Prevented empty or reasoning-only results from being reported as successful or cached, while preserving structured HF answers such as JSON and code blocks.
+
+### 3.1.3 Validation
+
+- 162 GGUF/feature tests and 53 HF, API, and token-policy tests passed. Python compilation and `git diff --check` passed.
+- Live ComfyUI smoke tests with Qwen3.5-9B GGUF and `max_tokens=3000`, temperature 0.9, top-p 0.7, and repetition penalty 1.5 produced non-empty output; the automatic Thinking cutoff was confirmed with Thinking initially enabled.
+- Reviewed 12 parser traces and confirmed incomplete reasoning was removed while completed final answers were preserved.
+
 ## Version 3.1.2 (2026/11/01) - Preset and Mask Focus Improvements
 
 ### 3.1.2 Changes

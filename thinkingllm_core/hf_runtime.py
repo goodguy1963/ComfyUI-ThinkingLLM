@@ -6,6 +6,7 @@ import time
 import numpy as np
 import torch
 from PIL import Image
+from AILab_OutputCleaner import OutputCleanConfig, clean_model_output
 try:
     from transformers import AutoProcessor, AutoTokenizer
 except ImportError:
@@ -45,6 +46,7 @@ from thinkingllm_core.media import (
 from thinkingllm_core.model_access import resolve_model_catalog_name
 from thinkingllm_core.hf_trust import trust_remote_code_for_snapshot
 from thinkingllm_core.prompt_contracts import (
+    QWEN_THINKING_BUDGET_POLICY_VERSION,
     apply_qwen_soft_thinking_directive,
     apply_video_duration_context,
     ensure_video_prompt_duration,
@@ -309,21 +311,34 @@ class QwenVLBase:
             if native_family == "gemma3" and video is not None:
                 raise ValueError("[QwenVL] Gemma 3 shared text encoders support text and image input, not video")
 
-            tokenize_kwargs = {"skip_template": False, "thinking": bool(enable_thinking)}
-            if native_family == "gemma3":
-                tokenize_kwargs["image"] = image[:1] if image is not None else None
-            else:
-                images = []
+            native_images = []
+            if native_family != "gemma3":
                 if image is not None:
                     if image.dim() == 4 and image.shape[0] > 1:
                         print(f"[QwenVL] IMAGE input contains {image.shape[0]} items; using the first item only. Use the video input for multi-frame analysis.")
-                    images.append(image[:1] if image.dim() == 4 else image)
+                    native_images.append(image[:1] if image.dim() == 4 else image)
                 if video is not None:
                     frame_indexes = list(range(video.shape[0]))
                     if len(frame_indexes) > frame_count:
                         frame_indexes = np.linspace(0, len(frame_indexes) - 1, frame_count, dtype=int).tolist()
-                    images.extend(video[index:index + 1] for index in frame_indexes)
-                tokenize_kwargs["images"] = images
+                    native_images.extend(video[index:index + 1] for index in frame_indexes)
+
+            def _tokenize_native(thinking_enabled: bool):
+                tokenize_kwargs = {"skip_template": False, "thinking": bool(thinking_enabled)}
+                if native_family == "gemma3":
+                    tokenize_kwargs["image"] = image[:1] if image is not None else None
+                else:
+                    tokenize_kwargs["images"] = native_images
+                return self.model.tokenize(prompt_text, **tokenize_kwargs)
+
+            requested_thinking = bool(enable_thinking)
+            effective_thinking = resolve_qwen_thinking_mode(
+                requested_thinking,
+                max_tokens,
+                label="QwenVL ComfyUI Native",
+                quiet=stream_to_terminal,
+            )
+            tokens = _tokenize_native(effective_thinking)
 
             throw_exception_if_processing_interrupted()
             log_llm_input(
@@ -333,10 +348,9 @@ class QwenVLBase:
                 prompt_text,
                 media={
                     "image": 1 if image is not None else 0,
-                    "video_frames": max(0, len(tokenize_kwargs.get("images", [])) - (1 if image is not None else 0)),
+                    "video_frames": max(0, len(native_images) - (1 if image is not None else 0)),
                 },
             )
-            tokens = self.model.tokenize(prompt_text, **tokenize_kwargs)
             output_tokens = self.model.generate(
                 tokens,
                 do_sample=True,
@@ -563,6 +577,7 @@ class QwenVLBase:
             use_torch_compile=bool(use_torch_compile),
             device=device,
             enable_thinking=bool(enable_thinking),
+            thinking_budget_policy_version=QWEN_THINKING_BUDGET_POLICY_VERSION,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -606,6 +621,7 @@ class QwenVLBase:
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             enable_thinking=enable_thinking,
+            thinking_budget_policy_version=QWEN_THINKING_BUDGET_POLICY_VERSION,
             effective_duration_seconds=effective_duration_seconds,
             video_prompt_contract_version=resolved_duration.get("contract_version") if resolved_duration else None,
             mask_prompt_contract_version=MASK_PROMPT_CONTRACT_VERSION if mask_hash else None,
@@ -655,6 +671,23 @@ class QwenVLBase:
                 seed=seed,
                 preset_name=llm_input_preset_name or preset_prompt,
             )
+            text = clean_model_output(
+                raw_text,
+                OutputCleanConfig(
+                    mode="text",
+                    strip_think=True,
+                    strip_code_fences=False,
+                    strip_role_prefixes=False,
+                    strip_json_wrappers=False,
+                    strip_leading_preamble=False,
+                    strip_planning=False,
+                ),
+            ).strip()
+            if not text:
+                raise RuntimeError(
+                    "[QwenVL HF] Generation returned no usable prompt after removing reasoning; "
+                    "the result was not cached or saved. Try disabling thinking or increasing the output token limit."
+                )
             text = ensure_video_prompt_duration(
                 text,
                 duration_preset_name,

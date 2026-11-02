@@ -180,6 +180,27 @@ class SecurityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'exceeds server-side limit'):
             api_node._validate_thinking_budget(p, 4097)
 
+    def test_qwen_total_completion_budget_disables_thinking_below_cutoff(self):
+        p = self.profile(thinking_mode='qwen', max_tokens_field='max_completion_tokens')
+        effective, budget, plan = api_node._resolve_api_qwen_thinking(p, 3000, True, 8192)
+        self.assertFalse(effective)
+        self.assertEqual(budget, 0)
+        self.assertEqual(plan, (3000, 2000))
+
+    def test_qwen_total_completion_budget_caps_thinking_and_preserves_answer_reserve(self):
+        p = self.profile(thinking_mode='qwen', max_tokens_field='max_completion_tokens')
+        effective, budget, plan = api_node._resolve_api_qwen_thinking(p, 3072, True, 8192)
+        self.assertTrue(effective)
+        self.assertEqual(budget, 1024)
+        self.assertEqual(plan, (3072, 2048))
+
+    def test_qwen_answer_only_max_tokens_keeps_provider_budget_semantics(self):
+        p = self.profile(thinking_mode='qwen')
+        self.assertEqual(
+            api_node._resolve_api_qwen_thinking(p, 3000, True, 8192),
+            (True, 8192, None),
+        )
+
     def test_allowed_models_requires_strings(self):
         with self.assertRaisesRegex(ValueError, 'list of strings'):
             self.profile(allowed_models=[123])
@@ -235,6 +256,26 @@ class SecurityTests(unittest.TestCase):
 
     def test_remote_node_always_reruns(self):
         self.assertTrue(math.isnan(api_node.ThinkingLLMOpenAICompatibleAPI.IS_CHANGED()))
+
+    def test_generation_rejects_reasoning_only_provider_responses(self):
+        for message in (
+            {'content': '', 'reasoning_content': 'still planning'},
+            {'content': '<think>x</think>'},
+        ):
+            with self.subTest(message=message):
+                response = mock.MagicMock()
+                response.__enter__.return_value = response
+                response.headers = {'Content-Type': 'application/json'}
+                response.read.return_value = json.dumps({'choices': [{'message': message}]}).encode()
+                with mock.patch.object(api_node, '_resolve_profile', return_value=self.profile()), \
+                     mock.patch.object(api_node, '_authorization_headers', return_value={}), \
+                     mock.patch.object(api_node, '_open_request', return_value=response):
+                    with self.assertRaisesRegex(RuntimeError, 'no final answer'):
+                        api_node.ThinkingLLMOpenAICompatibleAPI().generate(
+                            api_profile='Production', model_name='test-model', system_prompt='', prompt='test',
+                            max_tokens=1000, temperature=0.7, top_p=0.9, seed=1, enable_thinking=False,
+                            thinking_budget=0, stream_tokens_to_terminal=False, timeout_seconds=30,
+                        )
 
     def test_image_support_is_fail_closed_for_custom_profiles(self):
         p = self.profile()

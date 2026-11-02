@@ -21,6 +21,11 @@ from pathlib import Path
 
 from AILab_OutputCleaner import OutputCleanConfig, clean_model_output
 from AILab_StreamDisplay import compose_streamed_model_output, extract_stream_token, get_thinking_stream_display
+from thinkingllm_core.prompt_contracts import (
+    QWEN_MIN_REASONING_BUDGET_TOKENS,
+    resolve_qwen_output_token_plan,
+    resolve_qwen_thinking_mode,
+)
 
 PACKAGE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_PROFILE_FILE = PACKAGE_DIR / "thinkingllm_api_profiles.json"
@@ -513,6 +518,36 @@ def _validate_thinking_budget(profile: dict, value: int) -> int:
     return value
 
 
+def _resolve_api_qwen_thinking(profile: dict, max_tokens: int, enabled: bool, requested_budget: int):
+    """Apply the shared cutoff when the profile's output limit includes reasoning."""
+    if (
+        profile.get("thinking_mode") != "qwen"
+        or profile.get("max_tokens_field") != "max_completion_tokens"
+    ):
+        return bool(enabled), requested_budget, None
+
+    available_output, answer_reserve, reasoning_budget = resolve_qwen_output_token_plan(max_tokens)
+    minimum_reasoning = QWEN_MIN_REASONING_BUDGET_TOKENS
+    if requested_budget > 0:
+        minimum_reasoning = min(minimum_reasoning, requested_budget)
+    effective_thinking = resolve_qwen_thinking_mode(
+        enabled,
+        available_output,
+        label="ThinkingLLM API",
+        min_reasoning_tokens=minimum_reasoning,
+        answer_reserve_tokens=answer_reserve,
+    )
+    if effective_thinking:
+        effective_budget = (
+            min(reasoning_budget, requested_budget)
+            if requested_budget > 0
+            else reasoning_budget
+        )
+    else:
+        effective_budget = 0
+    return effective_thinking, effective_budget, (available_output, answer_reserve)
+
+
 def _validate_input_text(profile: dict, system_prompt, prompt) -> tuple[str, str]:
     if system_prompt is not None and not isinstance(system_prompt, str):
         raise ValueError("system_prompt must be a string.")
@@ -792,6 +827,21 @@ class ThinkingLLMOpenAICompatibleAPI:
         timeout = _validate_timeout(profile, timeout_seconds)
         temperature, top_p, seed, thinking_budget = _validate_sampling(temperature, top_p, seed, thinking_budget)
         thinking_budget = _validate_thinking_budget(profile, thinking_budget)
+        effective_thinking, effective_thinking_budget, qwen_token_plan = _resolve_api_qwen_thinking(
+            profile,
+            max_out,
+            enable_thinking,
+            thinking_budget,
+        )
+        if qwen_token_plan is not None and (
+            effective_thinking != enable_thinking or effective_thinking_budget != thinking_budget
+        ):
+            available_output, answer_reserve = qwen_token_plan
+            print(
+                f"[ThinkingLLM API] Qwen output preflight: available_output={available_output}, "
+                f"reasoning_budget={effective_thinking_budget}, answer_reserve={answer_reserve}, "
+                f"thinking={'enabled' if effective_thinking else 'disabled'}."
+            )
         system_text, prompt_text = _validate_input_text(profile, system_prompt, prompt)
         user_content, image_supplied = _build_user_content(profile, prompt_text, image=image, image_url=image_url)
 
@@ -810,9 +860,9 @@ class ThinkingLLMOpenAICompatibleAPI:
         if profile.get("send_seed"):
             request_body["seed"] = seed
         if profile.get("thinking_mode") == "qwen":
-            request_body["enable_thinking"] = enable_thinking
-            if thinking_budget > 0:
-                request_body["thinking_budget"] = thinking_budget
+            request_body["enable_thinking"] = effective_thinking
+            if effective_thinking_budget > 0:
+                request_body["thinking_budget"] = effective_thinking_budget
         request_body.update(_parse_extra_json(extra_body_json, profile.get("allowed_extra_body_fields", [])))
         request_body["stream"] = True
 
@@ -910,6 +960,12 @@ class ThinkingLLMOpenAICompatibleAPI:
                 strip_json_wrappers=False, strip_leading_preamble=False, strip_planning=False,
             ),
         )
+        if not response_text.strip():
+            raise RuntimeError(
+                f"ThinkingLLM API profile {profile['name']!r} returned no final answer "
+                "(empty or reasoning-only output). Check the provider's thinking settings "
+                "and completion token limit before retrying."
+            )
         return (response_text, raw_trace)
 
 

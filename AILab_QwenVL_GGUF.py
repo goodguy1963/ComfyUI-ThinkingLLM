@@ -76,11 +76,15 @@ from thinkingllm_core.model_access import (
     resolve_model_catalog_name,
 )
 from thinkingllm_core.prompt_contracts import (
+    QWEN_MAX_REASONING_BUDGET_TOKENS,
+    QWEN_MIN_FINAL_ANSWER_TOKENS,
+    QWEN_THINKING_BUDGET_POLICY_VERSION,
     VIDEO_DURATION_INPUT,
     apply_qwen_soft_thinking_directive,
     apply_video_duration_context,
     ensure_video_prompt_duration,
     estimate_qwen_text_tokens,
+    resolve_qwen_output_token_plan,
     resolve_qwen_thinking_mode,
     resolve_video_duration,
     validate_minimax_reference_request,
@@ -682,6 +686,35 @@ def _filter_kwargs_for_callable(fn, kwargs: dict) -> dict:
     return {k: v for k, v in kwargs.items() if k in allowed}
 
 
+def _supports_reasoning_budget(llm) -> bool:
+    """Return true only when llama-cpp exposes the full per-call reasoning budget API."""
+    completion_fn = getattr(llm, "create_chat_completion", None)
+    if not callable(completion_fn):
+        return False
+    try:
+        parameters = inspect.signature(completion_fn).parameters
+    except Exception:
+        return False
+    required = {
+        "reasoning_budget",
+        "reasoning_start",
+        "reasoning_end",
+        "reasoning_start_in_prompt",
+    }
+    return all(
+        name in parameters
+        and parameters[name].kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        for name in required
+    )
+
+
+def _require_nonempty_final_text(text: str, *, source: str) -> str:
+    """Reject empty final output before it can be persisted as a successful result."""
+    if not isinstance(text, str) or not text.strip():
+        raise RuntimeError(f"[{source}] Generation produced no usable final text; empty output was not saved or cached.")
+    return text
+
+
 def _unexpected_kwarg_names_from_type_error(exc: TypeError) -> list[str]:
     message = str(exc or "")
     matches = re.findall(r"unexpected keyword argument(?:\(s\))?\s+'([^']+)'", message)
@@ -714,7 +747,9 @@ def _select_mmproj_handler_class(model_name: str, arch: str | None):
 
     name = (model_name or "").lower()
     architecture = (arch or "").lower()
-    if "gemma-4" in name or "gemma4" in name or architecture == "gemma4":
+    if architecture in ("qwen35", "qwen35moe") or "qwen3.5-" in name:
+        preferred = ("Qwen35ChatHandler", "Qwen3VLChatHandler")
+    elif "gemma-4" in name or "gemma4" in name or architecture == "gemma4":
         preferred = ("Gemma4ChatHandler",)
     elif "qwen2.5" in name or "qwen25" in name or architecture in ("qwen2vl", "qwen25vl"):
         preferred = ("Qwen25VLChatHandler", "Qwen3VLChatHandler")
@@ -730,6 +765,25 @@ def _select_mmproj_handler_class(model_name: str, arch: str | None):
         "[QwenVL] Missing multimodal chat handler for this model. "
         f"Tried: {', '.join(preferred)}. Install/update llama-cpp-python."
     )
+
+
+def _set_chat_handler_thinking(chat_handler, enable_thinking: bool) -> None:
+    """Update the state read by llama-cpp-python's model-specific Jinja handler."""
+    if chat_handler is None:
+        return
+    enabled = bool(enable_thinking)
+    if hasattr(chat_handler, "enable_thinking"):
+        try:
+            chat_handler.enable_thinking = enabled
+        except Exception:
+            pass
+    template_arguments = getattr(chat_handler, "extra_template_arguments", None)
+    if isinstance(template_arguments, dict):
+        template_arguments["enable_thinking"] = enabled
+    for attr_name in ("chat_template_kwargs", "_chat_template_kwargs"):
+        current = getattr(chat_handler, attr_name, None)
+        if isinstance(current, dict):
+            current["enable_thinking"] = enabled
 
 
 def _resample_mono_audio(samples, source_rate: int, target_rate: int = GGUF_AUDIO_TARGET_SAMPLE_RATE):
@@ -1195,6 +1249,8 @@ class QwenVLGGUFBase:
         if self.llm is None or not self._uses_chat_template_thinking():
             return
         template_kwargs = {"enable_thinking": bool(enable_thinking)}
+        _set_chat_handler_thinking(self.chat_handler, enable_thinking)
+        _set_chat_handler_thinking(getattr(self.llm, "chat_handler", None), enable_thinking)
         for attr_name in ("chat_template_kwargs", "_chat_template_kwargs"):
             try:
                 current = getattr(self.llm, attr_name, None)
@@ -1426,6 +1482,7 @@ class QwenVLGGUFBase:
         arch = read_gguf_architecture(model_path)
         self.gguf_arch = arch
         is_qwen35 = arch in ("qwen35", "qwen35moe") if arch else "qwen3.5-" in model_name.lower()
+        self.is_qwen35 = bool(is_qwen35)
         self.supports_qwen_soft_think = (
             bool(is_qwen35 or arch == "qwen3")
             if arch
@@ -1496,6 +1553,8 @@ class QwenVLGGUFBase:
                 "force_reasoning": False,
                 "verbose": False,
             }
+            if is_qwen35:
+                mmproj_kwargs["enable_thinking"] = bool(enable_thinking)
             mmproj_kwargs = _filter_mmproj_handler_kwargs(handler_cls, mmproj_kwargs)
             if "image_max_tokens" not in mmproj_kwargs:
                 print(
@@ -1532,8 +1591,9 @@ class QwenVLGGUFBase:
             state_label = "enabled" if thinking_enabled else "disabled"
             print(f"[QwenVL] Qwen architecture detected (arch={arch}): Thinking {state_label} via chat template.")
 
-        if has_mmproj and self.chat_handler is not None:
+        if self.chat_handler is not None:
             llm_kwargs["chat_handler"] = self.chat_handler
+        if has_mmproj and self.chat_handler is not None:
             llm_kwargs["image_min_tokens"] = 1024
             llm_kwargs["image_max_tokens"] = img_max
 
@@ -1680,6 +1740,7 @@ class QwenVLGGUFBase:
         model_name: str = "",
         stream_to_terminal: bool = False,
         enable_thinking: bool = True,
+        reasoning_budget: int = 0,
         auto_finalization_retry: bool = False,
         top_k: int | None = None,
         preset_name: str = "",
@@ -1689,10 +1750,22 @@ class QwenVLGGUFBase:
         ensure_cuda_vram_headroom("QwenVL GGUF", min_free_gb=1.0, min_free_ratio=0.08)
         self._raise_if_unsafe_native_multimodal_path(images_b64, audio_b64 or [])
         supports_soft_think = getattr(self, "supports_qwen_soft_think", False)
+        supports_reasoning_budget = supports_soft_think and _supports_reasoning_budget(self.llm)
+        try:
+            reasoning_budget = max(0, int(reasoning_budget or 0))
+        except (TypeError, ValueError, OverflowError):
+            reasoning_budget = 0
         if supports_soft_think:
             directive = "/think" if enable_thinking else "/no_think"
             if not stream_to_terminal:
                 print(f"[QwenVL] Qwen3 GGUF detected: Thinking {'enabled' if enable_thinking else 'disabled'} via chat template and {directive}.")
+                if enable_thinking and supports_reasoning_budget and reasoning_budget > 0:
+                    print(f"[QwenVL GGUF] Per-request reasoning budget enforced: {reasoning_budget} tokens.")
+                elif enable_thinking:
+                    print(
+                        "[QwenVL GGUF] Backend has no explicit per-request reasoning budget; "
+                        "the shared preflight cutoff applies, but the estimated answer reserve is not a hard cap."
+                    )
         def _run_completion(
             system_prompt_text: str,
             user_prompt_text: str,
@@ -1704,10 +1777,35 @@ class QwenVLGGUFBase:
             attempt_enable_thinking: bool | None = None,
         ) -> tuple[str, str]:
             current_enable_thinking = enable_thinking if attempt_enable_thinking is None else bool(attempt_enable_thinking)
+            handler = self.chat_handler or getattr(self.llm, "chat_handler", None)
+            handler_controls_thinking = hasattr(handler, "enable_thinking")
+            if (
+                getattr(self, "is_qwen35", False)
+                and not current_enable_thinking
+                and not supports_reasoning_budget
+                and not handler_controls_thinking
+            ):
+                raise RuntimeError(
+                    "[QwenVL GGUF] Cannot reliably disable Qwen3.5 thinking for this request: "
+                    "the loaded llama.cpp backend exposes no reasoning-budget control and the active chat "
+                    "handler exposes no enable_thinking template switch. Upgrade llama-cpp-python or use "
+                    "a Qwen3.5 chat handler that supports enable_thinking."
+                )
+            reasoning_kwargs = {}
+            if supports_reasoning_budget:
+                handler_opens_reasoning = bool(
+                    current_enable_thinking and hasattr(handler, "enable_thinking")
+                )
+                reasoning_kwargs = {
+                    "reasoning_budget": reasoning_budget if current_enable_thinking else 0,
+                    "reasoning_start": "<think>",
+                    "reasoning_end": "</think>",
+                    "reasoning_start_in_prompt": handler_opens_reasoning,
+                }
             effective_user_prompt = apply_qwen_soft_thinking_directive(
                 user_prompt_text,
                 current_enable_thinking,
-                supports_soft_switch=supports_soft_think,
+                supports_soft_switch=(supports_soft_think and not getattr(self, "is_qwen35", False)),
             )
             if self.llm is not None and hasattr(self.llm, "reset"):
                 try:
@@ -1776,6 +1874,7 @@ class QwenVLGGUFBase:
                     stop=stop_tokens,
                     stream=True,
                     **sampler_kwargs,
+                    **reasoning_kwargs,
                 )
                 for chunk in result:
                     throw_exception_if_processing_interrupted()
@@ -1840,6 +1939,7 @@ class QwenVLGGUFBase:
                         stop=stop_tokens,
                         stream=True,
                         **sampler_kwargs,
+                        **reasoning_kwargs,
                     )
                     for chunk in result:
                         if abort_event.is_set():
@@ -2068,6 +2168,7 @@ class QwenVLGGUFBase:
             offload_kqv=bool(offload_kqv),
             ctx_checkpoints=ctx_checkpoints,
             enable_thinking=bool(enable_thinking),
+            thinking_budget_policy_version=QWEN_THINKING_BUDGET_POLICY_VERSION,
             auto_finalization_retry=bool(auto_finalization_retry),
             mask_mode=mask_mode,
             max_tokens=max_tokens,
@@ -2119,6 +2220,7 @@ class QwenVLGGUFBase:
             top_p=top_p,
             repetition_penalty=repetition_penalty,
             enable_thinking=enable_thinking,
+            thinking_budget_policy_version=QWEN_THINKING_BUDGET_POLICY_VERSION,
             effective_duration_seconds=effective_duration_seconds,
             video_prompt_contract_version=resolved_duration.get("contract_version") if resolved_duration else None,
             mask_prompt_contract_version=MASK_PROMPT_CONTRACT_VERSION if mask_hash else None,
@@ -2206,14 +2308,31 @@ class QwenVLGGUFBase:
                         "You are a helpful vision-language assistant.",
                         prompt,
                     ) + len(images_b64) * max(1024, int(attempt_image_max_tokens or 1024)) + len(audio_b64) * 2048
+                    available_output, answer_reserve, reasoning_budget = resolve_qwen_output_token_plan(
+                        max_tokens,
+                        prompt_tokens=estimated_prompt_tokens,
+                        context_window=context_window,
+                        min_answer_reserve_tokens=QWEN_MIN_FINAL_ANSWER_TOKENS,
+                        max_reasoning_tokens=QWEN_MAX_REASONING_BUDGET_TOKENS,
+                    )
                     effective_thinking = resolve_qwen_thinking_mode(
                         enable_thinking,
                         max_tokens,
                         label="QwenVL GGUF",
                         prompt_tokens=estimated_prompt_tokens,
                         context_window=context_window,
+                        answer_reserve_tokens=answer_reserve,
                         quiet=stream_to_terminal,
                     )
+                    if not effective_thinking:
+                        reasoning_budget = 0
+                    if not stream_to_terminal:
+                        print(
+                            f"[QwenVL GGUF] Token preflight: "
+                            f"available_output={available_output}, "
+                            f"reasoning_cap={reasoning_budget}, "
+                            f"final_answer_reserve={answer_reserve}."
+                        )
                     print(f"[QwenVL GGUF DEBUG] Loading model...")
                     self._load_model(
                         model_name=model_name,
@@ -2257,6 +2376,7 @@ class QwenVLGGUFBase:
                         model_name=model_name,
                         stream_to_terminal=stream_to_terminal,
                         enable_thinking=effective_thinking,
+                        reasoning_budget=reasoning_budget,
                         auto_finalization_retry=auto_finalization_retry,
                         top_k=top_k,
                         preset_name=preset_prompt,
@@ -2292,6 +2412,7 @@ class QwenVLGGUFBase:
                 duration_seconds,
                 source_prompt_text=custom_prompt,
             )
+            text = _require_nonempty_final_text(text, source="QwenVL GGUF")
 
             print(f"[QwenVL GGUF DEBUG] Generation completed. Text length: {len(text) if text else 0}")
             print(f"[QwenVL GGUF DEBUG] Generated text: {text[:100] if text else 'EMPTY'}...")

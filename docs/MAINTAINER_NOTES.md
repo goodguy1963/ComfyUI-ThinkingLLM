@@ -23,6 +23,10 @@
 - Keep the same version mirrored in the `__init__.py` metadata block and `custom_nodes.json` so local ComfyUI metadata and manager-facing metadata stay aligned.
 - README still contains historical upstream links and changelog references beyond the top-level fork identity; that is acceptable for attribution, but a docs pass should normalize publish-facing instructions before release.
 
+## ThinkingLLM 3.1.3 release record
+
+Version metadata is synchronized at **3.1.3** in `pyproject.toml`, `__init__.py`, and `custom_nodes.json`. This release unifies Qwen thinking preflight, fixes Qwen3.5 template control, and prevents empty or reasoning-only results from being stored as successful output. See `update.md` for validation details.
+
 ## ThinkingLLM 3.1.1 release record
 
 Version metadata is synchronized at **3.1.1** in `pyproject.toml`, `__init__.py`, and `custom_nodes.json`. This release expands audio, mask-focused image, and video prompt workflows, and adds security controls for audio paths and resource use, pinned Transformers remote code, and terminal output. See `update.md` for the change summary and focused validation.

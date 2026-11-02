@@ -5,7 +5,12 @@ import re
 
 QWEN_MIN_REASONING_BUDGET_TOKENS = 1024
 QWEN_FINAL_ANSWER_RESERVE_TOKENS = 256
+QWEN_MIN_FINAL_ANSWER_TOKENS = 512
+QWEN_FINAL_ANSWER_RESERVE_NUMERATOR = 2
+QWEN_FINAL_ANSWER_RESERVE_DENOMINATOR = 3
+QWEN_MAX_REASONING_BUDGET_TOKENS = 2048
 QWEN_CONTEXT_OVERHEAD_TOKENS = 128
+QWEN_THINKING_BUDGET_POLICY_VERSION = 4
 _QWEN_SOFT_SWITCHES = {"/think", "/no_think", "/nothink"}
 MINIMAX_H3_REFERENCE_PRESET = "🖼️ MiniMax H3 Reference-to-Video"
 VIDEO_PROMPT_CONTRACT_VERSION = 10
@@ -72,6 +77,69 @@ def resolve_qwen_context_window(config, fallback=32768):
     return int(fallback)
 
 
+def resolve_qwen_output_token_plan(
+    max_tokens,
+    *,
+    prompt_tokens=None,
+    context_window=None,
+    answer_reserve_tokens=None,
+    min_answer_reserve_tokens=QWEN_MIN_FINAL_ANSWER_TOKENS,
+    max_reasoning_tokens=None,
+    context_overhead_tokens=QWEN_CONTEXT_OVERHEAD_TOKENS,
+):
+    """Estimate usable output tokens and reserve answer space before generation.
+
+    When no explicit answer reserve is supplied, reserve at least two thirds of
+    the available output for the final answer. This is a conservative planning
+    heuristic; it cannot predict how many tokens a model will actually spend
+    reasoning unless the backend enforces the returned reasoning budget.
+    """
+    try:
+        requested_output = max(0, int(max_tokens or 0))
+    except (TypeError, ValueError, OverflowError):
+        requested_output = 0
+    try:
+        prompt_token_count = max(0, int(prompt_tokens or 0))
+    except (TypeError, ValueError, OverflowError):
+        prompt_token_count = 0
+
+    available_output = requested_output
+    if context_window is not None:
+        try:
+            context_limit = int(context_window)
+            context_overhead = max(0, int(context_overhead_tokens))
+        except (TypeError, ValueError, OverflowError):
+            context_limit = 0
+            context_overhead = 0
+        if context_limit > 0:
+            remaining_context = max(0, context_limit - prompt_token_count - context_overhead)
+            available_output = min(available_output, remaining_context)
+
+    if answer_reserve_tokens is None:
+        try:
+            min_answer_reserve = max(0, int(min_answer_reserve_tokens))
+        except (TypeError, ValueError, OverflowError):
+            min_answer_reserve = QWEN_MIN_FINAL_ANSWER_TOKENS
+        scaled_answer_reserve = (
+            available_output * QWEN_FINAL_ANSWER_RESERVE_NUMERATOR
+            + QWEN_FINAL_ANSWER_RESERVE_DENOMINATOR - 1
+        ) // QWEN_FINAL_ANSWER_RESERVE_DENOMINATOR
+        answer_reserve = max(min_answer_reserve, scaled_answer_reserve)
+    else:
+        try:
+            answer_reserve = max(0, int(answer_reserve_tokens))
+        except (TypeError, ValueError, OverflowError):
+            answer_reserve = QWEN_MIN_FINAL_ANSWER_TOKENS
+
+    reasoning_budget = max(0, available_output - answer_reserve)
+    if max_reasoning_tokens is not None:
+        try:
+            reasoning_budget = min(reasoning_budget, max(0, int(max_reasoning_tokens)))
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return available_output, answer_reserve, reasoning_budget
+
+
 def resolve_qwen_thinking_mode(
     requested_enable,
     max_tokens,
@@ -80,24 +148,40 @@ def resolve_qwen_thinking_mode(
     prompt_tokens=None,
     context_window=None,
     min_reasoning_tokens=QWEN_MIN_REASONING_BUDGET_TOKENS,
-    answer_reserve_tokens=QWEN_FINAL_ANSWER_RESERVE_TOKENS,
+    answer_reserve_tokens=None,
+    min_answer_reserve_tokens=QWEN_MIN_FINAL_ANSWER_TOKENS,
     context_overhead_tokens=QWEN_CONTEXT_OVERHEAD_TOKENS,
     quiet=False,
 ):
     """Enable thinking only when requested and enough generation budget remains."""
     if not bool(requested_enable):
         return False
-    requested_output = max(0, int(max_tokens or 0))
-    available_output = requested_output
-    prompt_token_count = max(0, int(prompt_tokens or 0))
-    context_limit = int(context_window) if context_window is not None else None
-
-    if context_limit is not None:
-        remaining_context = max(0, context_limit - prompt_token_count - int(context_overhead_tokens))
-        available_output = min(available_output, remaining_context) if available_output else remaining_context
-
-    minimum_required = int(min_reasoning_tokens) + int(answer_reserve_tokens)
-    if available_output <= 0 or available_output < minimum_required:
+    try:
+        requested_output = max(0, int(max_tokens or 0))
+    except (TypeError, ValueError, OverflowError):
+        requested_output = 0
+    try:
+        prompt_token_count = max(0, int(prompt_tokens or 0))
+    except (TypeError, ValueError, OverflowError):
+        prompt_token_count = 0
+    try:
+        context_limit = int(context_window) if context_window is not None else None
+    except (TypeError, ValueError, OverflowError):
+        context_limit = None
+    available_output, answer_reserve, reasoning_budget = resolve_qwen_output_token_plan(
+        requested_output,
+        prompt_tokens=prompt_token_count,
+        context_window=context_limit,
+        answer_reserve_tokens=answer_reserve_tokens,
+        min_answer_reserve_tokens=min_answer_reserve_tokens,
+        context_overhead_tokens=context_overhead_tokens,
+    )
+    try:
+        minimum_reasoning = max(0, int(min_reasoning_tokens))
+    except (TypeError, ValueError, OverflowError):
+        minimum_reasoning = QWEN_MIN_REASONING_BUDGET_TOKENS
+    minimum_required = minimum_reasoning + answer_reserve
+    if available_output <= 0 or reasoning_budget < minimum_reasoning:
         if context_limit is not None:
             budget_note = (
                 f"max_tokens={requested_output}, prompt_tokens={prompt_token_count}, "
@@ -108,7 +192,7 @@ def resolve_qwen_thinking_mode(
         if not quiet:
             print(
                 f"[{label}] Thinking requested but {budget_note} is below the required {minimum_required} tokens "
-                f"({int(min_reasoning_tokens)} reasoning + {int(answer_reserve_tokens)} answer reserve); "
+                f"({minimum_reasoning} reasoning + {answer_reserve} answer reserve); "
                 "forcing non-thinking mode to preserve answer space."
             )
         return False

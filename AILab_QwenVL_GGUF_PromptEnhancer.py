@@ -51,11 +51,16 @@ from thinkingllm_core.model_access import (
     resolve_model_catalog_name,
 )
 from thinkingllm_core.prompt_contracts import (
+    QWEN_MAX_REASONING_BUDGET_TOKENS,
+    QWEN_MIN_FINAL_ANSWER_TOKENS,
+    QWEN_MIN_REASONING_BUDGET_TOKENS,
+    QWEN_THINKING_BUDGET_POLICY_VERSION,
     VIDEO_DURATION_INPUT,
     apply_qwen_soft_thinking_directive,
     apply_video_duration_context,
     ensure_video_prompt_duration,
     estimate_qwen_text_tokens,
+    resolve_qwen_output_token_plan,
     resolve_qwen_thinking_mode,
     resolve_video_duration,
     validate_minimax_source_duration,
@@ -82,6 +87,7 @@ from AILab_QwenVL_GGUF import (
     _filter_kwargs_for_callable,
     _find_existing_local_file_in_dirs,
     _gguf_search_dirs,
+    _supports_reasoning_budget,
 )
 
 
@@ -90,7 +96,7 @@ GGUF_PROMPT_TOOLTIPS = {
     "prompt_text": "Type your scene idea or video description here; no separate text node is needed. The selected style transforms this text into a generation prompt. For image-to-video styles, include any source-frame details in your text because this node does not receive images.",
     "preset_system_prompt": "Preset enhancement style. Use Custom Only when you want custom_system_prompt to fully control the instruction.",
     "custom_system_prompt": "Optional extra instruction. Required when using Custom Only; otherwise it is prepended to the selected style.",
-    "max_tokens": "Maximum new tokens for the enhanced prompt. Increase only when the model truncates useful detail.",
+    "max_tokens": "Maximum new tokens for the enhanced prompt. The node dynamically caps Qwen reasoning to preserve at least two thirds of the available output for the final prompt.",
     "temperature": "Sampling randomness. Lower is more stable; higher is more varied.",
     "top_p": "Nucleus sampling cutoff. Lower values restrict token choice; 0.9 is a balanced default.",
     "repetition_penalty": "Values above 1.0 reduce repeated phrases in the enhanced prompt.",
@@ -100,8 +106,8 @@ GGUF_PROMPT_TOOLTIPS = {
     "seed": "Sampling seed. Reusing it with identical inputs can reuse the saved prompt result.",
     "keep_last_prompt": "Return the saved per-node prompt instead of generating a new one when available.",
     "stream_tokens_to_terminal": "Show clean wrapped generated tokens in the ComfyUI terminal. Streaming bypasses fixed-seed reuse for a fresh run.",
-    "enable_thinking": "Enable model reasoning/thinking when supported. The node still returns the cleaned final prompt, so reasoning may be hidden or empty.",
-    "auto_finalization_retry": "If enabled, runs an extra LLM completion when the first output is empty or reasoning-only. Disabled by default so one node execution performs one generation pass.",
+    "enable_thinking": "Request model reasoning/thinking when supported. The node calculates a reasoning cap before generation, reserves room for the final prompt, and disables thinking automatically when the available budget is too small or the backend cannot cap it.",
+    "auto_finalization_retry": "If enabled, allows up to two finalization retries after an empty or reasoning-only response. The node automatically makes one direct-answer recovery attempt for reasoning-only output.",
     "hf_token": "Optional Hugging Face access token for private or gated GGUF downloads. It is passed only to the download call, never logged or cached, and the in-memory copy is dropped after the download attempt. Clear this field before saving or sharing workflows.",
 }
 
@@ -429,6 +435,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
     def __init__(self):
         self.llm = None
         self.current_signature = None
+        self.is_qwen35 = False
         self.gguf_models = self.load_gguf_models()
         self.styles = STYLES
         register_active_gguf_loader(self)
@@ -789,10 +796,14 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         arch = read_gguf_architecture(resolved)
         self.gguf_arch = arch
         is_qwen = (arch and any(a in arch for a in ("qwen35", "qwen35moe", "qwen3", "qwen"))) or "qwen3.5-" in model_name.lower() or "qwen3-" in model_name.lower()
+        normalized_arch = re.sub(r"[^a-z0-9]", "", str(arch or "").lower())
+        model_name_lower = model_name.lower()
+        is_qwen35 = normalized_arch in {"qwen35", "qwen35moe"} or "qwen3.5-" in model_name_lower
+        self.is_qwen35 = bool(is_qwen35)
         self.supports_qwen_soft_think = (
-            bool(arch and (arch == "qwen3" or arch.startswith("qwen35")))
-            if arch
-            else ("qwen3-" in model_name.lower() or "qwen3.5-" in model_name.lower())
+            normalized_arch in {"qwen3", "qwen35", "qwen35moe", "qwen3vl"}
+            or "qwen3-" in model_name_lower
+            or "qwen3.5-" in model_name_lower
         )
         if is_qwen:
             thinking_state = bool(enable_thinking)
@@ -831,6 +842,8 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         stream_to_terminal=False,
         initial_stage_label="INITIAL GENERATION",
         enable_thinking=True,
+        reasoning_budget=0,
+        answer_reserve_tokens=0,
         auto_finalization_retry=False,
         preset_name="",
     ):
@@ -838,10 +851,45 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         stream_display = TerminalStreamDisplay("QwenVL GGUF", suppress_planning=True, compact=True) if stream_to_terminal else None
         supports_soft_think = getattr(self, "supports_qwen_soft_think", False)
         is_video_preset = bool(resolve_video_duration(preset_name, 5.0))
+        supports_reasoning_budget = supports_soft_think and _supports_reasoning_budget(self.llm)
+        reasoning_budget = max(0, int(reasoning_budget or 0))
+        if enable_thinking and supports_soft_think and reasoning_budget <= 0:
+            enable_thinking = False
+            print(
+                "[QwenVL PromptEnhancer GGUF] The preflight left no safe reasoning budget; "
+                "disabling thinking before generation."
+            )
+        elif (
+            enable_thinking
+            and supports_soft_think
+            and not supports_reasoning_budget
+            and reasoning_budget < QWEN_MIN_REASONING_BUDGET_TOKENS
+        ):
+            enable_thinking = False
+            reasoning_budget = 0
+            print(
+                "[QwenVL PromptEnhancer GGUF] The backend cannot enforce a per-request reasoning cap, "
+                f"and the preflight allowance is below {QWEN_MIN_REASONING_BUDGET_TOKENS} tokens; "
+                "disabling thinking to preserve answer space."
+            )
         if supports_soft_think:
             directive = "/think" if enable_thinking else "/no_think"
             if not stream_to_terminal:
-                print(f"[QwenVL] Qwen3 GGUF prompt enhancer: Thinking {'enabled' if enable_thinking else 'disabled'} via chat template and {directive}.")
+                if enable_thinking:
+                    if supports_reasoning_budget:
+                        print(
+                            f"[QwenVL] Qwen GGUF prompt enhancer: Thinking enabled with an enforced "
+                            f"{reasoning_budget}-token cap and a {int(answer_reserve_tokens)}-token "
+                            f"final-answer reserve via chat template and {directive}."
+                        )
+                    else:
+                        print(
+                            f"[QwenVL] Qwen GGUF prompt enhancer: Thinking enabled with a preflight "
+                            f"allowance of {reasoning_budget} tokens and a {int(answer_reserve_tokens)}-token "
+                            "answer reserve. This backend cannot hard-cap reasoning; the reserve is a heuristic."
+                        )
+                else:
+                    print(f"[QwenVL] Qwen GGUF prompt enhancer: Thinking disabled via chat template and {directive}.")
 
         def _call(
             system: str,
@@ -857,7 +905,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             effective_user_prompt = apply_qwen_soft_thinking_directive(
                 user,
                 current_enable_thinking,
-                supports_soft_switch=supports_soft_think,
+                supports_soft_switch=(supports_soft_think and not self.is_qwen35),
             )
             ensure_cuda_vram_headroom("QwenVL PromptEnhancer GGUF", min_free_gb=1.0, min_free_ratio=0.08)
             if self.llm is not None and hasattr(self.llm, "reset"):
@@ -872,8 +920,11 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 {"role": "system", "content": system},
                 {"role": "user", "content": effective_user_prompt},
             ]
-            if assistant_prefill:
-                messages.append({"role": "assistant", "content": assistant_prefill})
+            effective_assistant_prefill = assistant_prefill
+            if supports_soft_think and self.is_qwen35 and not current_enable_thinking:
+                effective_assistant_prefill = f"<think>\n\n</think>\n{effective_assistant_prefill}"
+            if effective_assistant_prefill:
+                messages.append({"role": "assistant", "content": effective_assistant_prefill})
             log_llm_input(
                 "QwenVL PromptEnhancer GGUF",
                 stage_label,
@@ -912,12 +963,22 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                         "seed": seed_val,
                         "stop": ["<|im_end|>", "<|im_start|>"],
                         "stream": True,
+                        "assistant_prefill": bool(effective_assistant_prefill),
                     }
                     if supports_soft_think:
                         completion_kwargs["chat_template_kwargs"] = {
                             "enable_thinking": current_enable_thinking,
                             "thinking_mode": "enabled" if current_enable_thinking else "disabled",
                         }
+                    if supports_soft_think and supports_reasoning_budget:
+                        completion_kwargs.update(
+                            {
+                                "reasoning_budget": reasoning_budget if current_enable_thinking else 0,
+                                "reasoning_start": "<think>",
+                                "reasoning_end": "</think>",
+                                "reasoning_start_in_prompt": False,
+                            }
+                        )
                     completion_kwargs = _filter_kwargs_for_callable(getattr(llm, "create_chat_completion"), completion_kwargs)
                     response = llm.create_chat_completion(**completion_kwargs)
                     for chunk in response:
@@ -1001,14 +1062,30 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         best_cleaned = cleaned.strip() if _preset_output_is_usable(cleaned.strip(), preset_name) else ""
         if best_cleaned:
             return best_cleaned, "\n\n".join(raw_trace_parts)
-        if not (auto_finalization_retry or is_video_preset):
+        reasoning_only = bool(
+            not best_cleaned
+            and re.match(r"^\s*<think\b", raw or "", flags=re.IGNORECASE)
+        )
+        should_retry = auto_finalization_retry or is_video_preset or reasoning_only
+        if not should_retry:
             return "", "\n\n".join(raw_trace_parts)
 
-        for attempt_number in range(2, _PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS + 1):
+        max_finalization_attempts = (
+            _PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS
+            if auto_finalization_retry or is_video_preset
+            else 2
+        )
+        if reasoning_only and not (auto_finalization_retry or is_video_preset) and not stream_to_terminal:
+            print(
+                "[QwenVL PromptEnhancer GGUF] Reasoning-only response detected; "
+                "retrying once with thinking disabled."
+            )
+
+        for attempt_number in range(2, max_finalization_attempts + 1):
             if stream_to_terminal:
                 print(
                     "[QwenVL PromptEnhancer GGUF] "
-                    f"Finalization attempt {attempt_number}/{_PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS} "
+                    f"Finalization attempt {attempt_number}/{max_finalization_attempts} "
                     "— prior output was empty or reasoning-only"
                 )
             retry_system = (
@@ -1021,7 +1098,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 "Return the final prompt for this original user request. Preserve supported user facts and verbatim dialogue:\n\n"
                 f"{user_prompt}\n"
             )
-            stage_label = f"FINALIZATION ATTEMPT {attempt_number}/{_PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS}"
+            stage_label = f"FINALIZATION ATTEMPT {attempt_number}/{max_finalization_attempts}"
             raw_retry = _call(
                 retry_system,
                 retry_user,
@@ -1041,7 +1118,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
         if stream_to_terminal:
             print(
                 "[QwenVL PromptEnhancer GGUF] "
-                f"Finalization limit reached ({_PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS}/{_PROMPT_ENHANCER_MAX_FINALIZATION_ATTEMPTS}) "
+                f"Finalization limit reached ({max_finalization_attempts}/{max_finalization_attempts}) "
                 "— returning the best cleaned prompt available"
             )
         return best_cleaned, "\n\n".join(raw_trace_parts)
@@ -1090,6 +1167,7 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             enable_thinking=bool(enable_thinking),
             auto_finalization_retry=bool(auto_finalization_retry),
             output_cleaner_version=OUTPUT_CLEANER_VERSION,
+            reasoning_budget_policy_version=QWEN_THINKING_BUDGET_POLICY_VERSION,
             max_tokens=max_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -1119,9 +1197,10 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 custom_system_prompt.strip(),
                 f"english_output={effective_english_output}",
                 f"output_cleaner_version={OUTPUT_CLEANER_VERSION}",
+                f"reasoning_budget_policy_version={QWEN_THINKING_BUDGET_POLICY_VERSION}",
             ) if part
         )
-        cache_key = get_cache_key(model_name, preset_system_prompt, cache_prompt, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking, effective_duration_seconds=effective_duration_seconds, video_prompt_contract_version=resolved_duration.get("contract_version") if resolved_duration else None)
+        cache_key = get_cache_key(model_name, preset_system_prompt, cache_prompt, seed=seed, max_tokens=max_tokens, temperature=temperature, top_p=top_p, repetition_penalty=repetition_penalty, enable_thinking=enable_thinking, thinking_budget_policy_version=QWEN_THINKING_BUDGET_POLICY_VERSION, effective_duration_seconds=effective_duration_seconds, video_prompt_contract_version=resolved_duration.get("contract_version") if resolved_duration else None)
 
         # Check cache first (only for random mode)
         if cache_key in PROMPT_CACHE and not stream_tokens_to_terminal:
@@ -1155,14 +1234,32 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 effective_context_window,
                 min(int(context_window or 8192), 8192),
             )
+        available_output_tokens, answer_reserve_tokens, reasoning_budget = resolve_qwen_output_token_plan(
+            max_tokens,
+            prompt_tokens=estimated_prompt_tokens,
+            context_window=effective_context_window,
+            min_answer_reserve_tokens=QWEN_MIN_FINAL_ANSWER_TOKENS,
+            max_reasoning_tokens=QWEN_MAX_REASONING_BUDGET_TOKENS,
+        )
         effective_thinking = resolve_qwen_thinking_mode(
             enable_thinking,
             max_tokens,
             label="QwenVL PromptEnhancer GGUF",
             prompt_tokens=estimated_prompt_tokens,
             context_window=effective_context_window,
+            min_reasoning_tokens=QWEN_MIN_REASONING_BUDGET_TOKENS,
+            answer_reserve_tokens=answer_reserve_tokens,
             quiet=stream_tokens_to_terminal,
         )
+        if not effective_thinking:
+            reasoning_budget = 0
+        if not stream_tokens_to_terminal:
+            print(
+                f"[QwenVL PromptEnhancer GGUF] Token preflight: "
+                f"available_output={available_output_tokens}, "
+                f"reasoning_cap={reasoning_budget}, "
+                f"final_answer_reserve={answer_reserve_tokens}."
+            )
         self._load_model(
             model_name,
             device,
@@ -1184,17 +1281,49 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             stream_to_terminal=stream_tokens_to_terminal,
             initial_stage_label="INITIAL GENERATION",
             enable_thinking=effective_thinking,
+            reasoning_budget=reasoning_budget,
+            answer_reserve_tokens=answer_reserve_tokens,
             auto_finalization_retry=auto_finalization_retry,
             preset_name=preset_system_prompt,
         )
         full_raw_trace = raw_trace
         if effective_english_output:
+            translation_system_prompt = (
+                PROMPT_CONFIG.get("translation_prompt")
+                or "Return a single English paragraph (150-300 words). No prefixes, bullets, JSON, or </think>. "
+                "Cover subject, environment, lighting, camera settings, composition, color/texture, and style. Output only the prompt."
+            )
+            translation_prompt_tokens = estimate_qwen_text_tokens(translation_system_prompt, enhanced)
+            translation_available, translation_answer_reserve, translation_reasoning_budget = (
+                resolve_qwen_output_token_plan(
+                    max_tokens,
+                    prompt_tokens=translation_prompt_tokens,
+                    context_window=effective_context_window,
+                    min_answer_reserve_tokens=QWEN_MIN_FINAL_ANSWER_TOKENS,
+                    max_reasoning_tokens=QWEN_MAX_REASONING_BUDGET_TOKENS,
+                )
+            )
+            translation_effective_thinking = resolve_qwen_thinking_mode(
+                effective_thinking,
+                max_tokens,
+                label="QwenVL PromptEnhancer GGUF translation",
+                prompt_tokens=translation_prompt_tokens,
+                context_window=effective_context_window,
+                min_reasoning_tokens=QWEN_MIN_REASONING_BUDGET_TOKENS,
+                answer_reserve_tokens=translation_answer_reserve,
+                quiet=stream_tokens_to_terminal,
+            )
+            if not translation_effective_thinking:
+                translation_reasoning_budget = 0
+            if not stream_tokens_to_terminal:
+                print(
+                    f"[QwenVL PromptEnhancer GGUF] Translation token preflight: "
+                    f"available_output={translation_available}, "
+                    f"reasoning_cap={translation_reasoning_budget}, "
+                    f"final_answer_reserve={translation_answer_reserve}."
+                )
             translated, trans_trace = self._invoke_llama(
-                system_prompt=(
-                    PROMPT_CONFIG.get("translation_prompt")
-                    or "Return a single English paragraph (150-300 words). No prefixes, bullets, JSON, or </think>. "
-                    "Cover subject, environment, lighting, camera settings, composition, color/texture, and style. Output only the prompt."
-                ),
+                system_prompt=translation_system_prompt,
                 user_prompt=enhanced,
                 max_tokens=max_tokens,
                 temperature=0.3,
@@ -1203,7 +1332,9 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
                 seed=seed + 1,
                 stream_to_terminal=stream_tokens_to_terminal,
                 initial_stage_label="TRANSLATION STAGE",
-                enable_thinking=effective_thinking,
+                enable_thinking=translation_effective_thinking,
+                reasoning_budget=translation_reasoning_budget,
+                answer_reserve_tokens=translation_answer_reserve,
                 auto_finalization_retry=auto_finalization_retry,
                 preset_name=preset_system_prompt,
             )
@@ -1217,6 +1348,12 @@ class ThinkingLLM_QwenVL_GGUF_PromptEnhancer:
             duration_seconds,
             source_prompt_text=prompt_text,
         )
+
+        if not final.strip():
+            raise RuntimeError(
+                "QwenVL GGUF PromptEnhancer produced no usable final prompt after finalization; "
+                "the empty result was not cached. Check the model output and token budget."
+            )
 
         # Cache the generated text
         PROMPT_CACHE[cache_key] = {
