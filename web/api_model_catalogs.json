@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Curated convenience model lists for the ThinkingLLM API node. These are suggestions only and never override a server-side profile allowed_models allowlist. Maintained by hand; validated by tools/check_api_model_catalogs.py on every PR, push, and release.",
-  "updated_at": "2026-11-01",
+  "updated_at": "2026-11-02",
   "profiles": {
     "OpenAI": {
       "provider": "OpenAI",
@@ -733,6 +733,11 @@
           "vision": false
         },
         {
+          "id": "qwen/qwen3.8-27b",
+          "label": "qwen/qwen3.8-27b",
+          "vision": false
+        },
+        {
           "id": "thedrummer/unslopnemo-12b",
           "label": "thedrummer/unslopnemo-12b",
           "vision": false
@@ -960,11 +965,6 @@
         {
           "id": "qwen/qwen3.7-plus",
           "label": "qwen/qwen3.7-plus",
-          "vision": false
-        },
-        {
-          "id": "qwen/qwen3.8-27b",
-          "label": "qwen/qwen3.8-27b",
           "vision": false
         },
         {
