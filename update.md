@@ -1,5 +1,17 @@
 # ComfyUI-QwenVL Update Log
 
+## Version 3.1.4 (2026/11/06) - Decision Router Route Index
+
+- Added a 1-based `route_index` INT output to both Image and Text Decision Router nodes. Each input item gets its selected fixed route-socket number in original input order, and `decision_json` includes the same number.
+- Connected `route_index` to integer-controlled switches; preserved fixed route numbers for sparse route configurations and list order for batches.
+- Migrated existing Image and Text route connections safely when workflows load with the new output, keeping the community and commercial frontends aligned.
+
+### 3.1.4 Validation
+
+- 31 Decision Router tests, 12 Decisions API tests, and 5 frontend tests passed. Python compilation, JavaScript syntax checks, and `git diff --check` passed.
+- Restarted ComfyUI 0.42.1 and ran a live Clef-Flash 9B Image Router workflow. The Fuchs test image selected `fox`, returned `route_index: 1`, and drove a real TwoWaySwitch to its first image input; the preview pixel matched that selected input. Both Image and Text node schemas expose `decision_json` and `route_index` after restart.
+- The live workflow test used a single image. For batches, keep each integer paired with its input item and use a list-aware switch or unbatch first.
+
 ## Version 3.1.3 (2026/11/02) - Reliable Thinking Control and Final Output
 
 ### 3.1.3 Changes

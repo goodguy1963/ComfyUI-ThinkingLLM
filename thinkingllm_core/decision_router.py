@@ -81,6 +81,18 @@ def route_indices(routes: list[dict[str, object]], chosen_names: Iterable[str]) 
     return result
 
 
+def selected_route_numbers(routes: list[dict[str, object]], chosen_names: Iterable[str]) -> list[int]:
+    """Return one-based fixed output-slot numbers for each selected route."""
+    slot_by_name = {str(route["name"]): int(route["slot"]) + 1 for route in routes}
+    result = []
+    for name in chosen_names:
+        try:
+            result.append(slot_by_name[name])
+        except KeyError as exc:
+            raise RuntimeError(f"The decision model selected an unknown route: {name!r}.") from exc
+    return result
+
+
 def selected_route(routes: list[dict[str, object]], probabilities: Mapping[str, float]) -> str:
     if set(probabilities) != {str(route["name"]) for route in routes}:
         raise ValueError("The probability map does not match the configured routes.")

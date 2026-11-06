@@ -32,7 +32,9 @@ function buildDecisionNotes(node) {
     "Route name: output label. Route description: criteria the model uses to choose it.",
     "Batch inputs are evaluated item by item; items sent to each route keep their original order.",
     "An empty route output is blocked, so its downstream branch is skipped.",
-    "decision_json contains the chosen route and probabilities.",
+    "route_index: one 1-based route-socket number per input item, in input order (route_01 = 1).",
+    "Use route_index with an integer-controlled Switch; batches need list-aware, aligned inputs.",
+    "decision_json contains the chosen route, route_index, and probabilities.",
     "Backend: local models run in-process; API mode uses the selected provider profile.",
     "Tip: use clear, distinct descriptions, including when no route should match.",
   ].join("\n");

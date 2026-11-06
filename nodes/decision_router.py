@@ -29,6 +29,7 @@ from thinkingllm_core.decision_router import (
     normalize_routes,
     route_indices,
     selected_route,
+    selected_route_numbers,
 )
 from thinkingllm_core.decision_fields import (
     MAX_BOOLEAN_FIELDS,
@@ -443,7 +444,11 @@ class _DecisionRouterBase:
                 self.clear()
             selected_model = str(kwargs.get("api_model", "")).strip() if api_backend else str(decision_model)
             outputs = [ExecutionBlocker(None) for _ in range(MAX_DECISION_ROUTES)]
-            return (json.dumps({"model": selected_model, "input_type": input_kind, "decisions": []}, ensure_ascii=False), *outputs)
+            return (
+                json.dumps({"model": selected_model, "input_type": input_kind, "decisions": []}, ensure_ascii=False),
+                ExecutionBlocker(None),
+                *outputs,
+            )
 
         model_key = None
         api_profile = None
@@ -569,6 +574,10 @@ class _DecisionRouterBase:
                         decision["reason_error"] = f"Explanation unavailable ({type(exc).__name__})."
                 decisions.append(decision)
 
+            selected_numbers = selected_route_numbers(routes, chosen_names)
+            for decision, route_number in zip(decisions, selected_numbers):
+                decision["route_index"] = route_number
+
             indices_by_slot = route_indices(routes, chosen_names)
             output_batches = []
             for slot in range(MAX_DECISION_ROUTES):
@@ -590,7 +599,7 @@ class _DecisionRouterBase:
                 ensure_ascii=False,
                 separators=(",", ":"),
             )
-            return (decision_json, *output_batches)
+            return (decision_json, selected_numbers, *output_batches)
         finally:
             if not api_backend and not keep_model_loaded:
                 self.clear()
@@ -605,8 +614,12 @@ class ThinkingLLMDecisionRouter(_DecisionRouterBase):
             "Choose the single route that best matches the image. Use the route descriptions as decision criteria.",
         )
 
-    RETURN_TYPES = ("STRING",) + ("IMAGE",) * MAX_DECISION_ROUTES
-    RETURN_NAMES = ("decision_json",) + tuple(f"route_{index + 1:02d}" for index in range(MAX_DECISION_ROUTES))
+    RETURN_TYPES = ("STRING", "INT") + ("IMAGE",) * MAX_DECISION_ROUTES
+    RETURN_NAMES = (
+        ("decision_json", "route_index")
+        + tuple(f"route_{index + 1:02d}" for index in range(MAX_DECISION_ROUTES))
+    )
+    OUTPUT_IS_LIST = (False, True) + (False,) * MAX_DECISION_ROUTES
     FUNCTION = "route_images"
 
     def route_images(self, image, decision_model, system_prompt, **kwargs):
@@ -622,8 +635,12 @@ class ThinkingLLMDecisionRouterText(_DecisionRouterBase):
             "Choose the single route that best matches the input text. Use the route descriptions as decision criteria.",
         )
 
-    RETURN_TYPES = ("STRING",) + ("STRING",) * MAX_DECISION_ROUTES
-    RETURN_NAMES = ("decision_json",) + tuple(f"route_{index + 1:02d}" for index in range(MAX_DECISION_ROUTES))
+    RETURN_TYPES = ("STRING", "INT") + ("STRING",) * MAX_DECISION_ROUTES
+    RETURN_NAMES = (
+        ("decision_json", "route_index")
+        + tuple(f"route_{index + 1:02d}" for index in range(MAX_DECISION_ROUTES))
+    )
+    OUTPUT_IS_LIST = (False, True) + (False,) * MAX_DECISION_ROUTES
     FUNCTION = "route_text"
 
     def route_text(self, text, decision_model, system_prompt, **kwargs):

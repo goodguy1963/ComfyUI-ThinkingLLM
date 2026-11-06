@@ -62,6 +62,8 @@ test("Decision Router notes explain route names, descriptions, batches, and bloc
   assert.match(imageNotes, /exactly one matching route/);
   assert.match(imageNotes, /Route description: criteria/);
   assert.match(imageNotes, /evaluated item by item/);
+  assert.match(imageNotes, /route_index: one 1-based route-socket number per input item/);
+  assert.match(textNotes, /integer-controlled Switch/);
   assert.match(imageNotes, /downstream branch is skipped/);
 });
 

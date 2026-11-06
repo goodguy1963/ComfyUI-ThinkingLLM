@@ -189,8 +189,10 @@ class DecisionApiRouterTests(unittest.TestCase):
         payload = json.loads(result[0])
         self.assertEqual(payload["provider"], "OpenAI")
         self.assertEqual([item["route"] for item in payload["decisions"]], ["fox", "dog"])
-        self.assertEqual(result[1], ["fox text"])
-        self.assertEqual(result[2], ["dog text"])
+        self.assertEqual([item["route_index"] for item in payload["decisions"]], [1, 2])
+        self.assertEqual(result[1], [1, 2])
+        self.assertEqual(result[2], ["fox text"])
+        self.assertEqual(result[3], ["dog text"])
         node._load_model.assert_not_called()
         self.assertIsNone(node.llm)
         self.assertIsNone(node.current_signature)
@@ -206,10 +208,13 @@ class DecisionApiRouterTests(unittest.TestCase):
             mock.patch.object(decision_api, "request_decision", return_value=("dog", {"fox": 0.1, "dog": 0.9}, 0.9)) as request_mock,
         ):
             result = node.route_images(image, "unused local", "Choose.", **api_args, **route_fields)
-        self.assertEqual(json.loads(result[0])["decisions"][0]["route"], "dog")
+        decision = json.loads(result[0])["decisions"][0]
+        self.assertEqual(decision["route"], "dog")
+        self.assertEqual(decision["route_index"], 2)
         self.assertEqual(request_mock.call_args.args[4], "data:image/png;base64,AA==")
-        self.assertIsInstance(result[1], router_module.ExecutionBlocker)
-        self.assertEqual(tuple(result[2].shape), (1, 2, 2, 3))
+        self.assertEqual(result[1], [2])
+        self.assertIsInstance(result[2], router_module.ExecutionBlocker)
+        self.assertEqual(tuple(result[3].shape), (1, 2, 2, 3))
 
     def test_api_mode_rejects_unknown_image_model_before_request(self):
         router_module = load_router_module()

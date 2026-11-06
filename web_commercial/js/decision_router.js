@@ -9,8 +9,10 @@ const DECISION_FIELD_INPUT_KINDS = {
   ThinkingLLM_DecisionFieldsText: "text",
 };
 const MAX_ROUTES = 52;
+const ROUTE_INDEX_OUTPUT = "route_index";
 const API_MODELS_URL = "/thinkingllm/decision/models";
 const apiModelRequestIds = new WeakMap();
+const pendingLinkSlots = new WeakMap();
 
 function findWidget(node, name) {
   return node.widgets?.find((widget) => widget.name === name);
@@ -81,9 +83,55 @@ function routeValues(node) {
   }));
 }
 
+function linkId(link) {
+  if (Array.isArray(link)) return link[0];
+  return link && typeof link === "object" ? link.id : link;
+}
+
+function linkOrigin(link) {
+  return Array.isArray(link) ? link[1] : link?.origin_id;
+}
+
+function setLinkOriginSlot(link, slot) {
+  if (Array.isArray(link)) link[2] = slot;
+  else if (link && typeof link === "object") link.origin_slot = slot;
+}
+
+function graphLinks(graph) {
+  const links = graph?.links;
+  if (links instanceof Map) return Array.from(links.values());
+  if (Array.isArray(links)) return links.filter(Boolean);
+  if (links && typeof links === "object") return Object.values(links).filter(Boolean);
+  return [];
+}
+
+function repairLinks(node) {
+  const remappedSlots = pendingLinkSlots.get(node);
+  if (!remappedSlots) return;
+  const graph = node.graph ?? app.graph;
+  for (const link of graphLinks(graph)) {
+    const id = linkId(link);
+    if (String(linkOrigin(link)) !== String(node.id) || !remappedSlots.has(id)) continue;
+    setLinkOriginSlot(link, remappedSlots.get(id));
+    remappedSlots.delete(id);
+  }
+  if (!remappedSlots.size) pendingLinkSlots.delete(node);
+}
+
+function createOutput(node, name, type) {
+  if (typeof node.addOutput === "function") {
+    node.addOutput(name, type);
+    return node.outputs.pop();
+  }
+  return { name, type, links: [] };
+}
+
 function synchronize(node, routeType) {
   if (!node || !Array.isArray(node.widgets) || !Array.isArray(node.outputs)) return;
 
+  const oldOutputs = node.outputs.slice();
+  const hasRouteIndex = oldOutputs[1]?.type === "INT";
+  const oldRouteOutputs = oldOutputs.slice(hasRouteIndex ? 2 : 1);
   const routes = routeValues(node);
   let highestConfigured = -1;
   routes.forEach((route, index) => {
@@ -98,36 +146,45 @@ function synchronize(node, routeType) {
     }
   }
 
-  const linkedThrough = (node.outputs ?? []).reduce((highest, output, index) => {
+  const linkedThrough = oldRouteOutputs.reduce((highest, output, index) => {
     return output?.links?.length ? Math.max(highest, index) : highest;
-  }, 0);
-  const configuredThrough = highestConfigured + 1;
-  const wantedCount = Math.max(1, configuredThrough + 1, linkedThrough + 1);
+  }, -1);
+  const routeCount = Math.min(MAX_ROUTES, Math.max(0, highestConfigured + 1, linkedThrough + 1));
+  const jsonOutput = oldOutputs[0] ?? createOutput(node, "decision_json", "STRING");
+  const routeIndexOutput = hasRouteIndex
+    ? oldOutputs[1]
+    : createOutput(node, ROUTE_INDEX_OUTPUT, "INT");
+  const nextOutputs = [jsonOutput, routeIndexOutput];
+  const linkSlots = new Map();
 
-  while ((node.outputs?.length ?? 0) < wantedCount) {
-    const index = node.outputs.length;
-    const slot = index - 1;
-    if (typeof node.addOutput !== "function") break;
-    node.addOutput(`route_${String(slot + 1).padStart(2, "0")}`, routeType);
-  }
-  while ((node.outputs?.length ?? 0) > wantedCount) {
-    const lastIndex = node.outputs.length - 1;
-    if (node.outputs[lastIndex]?.links?.length || typeof node.removeOutput !== "function") break;
-    node.removeOutput(lastIndex);
+  jsonOutput.name = "decision_json";
+  jsonOutput.label = "decision_json";
+  jsonOutput.type = "STRING";
+  routeIndexOutput.name = ROUTE_INDEX_OUTPUT;
+  routeIndexOutput.label = ROUTE_INDEX_OUTPUT;
+  routeIndexOutput.type = "INT";
+
+  oldRouteOutputs.forEach((output, slot) => {
+    for (const link of output?.links ?? []) {
+      const id = linkId(link);
+      if (id !== undefined && id !== null) linkSlots.set(id, slot + 2);
+    }
+  });
+
+  for (let slot = 0; slot < routeCount; slot += 1) {
+    const route = routes[slot];
+    const output = oldRouteOutputs[slot]
+      ?? createOutput(node, route?.name || `route_${String(slot + 1).padStart(2, "0")}`, routeType);
+    const name = route?.name || `inactive route_${String(slot + 1).padStart(2, "0")}`;
+    output.name = name;
+    output.label = name;
+    output.type = routeType;
+    nextOutputs.push(output);
   }
 
-  if (node.outputs?.[0]) {
-    node.outputs[0].name = "decision_json";
-    node.outputs[0].label = "decision_json";
-    node.outputs[0].type = "STRING";
-  }
-  for (let index = 1; index < (node.outputs?.length ?? 0); index += 1) {
-    const route = routes[index - 1];
-    const name = route?.name || `inactive route_${String(index).padStart(2, "0")}`;
-    node.outputs[index].name = name;
-    node.outputs[index].label = name;
-    node.outputs[index].type = routeType;
-  }
+  node.outputs.splice(0, node.outputs.length, ...nextOutputs);
+  if (linkSlots.size) pendingLinkSlots.set(node, linkSlots);
+  repairLinks(node);
 
   if (typeof node.computeSize === "function") node.size = node.computeSize();
   node.setDirtyCanvas?.(true, true);

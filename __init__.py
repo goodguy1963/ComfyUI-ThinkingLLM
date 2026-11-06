@@ -3,7 +3,7 @@
     "name": "ComfyUI-ThinkingLLM",
     "description": "A multimodal ComfyUI AI node pack with Qwen, Gemma 4, GGUF, Whisper, image/text decision routing, typed decision fields, and live thinking output.",
     "author": "goodguy1963",
-    "version": "3.1.3",
+    "version": "3.1.4",
     "url": "https://github.com/goodguy1963/ComfyUI-ThinkingLLM",
     "category": "image"
 }

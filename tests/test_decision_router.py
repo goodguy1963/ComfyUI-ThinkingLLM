@@ -26,6 +26,7 @@ from thinkingllm_core.decision_router import (
     normalize_routes,
     route_indices,
     selected_route,
+    selected_route_numbers,
     stable_softmax,
 )
 from thinkingllm_core import decision_router_runtime
@@ -414,6 +415,12 @@ class DecisionRouterPolicyTests(unittest.TestCase):
         probabilities = map_route_probabilities(routes, [0.2, 0.8])
         self.assertEqual(selected_route(routes, probabilities), "dog")
         self.assertEqual(route_indices(routes, ["dog", "cat", "dog"]), {0: [1], 2: [0, 2]})
+        self.assertEqual(selected_route_numbers(routes, ["dog", "cat", "dog"]), [3, 1, 3])
+
+    def test_selected_route_numbers_reject_unknown_names(self):
+        routes = normalize_routes([("cat", ""), ("dog", "")])
+        with self.assertRaisesRegex(RuntimeError, "unknown route"):
+            selected_route_numbers(routes, ["bird"])
 
     def test_route_limit_is_52(self):
         routes = [(f"route_{index}", "") for index in range(MAX_DECISION_ROUTES)]
@@ -449,12 +456,43 @@ class DecisionRouterNodeTests(unittest.TestCase):
 
         payload = json.loads(result[0])
         self.assertEqual([decision["route"] for decision in payload["decisions"]], ["cat", "dog", "cat"])
+        self.assertEqual([decision["route_index"] for decision in payload["decisions"]], [1, 2, 1])
         self.assertEqual([decision["text_index"] for decision in payload["decisions"]], [0, 1, 2])
-        self.assertEqual(result[1], ["cat spotted", "cat sleeping"])
-        self.assertEqual(result[2], ["dog running"])
-        self.assertIsInstance(result[3], router_module.ExecutionBlocker)
-        self.assertEqual(len(result), MAX_DECISION_ROUTES + 1)
+        self.assertEqual(result[1], [1, 2, 1])
+        self.assertEqual(result[2], ["cat spotted", "cat sleeping"])
+        self.assertEqual(result[3], ["dog running"])
+        self.assertIsInstance(result[4], router_module.ExecutionBlocker)
+        self.assertEqual(len(result), MAX_DECISION_ROUTES + 2)
         self.assertFalse(load_calls[0]["require_vision"])
+
+    def test_route_index_matches_fixed_socket_when_route_slots_have_a_gap(self):
+        router_module = load_router_module()
+        node = router_module.ThinkingLLMDecisionRouterText()
+        node._load_model = lambda *_args, **_kwargs: setattr(node, "llm", object())
+        fields = {
+            "route_01_name": "first",
+            "route_03_name": "third",
+        }
+
+        with mock.patch.object(
+            router_module,
+            "openjev_text_probabilities",
+            side_effect=lambda _llm, text, _prompt, _routes: [0.9, 0.1] if "first" in text else [0.1, 0.9],
+        ):
+            result = node.route_text(
+                ["choose first", "choose third"],
+                "OpenJev 27B · Q4_K_M · non-commercial",
+                "Choose the matching route.",
+                **fields,
+            )
+
+        decisions = json.loads(result[0])["decisions"]
+        self.assertEqual([decision["route"] for decision in decisions], ["first", "third"])
+        self.assertEqual([decision["route_index"] for decision in decisions], [1, 3])
+        self.assertEqual(result[1], [1, 3])
+        self.assertEqual(result[2], ["choose first"])
+        self.assertIsInstance(result[3], router_module.ExecutionBlocker)
+        self.assertEqual(result[4], ["choose third"])
 
     def test_empty_batch_blocks_all_route_outputs_without_loading_model(self):
         router_module = load_router_module()
@@ -473,7 +511,12 @@ class DecisionRouterNodeTests(unittest.TestCase):
         text_node = module.ThinkingLLMDecisionRouterText
 
         self.assertEqual(image_node.RETURN_TYPES.count("IMAGE"), 52)
+        self.assertEqual(image_node.RETURN_TYPES[:2], ("STRING", "INT"))
+        self.assertEqual(image_node.RETURN_NAMES[:3], ("decision_json", "route_index", "route_01"))
+        self.assertEqual(image_node.OUTPUT_IS_LIST, (False, True) + (False,) * MAX_DECISION_ROUTES)
+        self.assertEqual(text_node.RETURN_TYPES[:2], ("STRING", "INT"))
         self.assertEqual(text_node.RETURN_TYPES.count("STRING"), 53)
+        self.assertEqual(text_node.OUTPUT_IS_LIST, (False, True) + (False,) * MAX_DECISION_ROUTES)
         self.assertEqual(image_node.INPUT_TYPES()["required"]["image"][0], "IMAGE")
         self.assertNotIn("text", image_node.INPUT_TYPES()["required"])
         self.assertEqual(text_node.INPUT_TYPES()["required"]["text"][0], "STRING")
@@ -513,10 +556,12 @@ class DecisionRouterNodeTests(unittest.TestCase):
         payload = json.loads(result[0])
         self.assertEqual(payload["input_type"], "image")
         self.assertEqual([item["route"] for item in payload["decisions"]], ["cat", "dog", "cat"])
-        self.assertEqual(tuple(result[1].shape), (2, 2, 2, 3))
-        self.assertEqual(tuple(result[2].shape), (1, 2, 2, 3))
-        self.assertTrue(torch.equal(result[1], image[[0, 2]]))
-        self.assertTrue(torch.equal(result[2], image[[1]]))
+        self.assertEqual([item["route_index"] for item in payload["decisions"]], [1, 2, 1])
+        self.assertEqual(result[1], [1, 2, 1])
+        self.assertEqual(tuple(result[2].shape), (2, 2, 2, 3))
+        self.assertEqual(tuple(result[3].shape), (1, 2, 2, 3))
+        self.assertTrue(torch.equal(result[2], image[[0, 2]]))
+        self.assertTrue(torch.equal(result[3], image[[1]]))
         self.assertTrue(load_calls[0]["require_vision"])
 
     def test_model_is_cleared_after_routing_by_default(self):
@@ -632,7 +677,8 @@ class DecisionRouterNodeTests(unittest.TestCase):
         decision = json.loads(result[0])["decisions"][0]
         self.assertEqual(decision["route"], "dog")
         self.assertEqual(decision["reason"], "A dog is visible.")
-        self.assertEqual(tuple(result[2].shape), (1, 2, 2, 3))
+        self.assertEqual(result[1], [2])
+        self.assertEqual(tuple(result[3].shape), (1, 2, 2, 3))
         self.assertEqual(reason_mock.call_args.kwargs["input_kind"], "image")
         self.assertEqual(reason_mock.call_args.kwargs["image_data_url"], "data:image/png;base64,AA==")
 
@@ -660,7 +706,8 @@ class DecisionRouterNodeTests(unittest.TestCase):
         self.assertEqual(decision["route"], "billing")
         self.assertIsNone(decision["reason"])
         self.assertEqual(decision["reason_error"], "Explanation unavailable (RuntimeError).")
-        self.assertEqual(result[1], ["billing issue"])
+        self.assertEqual(result[1], [1])
+        self.assertEqual(result[2], ["billing issue"])
         node.clear.assert_not_called()
 
     def test_decision_reason_is_one_line_bounded_and_restores_image_template(self):
